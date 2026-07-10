@@ -29,7 +29,9 @@ from app.models import (
 )
 
 PUBLIC = "public"
-BATCH = 5000
+# Rows per INSERT. Postgres caps a statement at 65,535 bind parameters, and the
+# widest table (dim_school) has ~20 columns -> keep batch * columns well under that.
+BATCH = 1000
 
 # --------------------------------------------------------------------------- #
 # Conformed vocabulary
