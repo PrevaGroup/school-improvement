@@ -1,0 +1,13 @@
+== SACS 2022-23 ==
+  extracted: sacs2223.mdb 483131392b
+== Charter financials 2023-24 ==
+  charter: alt2324data.mdb alt2324readme.docx 
+== CBEDS ORA (staff by school) ==
+OK rows=48320 cbeds_staff_racegender_2023-24_a.txt (ts=20250830201447, 7375577b)
+OK rows=65567 cbeds_staff_racegender_2023-24_b.txt (ts=20250830201507, 6844699b)
+OK rows=49977 cbeds_staff_racegender_2022-23_a.txt (ts=20250320111328, 7636703b)
+OK rows=65768 cbeds_staff_racegender_2022-23_b.txt (ts=20250326132526, 6867902b)
+== Staff FTE/Demo (historical last flat year 2017-18) ==
+OK rows=385726 staff_school_fte_2017-18_HISTORICAL.txt (ts=20201018040056, 40852537b)
+OK rows=364758 staff_demographics_2017-18_HISTORICAL.txt (ts=20250321231147, 36935373b)
+== DONE ==

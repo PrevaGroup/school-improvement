@@ -1,0 +1,22 @@
+OK rows=52270  attendance/chronicabsenteeism_2023-24.txt (ts=20251107212028)
+OK rows=375755  attendance/absenteeismreason_2023-24.txt (ts=20250830201228)
+OK rows=375823  attendance/absenteeismreason_2022-23.txt (ts=20250830201205)
+OK rows=52220  attendance/chronicabsenteeism_2022-23.txt (ts=20251107204925)
+OK rows=226180  behavior/expulsion_2022-23.txt (ts=20250830201026)
+OK rows=49197  behavior/suspension_2023-24.txt (ts=20251107210844)
+OK rows=225158  behavior/expulsion_2023-24.txt (ts=20250830201029)
+OK rows=49275  behavior/suspension_2024-25.txt (ts=<html><body><h1>504 Gateway Time-out</h1>
+The server didn't respond in time.
+</body></html>)
+OK rows=113978  academics/fosteryouth_gradcohort_2023-24.txt (ts=20250830202131)
+OK rows=113654  academics/acgr_gradcohort_2024-25.txt (ts=20260228212716)
+OK rows=227647  academics/collegegoingrate_16mo_2021-22.txt (ts=20250830201631)
+OK rows=113868  academics/acgr_gradcohort_2023-24.txt (ts=20250830202012)
+OK rows=1520857  academics/tamo_2022-23.txt (ts=20250911050133)
+OK rows=43361  demographics/enrollment_censusday_2024-25.txt (ts=20260209110229)
+OK rows=267763  demographics/enrollment_censusday_2023-24.txt (ts=20260405043933)
+OK rows=150811  demographics/homeless_2023-24.txt (ts=20250830092533)
+OK rows=48435  demographics/sped_primarydisability_2024-25.txt (ts=20260118174133)
+NO-SNAPSHOT  demographics/sped_primarydisability_2023-24.txt  <- https://www3.cde.ca.gov/demo-downloads/sped/spedps2324.txt
+OK rows=358420  demographics/mobility_stability_2023-24.txt (ts=20260116132728)
+=== DONE ===

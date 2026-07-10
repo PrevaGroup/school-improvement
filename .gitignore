@@ -1,0 +1,21 @@
+# Node / frontend
+node_modules
+dist
+.vite
+.DS_Store
+*.log
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Python (backend)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Data lives OUTSIDE this repo (sibling ../California/), so nothing to exclude here.

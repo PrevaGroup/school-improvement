@@ -1,0 +1,5 @@
+caaspp_smarterbalanced_all_2024-25.zip bytes=157250740 type=Zip archive data, at least v2.
+caaspp_smarterbalanced_all_2023-24.zip bytes=156922418 type=Zip archive data, at least v2.
+caaspp_entities_2024-25.zip bytes=181974 type=Zip archive data, made by v4.5
+caaspp_entities_2023-24.zip bytes=182296 type=Zip archive data, made by v4.5
+=== CAASPP DONE ===

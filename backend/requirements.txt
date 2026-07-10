@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+SQLAlchemy>=2.0.30
+alembic>=1.13
+psycopg[binary]>=3.1
+pydantic-settings>=2.2
+# Google OIDC verification for the tenant-binding (see app/security.py)
+google-auth>=2.29
+# Optional: connect to Cloud SQL without the Auth Proxy, incl. IAM DB auth
+# cloud-sql-python-connector[pg8000]>=1.9
