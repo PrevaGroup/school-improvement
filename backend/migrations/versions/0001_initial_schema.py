@@ -12,16 +12,16 @@ Revises:
 """
 from __future__ import annotations
 
-import os
-
 from alembic import op
+
+from app.config import settings
 
 revision = "0001"
 down_revision = None
 branch_labels = None
 depends_on = None
 
-APP_ROLE = os.environ.get("APP_DB_ROLE", "sip_app")
+APP_ROLE = settings.app_db_user
 
 REFERENCE_TABLES = ["dim_tenant", "dim_student_group", "dim_metric", "dim_school", "ref_benchmark"]
 PRIVATE_TABLES = ["fact_metric", "plan", "plan_goal", "plan_action"]

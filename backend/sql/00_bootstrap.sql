@@ -22,6 +22,12 @@ CREATE ROLE sip_app LOGIN PASSWORD 'CHANGE_ME_app'
   NOSUPERUSER NOCREATEROLE NOBYPASSRLS;
 
 -- 2. Database ----------------------------------------------------------------
+-- Cloud SQL note: the `postgres` admin is NOT a true superuser (only
+-- cloudsqlsuperuser), so to CREATE a database OWNED BY sip_migrator it must first
+-- be a MEMBER of sip_migrator. We also let sip_migrator manage sip_app, which the
+-- RLS smoke test needs (it does SET ROLE sip_app).
+GRANT sip_migrator TO postgres;
+GRANT sip_app TO sip_migrator;
 CREATE DATABASE sip OWNER sip_migrator;
 
 -- 3. In-database grants ------------------------------------------------------
