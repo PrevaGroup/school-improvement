@@ -6,5 +6,7 @@ psycopg[binary]>=3.1
 pydantic-settings>=2.2
 # Google OIDC verification for the tenant-binding (see app/security.py)
 google-auth>=2.29
+# DB credentials from Secret Manager (runbook Phase 3)
+google-cloud-secret-manager>=2.20
 # Optional: connect to Cloud SQL without the Auth Proxy, incl. IAM DB auth
 # cloud-sql-python-connector[pg8000]>=1.9
