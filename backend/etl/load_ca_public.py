@@ -5,8 +5,8 @@ dimensions, then loads metric files: school rows -> fact_metric, and the
 state/county/district rollup rows -> ref_benchmark.
 
 Run (connects as sip_migrator, reads passwords from Secret Manager via config):
-    python -m etl.load_public --data-dir /path/to/California/raw
-    python -m etl.load_public --data-dir /path/to/California/raw --dry-run   # parse only
+    python -m etl.load_ca_public --data-dir /path/to/California/raw
+    python -m etl.load_ca_public --data-dir /path/to/California/raw --dry-run   # parse only
 
 Extend by adding entries to METRIC_FILES.
 """
