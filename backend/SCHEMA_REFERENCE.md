@@ -4,6 +4,30 @@ _Auto-generated from the SQLAlchemy models by `backend/scripts/gen_schema_refere
 
 Documents the **as-built** database. The conceptual design is in [`../California/docs/TARGET_SCHEMA.md`](../California/docs/TARGET_SCHEMA.md).
 
+## `dim_date` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `date_key` | TEXT | PK, NOT NULL |
+| `school_year` | TEXT |  |
+| `month` | SMALLINT |  |
+| `iso_week` | SMALLINT |  |
+| `day_of_week` | SMALLINT |  |
+| `is_weekend` | BOOLEAN |  |
+
+## `dim_instrument` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `instrument_id` | TEXT | PK, NOT NULL |
+| `vendor` | TEXT |  |
+| `display_name` | TEXT |  |
+| `scale_type` | TEXT |  |
+| `scale_min` | NUMERIC |  |
+| `scale_max` | NUMERIC |  |
+| `version` | TEXT |  |
+| `notes` | TEXT |  |
+
 ## `dim_metric` — public reference
 
 | Column | Type | Constraints |
@@ -13,31 +37,76 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | `display_name` | TEXT |  |
 | `unit` | TEXT |  |
 | `direction` | TEXT |  |
+| `grains` | TEXT |  |
 | `applies_to_levels` | TEXT |  |
 | `applies_to_grades` | TEXT |  |
 | `is_leading_indicator` | BOOLEAN |  |
-| `cadence` | TEXT |  |
-| `source_dataset` | TEXT |  |
 | `data_origin` | TEXT |  |
 | `instrument_dependent` | BOOLEAN |  |
 | `definition` | TEXT |  |
 | `suppress_threshold` | SMALLINT | default `11` |
 
+## `dim_metric_relationship` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `leading_metric_id` | TEXT | PK, NOT NULL |
+| `lagging_metric_id` | TEXT | PK, NOT NULL |
+| `strength` | NUMERIC |  |
+
+## `dim_peer_group` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `peer_group_id` | TEXT | PK, NOT NULL |
+| `method` | TEXT |  |
+| `school_level` | TEXT |  |
+| `enroll_band` | TEXT |  |
+| `sed_quartile` | SMALLINT |  |
+| `locale_class` | TEXT |  |
+| `n_schools` | INTEGER |  |
+
+## `dim_period` — private (RLS)
+
+| Column | Type | Constraints |
+|---|---|---|
+| `period_id` | TEXT | PK, NOT NULL |
+| `grain` | TEXT |  |
+| `school_year` | TEXT |  |
+| `label` | TEXT |  |
+| `start_date` | DATE |  |
+| `end_date` | DATE |  |
+| `day_in_session_start` | INTEGER |  |
+| `day_in_session_end` | INTEGER |  |
+| `sort_order` | INTEGER |  |
+| `is_current` | BOOLEAN |  |
+| `tenant_id` | TEXT | NOT NULL, FK→`dim_tenant.tenant_id`, default `public` |
+| `visibility` | TEXT | NOT NULL, default `public` |
+
 ## `dim_school` — public reference
 
 | Column | Type | Constraints |
 |---|---|---|
-| `school_cds` | TEXT | PK, NOT NULL |
-| `school_year` | TEXT | PK, NOT NULL |
+| `school_id` | TEXT | PK, NOT NULL |
+| `cds_code` | TEXT |  |
+| `school_year` | TEXT |  |
 | `school_name` | TEXT |  |
-| `district_cds` | TEXT |  |
+| `district_id` | TEXT |  |
 | `district_name` | TEXT |  |
 | `county_name` | TEXT |  |
 | `school_level` | TEXT |  |
 | `grade_low` | TEXT |  |
 | `grade_high` | TEXT |  |
 | `is_charter` | BOOLEAN |  |
+| `is_title_i` | BOOLEAN |  |
+| `is_dass` | BOOLEAN |  |
+| `locale` | TEXT |  |
 | `enroll_total` | INTEGER |  |
+| `pct_sed` | NUMERIC |  |
+| `pct_el` | NUMERIC |  |
+| `pct_swd` | NUMERIC |  |
+| `latitude` | NUMERIC |  |
+| `longitude` | NUMERIC |  |
 | `peer_group_id` | TEXT |  |
 
 ## `dim_student_group` — public reference
@@ -56,15 +125,14 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | `tenant_id` | TEXT | PK, NOT NULL |
 | `tenant_type` | TEXT |  |
 | `display_name` | TEXT |  |
-| `cds_prefix` | TEXT |  |
-| `jurisdiction` | TEXT | default `CA` |
+| `jurisdiction` | TEXT |  |
 
 ## `fact_metric` — private (RLS)
 
 | Column | Type | Constraints |
 |---|---|---|
-| `school_cds` | TEXT | PK, NOT NULL, FK→`dim_school.school_cds` |
-| `school_year` | TEXT | PK, NOT NULL, FK→`dim_school.school_year` |
+| `school_id` | TEXT | PK, NOT NULL, FK→`dim_school.school_id` |
+| `period_id` | TEXT | PK, NOT NULL, FK→`dim_period.period_id` |
 | `metric_id` | TEXT | PK, NOT NULL, FK→`dim_metric.metric_id` |
 | `student_group_id` | TEXT | PK, NOT NULL, FK→`dim_student_group.student_group_id` |
 | `value` | NUMERIC |  |
@@ -73,37 +141,46 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | `is_suppressed` | BOOLEAN |  |
 | `is_unmapped` | BOOLEAN |  |
 | `instrument_id` | TEXT |  |
-| `period` | TEXT |  |
+| `source_dataset` | TEXT |  |
 | `value_state` | NUMERIC |  |
 | `value_district` | NUMERIC |  |
 | `value_peer_median` | NUMERIC |  |
 | `value_prior` | NUMERIC |  |
+| `value_all_group` | NUMERIC |  |
 | `target_value` | NUMERIC |  |
 | `change` | NUMERIC |  |
+| `change_3yr_slope` | NUMERIC |  |
+| `series_break` | BOOLEAN |  |
 | `gap_vs_state` | NUMERIC |  |
 | `gap_vs_peer` | NUMERIC |  |
 | `gap_vs_all_students` | NUMERIC |  |
 | `z_in_peer` | NUMERIC |  |
 | `pctile_in_peer` | NUMERIC |  |
-| `series_break` | BOOLEAN |  |
 | `status_level` | TEXT |  |
 | `change_level` | TEXT |  |
-| `dashboard_color` | TEXT |  |
+| `band` | TEXT |  |
 | `tenant_id` | TEXT | NOT NULL, FK→`dim_tenant.tenant_id`, default `public` |
 | `visibility` | TEXT | NOT NULL, default `public` |
+
+## `group_crosswalk` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `source_system` | TEXT | PK, NOT NULL |
+| `source_code` | TEXT | PK, NOT NULL |
+| `student_group_id` | TEXT |  |
 
 ## `plan` — private (RLS)
 
 | Column | Type | Constraints |
 |---|---|---|
 | `plan_id` | TEXT | PK, NOT NULL |
-| `school_cds` | TEXT |  |
+| `school_id` | TEXT |  |
 | `plan_year` | TEXT |  |
 | `plan_type` | TEXT |  |
 | `status` | TEXT |  |
 | `adopted_date` | DATE |  |
 | `total_budget` | NUMERIC |  |
-| `funding_sources` | TEXT |  |
 | `source_url` | TEXT |  |
 | `tenant_id` | TEXT | NOT NULL, FK→`dim_tenant.tenant_id`, default `public` |
 | `visibility` | TEXT | NOT NULL, default `public` |
@@ -123,7 +200,6 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | `fte` | NUMERIC |  |
 | `role_type` | TEXT |  |
 | `is_district_provided` | BOOLEAN |  |
-| `owner` | TEXT |  |
 | `tenant_id` | TEXT | NOT NULL, FK→`dim_tenant.tenant_id`, default `public` |
 | `visibility` | TEXT | NOT NULL, default `public` |
 
@@ -150,9 +226,23 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | Column | Type | Constraints |
 |---|---|---|
 | `level` | TEXT | PK, NOT NULL |
-| `entity_cds` | TEXT | PK, NOT NULL |
-| `school_year` | TEXT | PK, NOT NULL |
+| `entity_id` | TEXT | PK, NOT NULL |
+| `period_id` | TEXT | PK, NOT NULL |
 | `metric_id` | TEXT | PK, NOT NULL |
 | `student_group_id` | TEXT | PK, NOT NULL |
 | `value` | NUMERIC |  |
 | `n_size` | INTEGER |  |
+
+## `tenant_membership` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `tenant_id` | TEXT | PK, NOT NULL |
+| `parent_id` | TEXT | PK, NOT NULL |
+
+## `tenant_scope` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `tenant_id` | TEXT | PK, NOT NULL |
+| `school_id` | TEXT | PK, NOT NULL |

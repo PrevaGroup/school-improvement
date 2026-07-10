@@ -1,7 +1,8 @@
-"""initial schema + row-level security
+"""initial star schema + row-level security
 
-Creates the public reference tables and the private tenant tables, then turns on
-ENABLE + FORCE ROW LEVEL SECURITY and the tenant policies on the private ones.
+Creates the public/conformed reference tables and the private tenant tables, then
+turns on ENABLE + FORCE ROW LEVEL SECURITY and the tenant policies on the private
+ones. Write scope is enforced via the tenant_scope membership table.
 
 Runs as the migrator role, which OWNS the resulting tables. The app role (sip_app)
 only gets the table-level DML grants issued here — and because it is a non-owner,
@@ -23,9 +24,14 @@ depends_on = None
 
 APP_ROLE = settings.app_db_user
 
-REFERENCE_TABLES = ["dim_tenant", "dim_student_group", "dim_metric", "dim_school", "ref_benchmark"]
-PRIVATE_TABLES = ["fact_metric", "plan", "plan_goal", "plan_action"]
-SCHOOL_SCOPED = {"fact_metric"}
+REFERENCE_TABLES = [
+    "dim_tenant", "tenant_scope", "tenant_membership",
+    "dim_school", "dim_date", "dim_student_group", "group_crosswalk",
+    "dim_metric", "dim_instrument", "dim_peer_group", "dim_metric_relationship",
+    "ref_benchmark",
+]
+PRIVATE_TABLES = ["fact_metric", "dim_period", "plan", "plan_goal", "plan_action"]
+SCHOOL_SCOPED = {"fact_metric"}   # write-scoped to the tenant's own schools
 
 
 def upgrade() -> None:
@@ -37,12 +43,12 @@ def upgrade() -> None:
 
     # 2. The 'public' tenant owns all public/state rows.
     op.execute(
-        "INSERT INTO dim_tenant (tenant_id, tenant_type, display_name, cds_prefix) "
-        "VALUES ('public', 'public', 'Public / state data', '') "
+        "INSERT INTO dim_tenant (tenant_id, tenant_type, display_name, jurisdiction) "
+        "VALUES ('public', 'public', 'Public / state data', 'CA') "
         "ON CONFLICT (tenant_id) DO NOTHING"
     )
 
-    # 3. Reference tables: no RLS, app reads them.
+    # 3. Reference tables: no RLS; app reads them.
     for t in REFERENCE_TABLES:
         op.execute(f"GRANT SELECT ON {t} TO {APP_ROLE}")
 
@@ -51,7 +57,7 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE {t} ENABLE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {t} FORCE ROW LEVEL SECURITY")
 
-        # READ: public rows for everyone, private rows only for their tenant.
+        # READ: public rows for everyone; private rows only for their tenant.
         # current_setting(..., true) returns NULL when unset -> matches nothing
         # private (fail-closed).
         op.execute(
@@ -64,15 +70,17 @@ def upgrade() -> None:
             """
         )
 
-        # WRITE: only your own rows; fact_metric additionally only about your own
-        # schools (COALESCE handles the 'public' tenant whose prefix is '' -> LIKE '%').
+        # WRITE: only your own rows. School-scoped tables additionally require the
+        # school to be in your tenant_scope — except the 'public' tenant, which is
+        # the state-data loader and may write any school.
         if t in SCHOOL_SCOPED:
             write_check = (
-                "tenant_id = current_setting('app.tenant', true) "
-                "AND school_cds LIKE COALESCE("
-                "  (SELECT cds_prefix FROM dim_tenant "
-                "   WHERE tenant_id = current_setting('app.tenant', true)), ''"
-                ") || '%'"
+                "tenant_id = current_setting('app.tenant', true) AND ("
+                "  current_setting('app.tenant', true) = 'public'"
+                "  OR EXISTS (SELECT 1 FROM tenant_scope ts"
+                f"            WHERE ts.tenant_id = current_setting('app.tenant', true)"
+                f"              AND ts.school_id = {t}.school_id)"
+                ")"
             )
         else:
             write_check = "tenant_id = current_setting('app.tenant', true)"

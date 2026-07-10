@@ -1,11 +1,19 @@
 from .base import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 from .reference import (
-    DimTenant, DimStudentGroup, DimMetric, DimSchool, RefBenchmark,
+    DimTenant, TenantScope, TenantMembership,
+    DimSchool, DimDate, DimStudentGroup, GroupCrosswalk,
+    DimMetric, DimInstrument, DimPeerGroup, DimMetricRelationship,
+    RefBenchmark,
 )
-from .tenant import FactMetric, Plan, PlanGoal, PlanAction
+from .tenant import DimPeriod, FactMetric, Plan, PlanGoal, PlanAction
 
 __all__ = [
     "Base", "PRIVATE_TABLES", "SCHOOL_SCOPED_TABLES",
-    "DimTenant", "DimStudentGroup", "DimMetric", "DimSchool", "RefBenchmark",
-    "FactMetric", "Plan", "PlanGoal", "PlanAction",
+    # reference / conformed dimensions
+    "DimTenant", "TenantScope", "TenantMembership",
+    "DimSchool", "DimDate", "DimStudentGroup", "GroupCrosswalk",
+    "DimMetric", "DimInstrument", "DimPeerGroup", "DimMetricRelationship",
+    "RefBenchmark",
+    # private / tenant-scoped
+    "DimPeriod", "FactMetric", "Plan", "PlanGoal", "PlanAction",
 ]

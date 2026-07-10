@@ -22,30 +22,29 @@ def health() -> dict:
 
 
 @app.get("/schools")
-def list_schools(year: str, db: Session = Depends(get_db)) -> list[dict]:
+def list_schools(db: Session = Depends(get_db)) -> list[dict]:
     # Public reference read (no RLS) — same for every tenant.
-    rows = db.execute(
-        select(DimSchool).where(DimSchool.school_year == year).limit(200)
-    ).scalars().all()
+    rows = db.execute(select(DimSchool).limit(200)).scalars().all()
     return [
-        {"cds": r.school_cds, "name": r.school_name, "district": r.district_name}
+        {"school_id": r.school_id, "name": r.school_name, "district": r.district_name}
         for r in rows
     ]
 
 
-@app.get("/schools/{cds}/metrics")
-def school_metrics(cds: str, year: str, db: Session = Depends(get_db)) -> list[dict]:
+@app.get("/schools/{school_id}/metrics")
+def school_metrics(school_id: str, period_id: str | None = None,
+                   db: Session = Depends(get_db)) -> list[dict]:
     # RLS auto-scopes: public/state rows PLUS only *this* tenant's private rows.
     # No tenant filter in the query — the database enforces it.
-    rows = db.execute(
-        select(FactMetric).where(
-            FactMetric.school_cds == cds, FactMetric.school_year == year
-        )
-    ).scalars().all()
+    stmt = select(FactMetric).where(FactMetric.school_id == school_id)
+    if period_id:
+        stmt = stmt.where(FactMetric.period_id == period_id)
+    rows = db.execute(stmt).scalars().all()
     return [
         {
             "metric": r.metric_id,
             "group": r.student_group_id,
+            "period": r.period_id,
             "value": float(r.value) if r.value is not None else None,
             "status": r.value_status,
             "visibility": r.visibility,

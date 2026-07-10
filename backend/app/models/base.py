@@ -15,9 +15,10 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
-# Tables that carry tenant data and get ENABLE + FORCE ROW LEVEL SECURITY.
-# Everything else is public reference (shared, read by everyone, no RLS).
-PRIVATE_TABLES = ("fact_metric", "plan", "plan_goal", "plan_action")
+# Private tenant tables: get ENABLE + FORCE ROW LEVEL SECURITY + tenant policies.
+# Everything else is public/conformed reference (shared, read by everyone, no RLS).
+PRIVATE_TABLES = ("fact_metric", "dim_period", "plan", "plan_goal", "plan_action")
 
-# fact_metric additionally scopes WRITES to the tenant's own schools (cds_prefix).
+# Of the private tables, these additionally scope WRITES to the tenant's own
+# schools (via tenant_scope). They carry a school_id column.
 SCHOOL_SCOPED_TABLES = ("fact_metric",)
