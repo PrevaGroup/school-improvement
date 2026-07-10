@@ -189,25 +189,22 @@ def load_metric_file(conn, path, metric_id, period_id, value_col, n_col, dry):
             value = _f(raw)
             status = "reported" if value is not None else ("suppressed" if (raw or "").strip() == "*" else "not_collected")
             n_size = _i(r.get(n_col))
-            if level == "S":
-                sid = cds_from(r.get("County Code"), r.get("District Code"), r.get("School Code"))
-                seen_schools.setdefault(sid, dict(
-                    school_id=sid, cds_code=sid, county_name=r.get("County Name"),
-                    district_name=r.get("District Name"), school_name=r.get("School Name"),
-                    district_id=sid[:7]))
-                facts.append(dict(
-                    school_id=sid, period_id=period_id, metric_id=metric_id, student_group_id=grp,
-                    tenant_id=PUBLIC, visibility=PUBLIC, value=value, value_status=status,
-                    n_size=n_size, source_dataset=path.name))
-                n_fact += 1
-            elif level in ("T", "C", "D"):
-                entity = "" if level == "T" else (
-                    (r.get("County Code") or "").strip().zfill(2) if level == "C"
-                    else cds_from(r.get("County Code"), r.get("District Code"), "")[:7])
-                benchmarks.append(dict(
-                    level=level, entity_id=entity, period_id=period_id, metric_id=metric_id,
-                    student_group_id=grp, value=value, n_size=n_size))
+            if level != "S":
+                # Rollup rows (T/C/D) -> ref_benchmark are DEFERRED: CDE splits them
+                # into charter/DASS variants that collide on the benchmark key. Reload
+                # with an "all schools" filter when the benchmarking step is built.
                 n_bench += 1
+                continue
+            sid = cds_from(r.get("County Code"), r.get("District Code"), r.get("School Code"))
+            seen_schools.setdefault(sid, dict(
+                school_id=sid, cds_code=sid, county_name=r.get("County Name"),
+                district_name=r.get("District Name"), school_name=r.get("School Name"),
+                district_id=sid[:7]))
+            facts.append(dict(
+                school_id=sid, period_id=period_id, metric_id=metric_id, student_group_id=grp,
+                tenant_id=PUBLIC, visibility=PUBLIC, value=value, value_status=status,
+                n_size=n_size, source_dataset=path.name))
+            n_fact += 1
             if not dry and len(facts) >= BATCH:
                 _flush_facts(conn, list(seen_schools.values()), facts); facts, seen_schools = [], {}
             if not dry and len(benchmarks) >= BATCH:
@@ -215,7 +212,8 @@ def load_metric_file(conn, path, metric_id, period_id, value_col, n_col, dry):
     if not dry:
         _flush_facts(conn, list(seen_schools.values()), facts)
         _flush_benchmarks(conn, benchmarks)
-    print(f"  {path.name}: {n_fact} school facts, {n_bench} benchmark rows, {n_skip} skipped (grade-span/unmapped)")
+    print(f"  {path.name}: {n_fact} school facts loaded, {n_bench} rollup rows deferred, "
+          f"{n_skip} skipped (grade-span/unmapped)")
 
 
 def _flush_facts(conn, school_stubs, facts):
