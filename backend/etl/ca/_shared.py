@@ -1,14 +1,10 @@
-"""Load CA public (state) data into the star schema.
+"""Shared machinery for the California public-data loaders.
 
-All rows go into the PUBLIC tier (tenant_id='public'). Seeds the conformed
-dimensions, then loads metric files: school rows -> fact_metric, and the
-state/county/district rollup rows -> ref_benchmark.
+Per-fact scripts (`load_ca_<fact>.py`) are thin: they define a SPEC and call
+`run_metric_loader`. `seed_ca_dims.py` calls `run_seed`. All CDE metric files that
+share the school x reporting-category x rate shape reuse `load_metric_file`.
 
-Run (connects as sip_migrator, reads passwords from Secret Manager via config):
-    python -m etl.load_ca_public --data-dir /path/to/California/raw
-    python -m etl.load_ca_public --data-dir /path/to/California/raw --dry-run   # parse only
-
-Extend by adding entries to METRIC_FILES.
+Everything loads into the PUBLIC tier (tenant_id='public').
 """
 from __future__ import annotations
 
@@ -17,24 +13,22 @@ import csv
 import pathlib
 import sys
 
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))  # -> backend/
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import settings
 from app.models import (
-    Base, DimSchool, DimStudentGroup, GroupCrosswalk, DimMetric, DimPeriod,
-    FactMetric, RefBenchmark,
+    DimSchool, DimStudentGroup, GroupCrosswalk, DimMetric, DimPeriod, FactMetric,
 )
 
 PUBLIC = "public"
-# Rows per INSERT. Postgres caps a statement at 65,535 bind parameters, and the
-# widest table (dim_school) has ~20 columns -> keep batch * columns well under that.
+# Postgres caps a statement at 65,535 bind params; widest table ~20 cols -> keep small.
 BATCH = 1000
 
 # --------------------------------------------------------------------------- #
-# Conformed vocabulary
+# Conformed vocabulary (shared across all CA loaders)
 # --------------------------------------------------------------------------- #
 STUDENT_GROUPS = [
     ("all", "All Students", "total"),
@@ -59,7 +53,7 @@ STUDENT_GROUPS = [
 ]
 
 # CDE ReportingCategory -> conformed student_group_id. Grade-span codes (GR*) and
-# anything not here are skipped (they're a different axis, not a student group).
+# anything not here are skipped (a different axis, not a student group).
 CDE_CATEGORY = {
     "TA": "all",
     "RB": "race_black", "RI": "race_amerind", "RA": "race_asian", "RF": "race_filipino",
@@ -76,18 +70,19 @@ METRICS = [
     dict(metric_id="suspension_rate", domain="behavior", display_name="Suspension Rate (Total)",
          unit="pct", direction="lower_better", grains="annual", applies_to_levels="ES,MS,HS",
          is_leading_indicator=True, data_origin="state"),
+    dict(metric_id="expulsion_rate", domain="behavior", display_name="Expulsion Rate (Total)",
+         unit="pct", direction="lower_better", grains="annual", applies_to_levels="ES,MS,HS",
+         is_leading_indicator=True, data_origin="state"),
+    dict(metric_id="grad_rate_acgr", domain="academics", display_name="Graduation Rate (ACGR)",
+         unit="pct", direction="higher_better", grains="annual", applies_to_levels="HS",
+         is_leading_indicator=False, data_origin="state"),
 ]
 
 PERIODS = [
+    ("p2021-22", "annual", "2021-22", "2021-22"),
     ("p2022-23", "annual", "2022-23", "2022-23"),
     ("p2023-24", "annual", "2023-24", "2023-24"),
     ("p2024-25", "annual", "2024-25", "2024-25"),
-]
-
-# Metric files: (relpath, metric_id, period_id, value_col, n_col). Tab-delimited CDE files.
-METRIC_FILES = [
-    ("attendance/chronicabsenteeism_2023-24.txt", "chronic_absenteeism_rate", "p2023-24",
-     "ChronicAbsenteeismRate", "ChronicAbsenteeismEligibleCumulativeEnrollment"),
 ]
 
 
@@ -117,8 +112,25 @@ def cds_from(county, district, school):
     return f"{(county or '').strip().zfill(2)}{(district or '').strip().zfill(5)}{(school or '').strip().zfill(7)}"
 
 
+def field(r, *names):
+    """First present column among candidates. CDE is inconsistent about spaces:
+    'Reporting Category' (chronic) vs 'ReportingCategory' (suspension/ACGR)."""
+    for n in names:
+        v = r.get(n)
+        if v is not None:
+            return v
+    return None
+
+
 # --------------------------------------------------------------------------- #
-# loaders
+# DB
+# --------------------------------------------------------------------------- #
+def _engine():
+    return create_engine(settings.migration_database_url)
+
+
+# --------------------------------------------------------------------------- #
+# seeding (seed_ca_dims.py)
 # --------------------------------------------------------------------------- #
 def seed_reference(conn):
     conn.execute(pg_insert(DimStudentGroup).values(
@@ -138,9 +150,8 @@ def seed_reference(conn):
 
 
 def load_schools(conn, path, dry):
-    n = 0
+    n, rows = 0, []
     with open(path, encoding="utf-8-sig", newline="") as fh:
-        rows = []
         for r in csv.DictReader(fh):
             cds = (r.get("CDS Code") or "").strip()
             if not cds:
@@ -172,95 +183,95 @@ def _upsert_schools(conn, rows):
     conn.execute(stmt.on_conflict_do_update(index_elements=["school_id"], set_=cols))
 
 
+# --------------------------------------------------------------------------- #
+# metric loading (load_ca_<fact>.py)
+# --------------------------------------------------------------------------- #
 def load_metric_file(conn, path, metric_id, period_id, value_col, n_col, dry):
-    facts, benchmarks, seen_schools = [], [], {}
-    n_fact = n_bench = n_skip = 0
-    # CDE demo-download files are Latin-1 (e.g. 'ñ' in school names), not UTF-8.
-    with open(path, encoding="latin-1", newline="") as fh:
-        reader = csv.DictReader(fh, delimiter="\t")
-        for r in reader:
-            cat = (r.get("Reporting Category") or "").strip()
-            grp = CDE_CATEGORY.get(cat)
-            if grp is None:              # grade spans / unmapped -> skip
+    facts, seen_schools = [], {}
+    n_fact = n_roll = n_skip = 0
+    with open(path, encoding="latin-1", newline="") as fh:      # CDE files are Latin-1
+        for r in csv.DictReader(fh, delimiter="\t"):
+            grp = CDE_CATEGORY.get((field(r, "Reporting Category", "ReportingCategory") or "").strip())
+            if grp is None:                                     # grade span / unmapped
                 n_skip += 1
                 continue
-            level = (r.get("Aggregate Level") or "").strip()
+            if (field(r, "Aggregate Level", "AggregateLevel") or "").strip() != "S":  # rollups deferred
+                n_roll += 1
+                continue
             raw = r.get(value_col)
             value = _f(raw)
             status = "reported" if value is not None else ("suppressed" if (raw or "").strip() == "*" else "not_collected")
-            n_size = _i(r.get(n_col))
-            if level != "S":
-                # Rollup rows (T/C/D) -> ref_benchmark are DEFERRED: CDE splits them
-                # into charter/DASS variants that collide on the benchmark key. Reload
-                # with an "all schools" filter when the benchmarking step is built.
-                n_bench += 1
-                continue
-            sid = cds_from(r.get("County Code"), r.get("District Code"), r.get("School Code"))
+            sid = cds_from(field(r, "County Code", "CountyCode"),
+                           field(r, "District Code", "DistrictCode"),
+                           field(r, "School Code", "SchoolCode"))
             seen_schools.setdefault(sid, dict(
-                school_id=sid, cds_code=sid, county_name=r.get("County Name"),
-                district_name=r.get("District Name"), school_name=r.get("School Name"),
+                school_id=sid, cds_code=sid,
+                county_name=field(r, "County Name", "CountyName"),
+                district_name=field(r, "District Name", "DistrictName"),
+                school_name=field(r, "School Name", "SchoolName"),
                 district_id=sid[:7]))
             facts.append(dict(
                 school_id=sid, period_id=period_id, metric_id=metric_id, student_group_id=grp,
                 tenant_id=PUBLIC, visibility=PUBLIC, value=value, value_status=status,
-                n_size=n_size, source_dataset=path.name))
+                n_size=_i(r.get(n_col)), source_dataset=path.name))
             n_fact += 1
             if not dry and len(facts) >= BATCH:
                 _flush_facts(conn, list(seen_schools.values()), facts); facts, seen_schools = [], {}
-            if not dry and len(benchmarks) >= BATCH:
-                _flush_benchmarks(conn, benchmarks); benchmarks = []
     if not dry:
         _flush_facts(conn, list(seen_schools.values()), facts)
-        _flush_benchmarks(conn, benchmarks)
-    print(f"  {path.name}: {n_fact} school facts loaded, {n_bench} rollup rows deferred, "
-          f"{n_skip} skipped (grade-span/unmapped)")
+    print(f"  {path.name}: {n_fact} school facts, {n_roll} rollups deferred, {n_skip} skipped")
 
 
 def _flush_facts(conn, school_stubs, facts):
-    if school_stubs:  # ensure FK integrity for schools not in the directory
+    if school_stubs:  # FK integrity for schools not in the directory
         conn.execute(pg_insert(DimSchool).values(school_stubs).on_conflict_do_nothing())
-    if facts:
-        stmt = pg_insert(FactMetric).values(facts)
-        conn.execute(stmt.on_conflict_do_update(
-            index_elements=["school_id", "period_id", "metric_id", "student_group_id"],
-            set_=dict(value=stmt.excluded.value, value_status=stmt.excluded.value_status,
-                      n_size=stmt.excluded.n_size, source_dataset=stmt.excluded.source_dataset)))
+    if not facts:
+        return
+    # dedup within batch on the PK (last wins) so ON CONFLICT never touches a row twice
+    dedup = {}
+    for f in facts:
+        dedup[(f["school_id"], f["period_id"], f["metric_id"], f["student_group_id"])] = f
+    stmt = pg_insert(FactMetric).values(list(dedup.values()))
+    conn.execute(stmt.on_conflict_do_update(
+        index_elements=["school_id", "period_id", "metric_id", "student_group_id"],
+        set_=dict(value=stmt.excluded.value, value_status=stmt.excluded.value_status,
+                  n_size=stmt.excluded.n_size, source_dataset=stmt.excluded.source_dataset)))
 
 
-def _flush_benchmarks(conn, rows):
-    if rows:
-        stmt = pg_insert(RefBenchmark).values(rows)
-        conn.execute(stmt.on_conflict_do_update(
-            index_elements=["level", "entity_id", "period_id", "metric_id", "student_group_id"],
-            set_=dict(value=stmt.excluded.value, n_size=stmt.excluded.n_size)))
-
-
-def main():
+# --------------------------------------------------------------------------- #
+# entry points
+# --------------------------------------------------------------------------- #
+def _args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", required=True, help="California/raw directory")
     ap.add_argument("--dry-run", action="store_true", help="parse + count only, no DB writes")
-    args = ap.parse_args()
-    root = pathlib.Path(args.data_dir)
+    return ap.parse_args()
 
-    if args.dry_run:
-        print("DRY RUN (no DB writes)")
-        load_schools(None, root / "directory/schools_2025-26.csv", dry=True)
-        for rel, mid, pid, vcol, ncol in METRIC_FILES:
-            load_metric_file(None, root / rel, mid, pid, vcol, ncol, dry=True)
-        return
 
-    engine = create_engine(settings.migration_database_url)
-    with engine.begin() as conn:
+def run_seed():
+    a = _args()
+    root = pathlib.Path(a.data_dir)
+    if a.dry_run:
+        print("DRY RUN"); load_schools(None, root / "directory/schools_2025-26.csv", dry=True); return
+    with _engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', :t, false)"), {"t": PUBLIC})
-        print("Seeding reference dimensions...")
-        seed_reference(conn)
-        print("Loading dim_school...")
-        load_schools(conn, root / "directory/schools_2025-26.csv", dry=False)
-        for rel, mid, pid, vcol, ncol in METRIC_FILES:
-            print(f"Loading {rel}...")
-            load_metric_file(conn, root / rel, mid, pid, vcol, ncol, dry=False)
+        print("Seeding reference dimensions..."); seed_reference(conn)
+        print("Loading dim_school..."); load_schools(conn, root / "directory/schools_2025-26.csv", dry=False)
     print("Done.")
 
 
-if __name__ == "__main__":
-    main()
+def run_metric_loader(spec):
+    """spec: dict(file, metric_id, period_id, value_col, n_col)."""
+    a = _args()
+    path = pathlib.Path(a.data_dir) / spec["file"]
+    if a.dry_run:
+        print("DRY RUN")
+        load_metric_file(None, path, spec["metric_id"], spec["period_id"],
+                         spec["value_col"], spec["n_col"], dry=True)
+        return
+    with _engine().begin() as conn:
+        conn.execute(text("SELECT set_config('app.tenant', :t, false)"), {"t": PUBLIC})
+        print(f"Loading {spec['metric_id']} from {spec['file']}...")
+        load_metric_file(conn, path, spec["metric_id"], spec["period_id"],
+                         spec["value_col"], spec["n_col"], dry=False)
+    print("Done.")
