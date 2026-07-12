@@ -250,13 +250,22 @@ def _args():
 
 def run_seed():
     a = _args()
-    root = pathlib.Path(a.data_dir)
+    schools = pathlib.Path(a.data_dir) / "directory/schools_2025-26.csv"
     if a.dry_run:
-        print("DRY RUN"); load_schools(None, root / "directory/schools_2025-26.csv", dry=True); return
+        print("DRY RUN")
+        if schools.exists():
+            load_schools(None, schools, dry=True)
+        else:
+            print(f"  (skip dim_school — {schools} not found)")
+        return
     with _engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', :t, false)"), {"t": PUBLIC})
         print("Seeding reference dimensions..."); seed_reference(conn)
-        print("Loading dim_school..."); load_schools(conn, root / "directory/schools_2025-26.csv", dry=False)
+        if schools.exists():
+            print("Loading dim_school..."); load_schools(conn, schools, dry=False)
+        else:
+            print(f"  SKIPPING dim_school — {schools} not uploaded yet. "
+                  "Re-run this once directory/ is present to refresh it.")
     print("Done.")
 
 
