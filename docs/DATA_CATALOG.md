@@ -8,7 +8,8 @@ layer** — files are stored as originally published (tab-delimited `.txt`, `.cs
 - **Coverage:** most recent 1–2 school years available per dataset (2022‑23 → 2024‑25)
 - **Grain:** school level wherever the source publishes it (files also contain
   district / county / state aggregate rows — filter on `Aggregate Level`)
-- **Root:** `California/raw/<domain>/`
+- **Root:** `California/raw/<domain>/` (local working copy); the canonical copy the
+  loaders read lives in Google Cloud Storage as `gs://<bucket>/raw/<domain>/`
 
 ---
 

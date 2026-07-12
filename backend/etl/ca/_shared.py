@@ -15,6 +15,7 @@ import sys
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))  # -> backend/
 
+import fsspec  # local paths AND gs:// URIs (gcsfs, via ADC)
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -143,6 +144,25 @@ def field(r, *names):
     return None
 
 
+# --- source access: local paths OR gs:// URIs (via fsspec/gcsfs) --------------
+def _join(base, rel):
+    b = str(base)
+    return b.rstrip("/") + "/" + rel if b.startswith("gs://") else str(pathlib.Path(base) / rel)
+
+
+def _open(path, encoding):
+    return fsspec.open(str(path), mode="r", encoding=encoding, newline="")
+
+
+def _exists(path):
+    fs, p = fsspec.core.url_to_fs(str(path))
+    return fs.exists(p)
+
+
+def _basename(path):
+    return str(path).rstrip("/").rsplit("/", 1)[-1]
+
+
 # --------------------------------------------------------------------------- #
 # DB
 # --------------------------------------------------------------------------- #
@@ -172,7 +192,7 @@ def seed_reference(conn):
 
 def load_schools(conn, path, dry):
     n, rows = 0, []
-    with open(path, encoding="utf-8-sig", newline="") as fh:
+    with _open(path, "utf-8-sig") as fh:
         for r in csv.DictReader(fh):
             cds = (r.get("CDS Code") or "").strip()
             if not cds:
@@ -210,7 +230,8 @@ def _upsert_schools(conn, rows):
 def load_metric_file(conn, path, metric_id, period_id, value_col, n_col, dry, where=None):
     facts, seen_schools = [], {}
     n_fact = n_roll = n_skip = 0
-    with open(path, encoding="latin-1", newline="") as fh:      # CDE files are Latin-1
+    src = _basename(path)
+    with _open(path, "latin-1") as fh:      # CDE files are Latin-1
         for r in csv.DictReader(fh, delimiter="\t"):
             grp = CDE_CATEGORY.get((field(r, "Reporting Category", "ReportingCategory") or "").strip())
             if grp is None:                                     # grade span / unmapped
@@ -238,13 +259,13 @@ def load_metric_file(conn, path, metric_id, period_id, value_col, n_col, dry, wh
             facts.append(dict(
                 school_id=sid, period_id=period_id, metric_id=metric_id, student_group_id=grp,
                 tenant_id=PUBLIC, visibility=PUBLIC, value=value, value_status=status,
-                n_size=_i(r.get(n_col)), source_dataset=path.name))
+                n_size=_i(r.get(n_col)), source_dataset=src))
             n_fact += 1
             if not dry and len(facts) >= BATCH:
                 _flush_facts(conn, list(seen_schools.values()), facts); facts, seen_schools = [], {}
     if not dry:
         _flush_facts(conn, list(seen_schools.values()), facts)
-    print(f"  {path.name}: {n_fact} school facts, {n_roll} rollups deferred, {n_skip} skipped")
+    print(f"  {src}: {n_fact} school facts, {n_roll} rollups deferred, {n_skip} skipped")
 
 
 def _flush_facts(conn, school_stubs, facts):
@@ -268,17 +289,18 @@ def _flush_facts(conn, school_stubs, facts):
 # --------------------------------------------------------------------------- #
 def _args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", required=True, help="California/raw directory")
+    ap.add_argument("--data-dir", required=True,
+                    help="raw data root: a local path or a gs://bucket/prefix URI")
     ap.add_argument("--dry-run", action="store_true", help="parse + count only, no DB writes")
     return ap.parse_args()
 
 
 def run_seed():
     a = _args()
-    schools = pathlib.Path(a.data_dir) / "directory/schools_2025-26.csv"
+    schools = _join(a.data_dir, "directory/schools_2025-26.csv")
     if a.dry_run:
         print("DRY RUN")
-        if schools.exists():
+        if _exists(schools):
             load_schools(None, schools, dry=True)
         else:
             print(f"  (skip dim_school — {schools} not found)")
@@ -286,7 +308,7 @@ def run_seed():
     with _engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', :t, false)"), {"t": PUBLIC})
         print("Seeding reference dimensions..."); seed_reference(conn)
-        if schools.exists():
+        if _exists(schools):
             print("Loading dim_school..."); load_schools(conn, schools, dry=False)
         else:
             print(f"  SKIPPING dim_school — {schools} not uploaded yet. "
@@ -297,7 +319,7 @@ def run_seed():
 def run_metric_loader(spec):
     """spec: dict(file, metric_id, period_id, value_col, n_col)."""
     a = _args()
-    path = pathlib.Path(a.data_dir) / spec["file"]
+    path = _join(a.data_dir, spec["file"])
     if a.dry_run:
         print("DRY RUN")
         load_metric_file(None, path, spec["metric_id"], spec["period_id"],

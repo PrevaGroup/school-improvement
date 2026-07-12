@@ -10,17 +10,21 @@ shared machinery lives in [`_shared.py`](_shared.py). Everything loads into the
 Seed the conformed dimensions + `dim_school` **once**, then run any fact loaders:
 
 ```bash
-python -m etl.ca.seed_ca_dims                --data-dir ~/raw
-python -m etl.ca.load_ca_chronic_absenteeism --data-dir ~/raw
-python -m etl.ca.load_ca_suspension          --data-dir ~/raw
-python -m etl.ca.load_ca_expulsion           --data-dir ~/raw
-python -m etl.ca.load_ca_graduation          --data-dir ~/raw
-python -m etl.ca.load_ca_stability           --data-dir ~/raw
-python -m etl.ca.load_ca_college_going        --data-dir ~/raw
-python -m etl.ca.load_ca_homeless            --data-dir ~/raw
-python -m etl.ca.load_ca_enrollment          --data-dir ~/raw
+python -m etl.ca.seed_ca_dims                --data-dir gs://<bucket>/raw
+python -m etl.ca.load_ca_chronic_absenteeism --data-dir gs://<bucket>/raw
+python -m etl.ca.load_ca_suspension          --data-dir gs://<bucket>/raw
+python -m etl.ca.load_ca_expulsion           --data-dir gs://<bucket>/raw
+python -m etl.ca.load_ca_graduation          --data-dir gs://<bucket>/raw
+python -m etl.ca.load_ca_stability           --data-dir gs://<bucket>/raw
+python -m etl.ca.load_ca_college_going        --data-dir gs://<bucket>/raw
+python -m etl.ca.load_ca_homeless            --data-dir gs://<bucket>/raw
+python -m etl.ca.load_ca_enrollment          --data-dir gs://<bucket>/raw
 ```
-Add `--dry-run` to parse + count without writing.
+
+`--data-dir` accepts either a **local path** (`~/raw`) or a **`gs://bucket/prefix`
+URI**. GCS access uses ADC (`gcloud auth application-default login`, or the Cloud
+Run / Cloud Shell service account); no keys in the repo. Add `--dry-run` to parse +
+count without writing.
 
 ## Scripts
 

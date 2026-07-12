@@ -8,5 +8,8 @@ pydantic-settings>=2.2
 google-auth>=2.29
 # DB credentials from Secret Manager (runbook Phase 3)
 google-cloud-secret-manager>=2.20
+# ETL loaders read the raw data from local paths OR gs:// URIs (etl/ca/_shared.py)
+fsspec>=2024.5
+gcsfs>=2024.5
 # Optional: connect to Cloud SQL without the Auth Proxy, incl. IAM DB auth
 # cloud-sql-python-connector[pg8000]>=1.9
