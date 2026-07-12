@@ -61,6 +61,15 @@ CDE_CATEGORY = {
     "RD": "race_nr",
     "GF": "gender_f", "GM": "gender_m", "GX": "gender_x",
     "SE": "el", "SD": "swd", "SS": "sed", "SM": "migrant", "SF": "foster", "SH": "homeless",
+    # Newer CALPADS scheme (census enrollment; also sped/foster). No key collisions
+    # with the older codes above. ELAS_* (English-status) and AR_* (age) are left
+    # unmapped on purpose — different axes / redundant with SG_EL.
+    "RE_B": "race_black", "RE_I": "race_amerind", "RE_A": "race_asian", "RE_F": "race_filipino",
+    "RE_H": "race_hispanic", "RE_P": "race_pacific", "RE_T": "race_two", "RE_W": "race_white",
+    "RE_D": "race_nr",
+    "GN_M": "gender_m", "GN_F": "gender_f", "GN_X": "gender_x",
+    "SG_SD": "swd", "SG_DS": "sed", "SG_EL": "el",   # SD=disabilities, DS=disadvantaged (inferred)
+    "SG_HM": "homeless", "SG_FS": "foster", "SG_MG": "migrant",
 }
 
 METRICS = [
@@ -75,6 +84,18 @@ METRICS = [
          is_leading_indicator=True, data_origin="state"),
     dict(metric_id="grad_rate_acgr", domain="academics", display_name="Graduation Rate (ACGR)",
          unit="pct", direction="higher_better", grains="annual", applies_to_levels="HS",
+         is_leading_indicator=False, data_origin="state"),
+    dict(metric_id="stability_rate", domain="engagement", display_name="Stability Rate",
+         unit="pct", direction="higher_better", grains="annual", applies_to_levels="ES,MS,HS",
+         is_leading_indicator=True, data_origin="state"),
+    dict(metric_id="college_going_rate", domain="academics", display_name="College-Going Rate (16 mo)",
+         unit="pct", direction="higher_better", grains="annual", applies_to_levels="HS",
+         is_leading_indicator=False, data_origin="state"),
+    dict(metric_id="homeless_enrollment", domain="demographics", display_name="Homeless Student Enrollment",
+         unit="count", direction="context", grains="annual", applies_to_levels="ES,MS,HS",
+         is_leading_indicator=False, data_origin="state"),
+    dict(metric_id="enrollment", domain="demographics", display_name="Enrollment (Census Day)",
+         unit="count", direction="context", grains="annual", applies_to_levels="ES,MS,HS",
          is_leading_indicator=False, data_origin="state"),
 ]
 
@@ -186,7 +207,7 @@ def _upsert_schools(conn, rows):
 # --------------------------------------------------------------------------- #
 # metric loading (load_ca_<fact>.py)
 # --------------------------------------------------------------------------- #
-def load_metric_file(conn, path, metric_id, period_id, value_col, n_col, dry):
+def load_metric_file(conn, path, metric_id, period_id, value_col, n_col, dry, where=None):
     facts, seen_schools = [], {}
     n_fact = n_roll = n_skip = 0
     with open(path, encoding="latin-1", newline="") as fh:      # CDE files are Latin-1
@@ -197,6 +218,10 @@ def load_metric_file(conn, path, metric_id, period_id, value_col, n_col, dry):
                 continue
             if (field(r, "Aggregate Level", "AggregateLevel") or "").strip() != "S":  # rollups deferred
                 n_roll += 1
+                continue
+            # optional row filter (e.g. CGR's CompleterType='TA' total, to avoid split-key dups)
+            if where and any((field(r, k) or "").strip() != v for k, v in where.items()):
+                n_skip += 1
                 continue
             raw = r.get(value_col)
             value = _f(raw)
@@ -276,11 +301,11 @@ def run_metric_loader(spec):
     if a.dry_run:
         print("DRY RUN")
         load_metric_file(None, path, spec["metric_id"], spec["period_id"],
-                         spec["value_col"], spec["n_col"], dry=True)
+                         spec["value_col"], spec["n_col"], dry=True, where=spec.get("where"))
         return
     with _engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', :t, false)"), {"t": PUBLIC})
         print(f"Loading {spec['metric_id']} from {spec['file']}...")
         load_metric_file(conn, path, spec["metric_id"], spec["period_id"],
-                         spec["value_col"], spec["n_col"], dry=False)
+                         spec["value_col"], spec["n_col"], dry=False, where=spec.get("where"))
     print("Done.")
