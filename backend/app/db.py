@@ -20,12 +20,34 @@ from sqlalchemy.orm import Session, sessionmaker
 from .config import settings
 from .security import get_current_tenant
 
-engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, class_=Session)
 
-# NOTE (Cloud SQL): to skip the Auth Proxy and use the Python Connector / IAM DB
-# auth, build the engine with a `creator=` that returns a connector connection
-# instead of a URL. The tenant-binding logic below is identical.
+def _build_engine():
+    """Cloud Run uses the Cloud SQL Python Connector (no Auth Proxy sidecar) when
+    INSTANCE_CONNECTION_NAME is set; local/dev falls back to the Auth-Proxy URL.
+    Tenant binding below is identical either way — only how we open the socket differs.
+    """
+    if settings.instance_connection_name:
+        from google.cloud.sql.connector import Connector, IPTypes
+
+        connector = Connector()
+
+        def _getconn():
+            return connector.connect(
+                settings.instance_connection_name,
+                "pg8000",
+                user=settings.app_db_user,
+                password=settings.app_db_password_value,
+                db=settings.db_name,
+                ip_type=IPTypes.PRIVATE if settings.db_ip_type == "private" else IPTypes.PUBLIC,
+            )
+
+        return create_engine("postgresql+pg8000://", creator=_getconn, pool_pre_ping=True, future=True)
+
+    return create_engine(settings.database_url, pool_pre_ping=True, future=True)
+
+
+engine = _build_engine()
+SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, class_=Session)
 
 
 @contextmanager

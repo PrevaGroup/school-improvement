@@ -13,7 +13,7 @@ loaders, on Cloud SQL.
 | [`docs/DATA_CATALOG.md`](docs/DATA_CATALOG.md) | The raw CA data sources and how they were obtained |
 | [`backend/`](backend/) | FastAPI + SQLAlchemy + Alembic app: RLS schema, Secret-Manager config, and the ETL loaders |
 | [`backend/etl/ca/`](backend/etl/ca/) | California public-data loaders (`load_ca_<fact>.py`) + [their README](backend/etl/ca/README.md) |
-| [`mvp-setup-runbook.md`](mvp-setup-runbook.md) | Cloud SQL / Cloud Run / Identity Platform setup runbook |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Architecture: request/trust flow, data-model layers, ingest pipelines, repo index, remaining tasks |
 
 ## Status
 
@@ -21,6 +21,9 @@ loaders, on Cloud SQL.
   security** (tenant isolation proven), credentials in **Google Secret Manager**.
 - **8 public metrics loaded** (chronic absenteeism, suspension, expulsion, graduation,
   stability, college-going, homelessness, enrollment) — ~960k `fact_metric` rows.
+- **SIP plan pipeline built** (PDF → `POST /plans/extract` → review → `POST /plans/load`)
+  and **GCIP token auth** wired; Cloud Run Dockerfile + Connector ready. Not yet deployed —
+  see [`ARCHITECTURE.md`](ARCHITECTURE.md) for remaining tasks.
 
 ## Backend quickstart
 

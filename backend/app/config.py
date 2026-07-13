@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     app_db_user: str = "sip_app"            # runtime role (non-owner, NOBYPASSRLS)
     migration_db_user: str = "sip_migrator"  # migrations role (owns objects)
 
+    # --- Cloud SQL Python Connector (Cloud Run): set to activate, else Auth-Proxy URL ---
+    # e.g. "school-improvement-501916:us-central1:school-improvement-sql"
+    instance_connection_name: str | None = None
+    db_ip_type: str = "public"              # "public" or "private" (VPC)
+
     # --- secrets: primary source is Secret Manager ---
     gcp_project: str | None = None
     app_db_password_secret: str = "sip-app-password"
@@ -27,8 +32,25 @@ class Settings(BaseSettings):
     app_db_password: str | None = None
     migration_db_password: str | None = None
 
+    # --- Anthropic API key for the SIP extractor (etl/ca/sip) ---
+    # Prod: Secret Manager `anthropic-api-key`. Dev fallback: the standard
+    # ANTHROPIC_API_KEY env var (pydantic maps the field name to it).
+    anthropic_api_key: str | None = None
+    anthropic_api_key_secret: str = "anthropic-api-key"
+
     dev_mode: bool = False
+    # GCIP/Firebase ID-token audience. Defaults to gcp_project (the token's `aud`);
+    # set explicitly only to override.
     google_oauth_audience: str | None = None
+    # How a verified identity becomes a tenant (see app/security.py):
+    #   1) a custom claim on the user (recommended) — this claim name, or
+    #   2) fallback: map the email domain, e.g. {"lbschools.net": "lbusd"}.
+    tenant_claim: str = "tenant_id"
+    domain_tenant_map: dict[str, str] = {}
+
+    @property
+    def gcip_audience(self) -> str | None:
+        return self.google_oauth_audience or self.gcp_project
 
     def _secret(self, secret_id: str) -> str:
         """Fetch a secret's latest version via Application Default Credentials."""
@@ -51,14 +73,21 @@ class Settings(BaseSettings):
         )
 
     @property
+    def app_db_password_value(self) -> str:
+        return self.app_db_password or self._secret(self.app_db_password_secret)
+
+    @property
     def database_url(self) -> URL:
-        pw = self.app_db_password or self._secret(self.app_db_password_secret)
-        return self._url(self.app_db_user, pw)
+        return self._url(self.app_db_user, self.app_db_password_value)
 
     @property
     def migration_database_url(self) -> URL:
         pw = self.migration_db_password or self._secret(self.migration_db_password_secret)
         return self._url(self.migration_db_user, pw)
+
+    @property
+    def anthropic_api_key_value(self) -> str:
+        return self.anthropic_api_key or self._secret(self.anthropic_api_key_secret)
 
 
 settings = Settings()

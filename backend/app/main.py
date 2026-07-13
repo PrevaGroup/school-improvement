@@ -12,8 +12,10 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 from .models import DimSchool, FactMetric
+from .plans import router as plans_router
 
 app = FastAPI(title="School Improvement Platform API", version="0.1.0")
+app.include_router(plans_router)
 
 
 @app.get("/health")
