@@ -1,0 +1,5 @@
+Long Beach Unified (LBUSD) SPSA structure. Goals are numbered independently per layer, so classify each goal with goal_type:
+1. Five-year district strategic targets (typically June-2023 baselines toward June-2028 targets), usually on an early summary page and carrying no actions -> goal_type "strategic_5yr".
+2. Current-year subject goals (ELA, Math, English Learner, Culture/Climate) with year-specific instructional targets -> goal_type "subject".
+3. Numbered "Accountability Measure" sections (e.g. Increase Achievement, Organizational Climate, Professional Development, Parent & Community Involvement) that carry the budgeted actions -> goal_type "accountability_measure".
+Record action-level budgeted amounts and funding sources where listed. Plan-level program allocations (Title I, LCFF totals) usually appear near the end — note those in `unresolved` rather than as action budgets.
