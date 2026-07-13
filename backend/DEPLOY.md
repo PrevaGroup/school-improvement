@@ -15,6 +15,22 @@ sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
 2. **Grant the Cloud Run service account** `roles/secretmanager.secretAccessor` and
    `roles/cloudsql.client`.
 
+## Anthropic key & credits (don't rely on a reminder)
+
+Two separate things fail, with different fixes:
+
+- **Credits run dry** (the balance, not the key). Set **Auto-reload** in the Anthropic
+  Console → Plans & Billing, plus a low-balance email alert. This is the forget-proof fix —
+  the balance can't hit zero unattended. (Anthropic bills separately from GCP.)
+- **Key rotated / revoked / (org-policy) expired.** API keys are long-lived; they don't
+  expire on a timer unless your org enforces it. To rotate, add a new secret version — the
+  app reads `latest`, so **no code change, no redeploy**:
+  ```bash
+  printf %s "sk-ant-NEWKEY" | gcloud secrets versions add anthropic-api-key --data-file=-
+  ```
+  A dead key surfaces cleanly as `Anthropic API 401: … → check the anthropic-api-key secret`
+  (extract_sip maps Anthropic HTTP errors to a one-line message; `/plans/extract` → 502).
+
 ## Deploy
 
 ```bash
