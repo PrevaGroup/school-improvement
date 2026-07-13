@@ -88,10 +88,11 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | Column | Type | Constraints |
 |---|---|---|
 | `school_id` | TEXT | PK, NOT NULL |
-| `cds_code` | TEXT |  |
+| `district_id` | TEXT |  |
+| `state_school_id` | TEXT |  |
+| `state_district_id` | TEXT |  |
 | `school_year` | TEXT |  |
 | `school_name` | TEXT |  |
-| `district_id` | TEXT |  |
 | `district_name` | TEXT |  |
 | `county_name` | TEXT |  |
 | `school_level` | TEXT |  |
