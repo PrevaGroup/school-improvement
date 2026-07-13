@@ -9,7 +9,8 @@ layer** — files are stored as originally published (tab-delimited `.txt`, `.cs
 - **Grain:** school level wherever the source publishes it (files also contain
   district / county / state aggregate rows — filter on `Aggregate Level`)
 - **Root:** `California/raw/<domain>/` (local working copy); the canonical copy the
-  loaders read lives in Google Cloud Storage as `gs://<bucket>/raw/<domain>/`
+  loaders read lives in Google Cloud Storage as `gs://<bucket>/raw/ca/<domain>/`
+  (raw data is partitioned by state — `raw/ca/…`, `raw/tx/…` later)
 
 ---
 
