@@ -150,6 +150,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--out-prefix", required=True, help="gs:// prefix (or local dir) to write <school>.json")
     ap.add_argument("--plan-year", default=None, help="school-year hint, e.g. 2025-26")
     ap.add_argument("--context-file", type=Path, default=None, help="district structure/format notes injected into every prompt")
+    ap.add_argument("--alias", action="append", default=[], metavar="STEM=SCHOOL_ID",
+                    help="pin a filename stem to a school_id when the name won't match (repeatable), e.g. --alias CAMS=062250...")
     ap.add_argument("--max-tokens", type=int, default=32000)
     ap.add_argument("--limit", type=int, default=None, help="process at most N PDFs (for a trial run)")
     ap.add_argument("--dry-run", action="store_true", help="resolve + report matches only; no API calls")
@@ -168,6 +170,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     by_norm: dict[str, list[dict]] = {}
     for s in schools:
         by_norm.setdefault(_norm(s["school_name"]), []).append(s)
+    by_id = {s["school_id"]: s for s in schools}
+
+    aliases: dict[str, str] = {}
+    for a in args.alias:
+        if "=" not in a:
+            print(f"[batch] bad --alias (need STEM=SCHOOL_ID): {a}", file=sys.stderr)
+            return 2
+        stem, sid = a.split("=", 1)
+        aliases[_norm(stem)] = sid.strip()
 
     pdfs = list_pdfs(args.pdf_prefix)
     if args.limit:
@@ -180,7 +191,15 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     for fname, src in pdfs:
         name = fname[:-4] if fname.lower().endswith(".pdf") else fname
-        school = resolve(name, by_norm)
+        alias_id = aliases.get(_norm(name))
+        if alias_id:
+            school = by_id.get(alias_id)
+            if not school:
+                errors.append((fname, f"--alias {alias_id} not in district {args.district_id}"))
+                print(f"[batch] ERROR      {fname}: alias school_id {alias_id} not in district", file=sys.stderr)
+                continue
+        else:
+            school = resolve(name, by_norm)
         if not school:
             unmatched.append(fname)
             print(f"[batch] UNMATCHED  {fname}", file=sys.stderr)
