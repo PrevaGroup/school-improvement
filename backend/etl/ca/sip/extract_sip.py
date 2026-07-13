@@ -324,7 +324,9 @@ def extract_bytes(
     # Key: ANTHROPIC_API_KEY (dev) else Secret Manager `anthropic-api-key` via ADC.
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key_value)
     try:
-        response = client.messages.create(
+        # Stream so a large max_tokens doesn't trip the SDK's 10-minute non-streaming
+        # timeout guard; get_final_message() returns the fully assembled Message.
+        with client.messages.stream(
             model=MODEL_ID,
             max_tokens=max_tokens,
             tools=[tool],
@@ -345,7 +347,8 @@ def extract_bytes(
                     ],
                 }
             ],
-        )
+        ) as stream:
+            response = stream.get_final_message()
     except anthropic.APIStatusError as e:
         # Turn Anthropic's HTTP errors into a clean, actionable message (no stack trace).
         detail = getattr(e, "message", str(e))
