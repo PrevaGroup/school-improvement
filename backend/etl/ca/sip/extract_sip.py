@@ -18,9 +18,12 @@ Run it the same way as the loaders — as a module from `backend/`, with ADC set
 (`gcloud auth application-default login`) so the Anthropic key resolves from Secret
 Manager (or set ANTHROPIC_API_KEY for a dev fallback):
 
-    python -m etl.ca.sip.extract_sip <pdf> [--out <json>] \
+    python -m etl.ca.sip.extract_sip <pdf|gs://...> [--out <json>] \
         [--district-id <NCES 7-digit>] [--school-id <NCES 12-digit>] \
         [--plan-year 2024-25] [--gs-uri gs://...] [--dry-run]
+
+The source may be a local path or a gs:// URI (read via gcsfs/ADC). Point it straight
+at the canonical raw path, e.g. gs://<bucket>/raw/ca/districts/<LEAID>/sip/<school>.pdf.
 
 `--dry-run` does everything except the billed API call (reads the PDF, hashes it,
 counts pages, builds the request) — use it to check plumbing without spending tokens.
@@ -241,6 +244,23 @@ def count_pages(data: bytes) -> int:
     return len(PdfReader(BytesIO(data)).pages)
 
 
+def read_source(src: str) -> tuple[bytes, str, str]:
+    """Read PDF bytes from a local path OR a remote URI (gs://, s3://, http…).
+
+    Returns (bytes, display_name, default_source_uri). For a remote URI the URI
+    itself becomes `source.file`; for a local path, its file:// URI. gs:// uses
+    gcsfs via ADC — the same access the loaders use.
+    """
+    name = src.rstrip("/").rsplit("/", 1)[-1]
+    if "://" in src and not src.startswith("file://"):
+        import fsspec
+
+        with fsspec.open(src, "rb") as fh:
+            return fh.read(), name, src
+    p = Path(src)
+    return p.read_bytes(), p.name, p.resolve().as_uri()
+
+
 # --------------------------------------------------------------------------- #
 # Extraction
 # --------------------------------------------------------------------------- #
@@ -344,7 +364,7 @@ def extract_bytes(
 
 
 def extract(
-    pdf_path: Path,
+    src: str,
     *,
     district_id: str,
     school_id_nces: Optional[str],
@@ -353,11 +373,12 @@ def extract(
     max_tokens: int = 16000,
     dry_run: bool = False,
 ) -> ExtractedPlan:
-    """CLI convenience wrapper: read a local PDF and delegate to `extract_bytes`."""
+    """CLI convenience wrapper: read a local path or gs:// URI, delegate to `extract_bytes`."""
+    data, name, default_uri = read_source(src)
     return extract_bytes(
-        pdf_path.read_bytes(),
-        name=pdf_path.name,
-        default_uri=pdf_path.resolve().as_uri(),
+        data,
+        name=name,
+        default_uri=default_uri,
         district_id=district_id,
         school_id_nces=school_id_nces,
         plan_year_hint=plan_year_hint,
@@ -369,8 +390,8 @@ def extract(
 
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Extract a CA school-improvement plan PDF to reviewable JSON.")
-    ap.add_argument("pdf", type=Path, help="path to the source PDF")
-    ap.add_argument("--out", type=Path, default=None, help="output JSON path (default: <pdf>.json)")
+    ap.add_argument("pdf", help="local path OR gs:// URI to the source PDF")
+    ap.add_argument("--out", type=Path, default=None, help="output JSON path (default: <basename>.json in cwd)")
     ap.add_argument(
         "--district-id",
         default="0622710",
@@ -383,21 +404,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="do everything except the API call")
     args = ap.parse_args(argv)
 
-    if not args.pdf.exists():
-        print(f"error: no such file: {args.pdf}", file=sys.stderr)
+    try:
+        plan = extract(
+            args.pdf,
+            district_id=args.district_id,
+            school_id_nces=args.school_id,
+            plan_year_hint=args.plan_year,
+            gs_uri=args.gs_uri,
+            max_tokens=args.max_tokens,
+            dry_run=args.dry_run,
+        )
+    except (FileNotFoundError, OSError) as e:
+        print(f"error: cannot read {args.pdf}: {e}", file=sys.stderr)
         return 2
 
-    plan = extract(
-        args.pdf,
-        district_id=args.district_id,
-        school_id_nces=args.school_id,
-        plan_year_hint=args.plan_year,
-        gs_uri=args.gs_uri,
-        max_tokens=args.max_tokens,
-        dry_run=args.dry_run,
-    )
-
-    out = args.out or args.pdf.with_suffix(".json")
+    basename = args.pdf.rstrip("/").rsplit("/", 1)[-1]
+    out = args.out or Path(basename).with_suffix(".json")
     out.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
     print(f"[extract] wrote {out}", file=sys.stderr)
     return 0
