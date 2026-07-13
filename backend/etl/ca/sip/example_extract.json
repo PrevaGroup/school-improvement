@@ -1,0 +1,77 @@
+{
+  "plan_id": "062271012345:spsa:2024-25",
+  "school_id": "062271012345",
+  "district_id": "0622710",
+  "state_school_id": "19647250130229",
+  "state_district_id": "1964725",
+  "plan_type": "SPSA",
+  "plan_year": "2024-25",
+  "status": "board-approved",
+  "adopted_date": "2024-10-15",
+  "total_budget": 412500.0,
+  "goals": [
+    {
+      "goal_id": "062271012345:spsa:2024-25:g1",
+      "goal_number": "1",
+      "statement": "Increase the percentage of students reading at or above grade level and reduce chronic absenteeism.",
+      "lcff_priority": 5,
+      "target_group_id": "sed",
+      "metric_links": [
+        {
+          "raw_metric_text": "chronic absenteeism rate for socioeconomically disadvantaged students",
+          "proposed_metric_id": "chronic_absenteeism_rate",
+          "target_group_id": "sed",
+          "direction": "decrease",
+          "baseline_value": 31.4,
+          "baseline_year": "2023-24",
+          "target_value": 22.0,
+          "target_year": "2024-25",
+          "link_status": "proposed",
+          "provenance": { "page": 7, "quote": "reduce chronic absenteeism among our SED students from 31.4% to 22%", "confidence": 0.92 }
+        }
+      ],
+      "actions": [
+        {
+          "action_id": "062271012345:spsa:2024-25:g1:a1.1",
+          "action_number": "1.1",
+          "strategy_text": "Hire two full-time attendance intervention specialists to run tiered attendance supports.",
+          "category_id": "staffing",
+          "budgeted_amount": 180000.0,
+          "funding_source_raw": "LCFF Supplemental",
+          "funding_source_id": "lcff_supplemental",
+          "fte": 2.0,
+          "role_type": "attendance_specialist",
+          "is_district_provided": false,
+          "metric_links": [
+            {
+              "raw_metric_text": "chronic absenteeism rate",
+              "proposed_metric_id": "chronic_absenteeism_rate",
+              "target_group_id": "all",
+              "direction": "decrease",
+              "baseline_value": null,
+              "baseline_year": null,
+              "target_value": null,
+              "target_year": null,
+              "link_status": "proposed",
+              "provenance": { "page": 8, "quote": "attendance specialists will focus on lowering chronic absenteeism", "confidence": 0.78 }
+            }
+          ],
+          "provenance": { "page": 8, "quote": "Action 1.1: Hire two FTE attendance intervention specialists", "confidence": 0.95 }
+        }
+      ],
+      "provenance": { "page": 6, "quote": "Goal 1: All students will read at grade level and attend school regularly", "confidence": 0.9 }
+    }
+  ],
+  "unresolved": [
+    "Page 12 lists a 'Panorama SEL screener growth' target with no baseline or numeric goal — no conformed metric yet."
+  ],
+  "source": {
+    "file": "gs://school-improvement-501916-raw/raw/ca/districts/0622710/sip/062271012345_spsa_2024-25.pdf",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "page_count": 24,
+    "extracted_by": "claude-opus-4-8",
+    "extracted_at": "2026-07-13T00:00:00Z"
+  },
+  "review_status": "draft",
+  "reviewer": null
+}

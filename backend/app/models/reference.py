@@ -41,13 +41,19 @@ class TenantMembership(Base):
 # Core dimensions
 # --------------------------------------------------------------------------- #
 class DimSchool(Base):
-    """Current-snapshot school dimension. school_id = NCES nationally (CDS in CA)."""
+    """Current-snapshot school dimension.
+
+    Identity keys on the **federal NCES** ids; state-native codes are attributes + a
+    crosswalk (TARGET_SCHEMA §identity). `school_id` = 12-digit NCES school id (ncessch),
+    `district_id` = 7-digit NCES LEAID. The CA CDS codes ride alongside as `state_*_id`.
+    """
     __tablename__ = "dim_school"
-    school_id: Mapped[str] = mapped_column(Text, primary_key=True)   # NCES id (CDS-derived in CA)
-    cds_code: Mapped[str | None] = mapped_column(Text)               # CA state-native code
+    school_id: Mapped[str] = mapped_column(Text, primary_key=True)   # NCES school id (ncessch, 12-digit)
+    district_id: Mapped[str | None] = mapped_column(Text)            # NCES LEAID (7-digit)
+    state_school_id: Mapped[str | None] = mapped_column(Text)        # state-native school code (CA 14-digit CDS)
+    state_district_id: Mapped[str | None] = mapped_column(Text)      # state-native district code (CA CDS district)
     school_year: Mapped[str | None] = mapped_column(Text)           # snapshot year (attribute, not key)
     school_name: Mapped[str | None] = mapped_column(Text)
-    district_id: Mapped[str | None] = mapped_column(Text)
     district_name: Mapped[str | None] = mapped_column(Text)
     county_name: Mapped[str | None] = mapped_column(Text)
     school_level: Mapped[str | None] = mapped_column(Text)          # ES|MS|HS|Other
