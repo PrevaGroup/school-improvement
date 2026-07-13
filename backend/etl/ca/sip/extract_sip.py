@@ -310,13 +310,25 @@ def extract_bytes(
 
     import anthropic
 
+    # A forced tool call, NOT structured outputs (messages.parse). Structured outputs
+    # compile the schema into a constrained-decoding grammar; this plan schema is deep
+    # enough that the grammar exceeds Anthropic's size limit ("compiled grammar is too
+    # large"). A non-strict tool passes the schema as guidance (no grammar), and we
+    # validate the returned input with Pydantic ourselves.
+    tool = {
+        "name": "emit_plan",
+        "description": "Return the extracted school-improvement plan as structured data.",
+        "input_schema": PlanExtraction.model_json_schema(),
+    }
+
     # Key: ANTHROPIC_API_KEY (dev) else Secret Manager `anthropic-api-key` via ADC.
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key_value)
     try:
-        response = client.messages.parse(
+        response = client.messages.create(
             model=MODEL_ID,
             max_tokens=max_tokens,
-            output_format=PlanExtraction,
+            tools=[tool],
+            tool_choice={"type": "tool", "name": "emit_plan"},
             messages=[
                 {
                     "role": "user",
@@ -355,12 +367,19 @@ def extract_bytes(
         raise RuntimeError(f"model refused: {getattr(response, 'stop_details', None)}")
     if response.stop_reason == "max_tokens":
         raise RuntimeError(
-            "output truncated at max_tokens — raise --max-tokens (and switch to streaming)"
+            "output truncated at max_tokens — raise --max-tokens (e.g. --max-tokens 32000)"
         )
 
-    px = response.parsed_output
-    if px is None:
-        raise RuntimeError("structured parse failed; response.parsed_output is None")
+    tool_use = next(
+        (b for b in response.content if b.type == "tool_use" and b.name == "emit_plan"),
+        None,
+    )
+    if tool_use is None:
+        raise RuntimeError("model did not return the emit_plan tool call")
+    try:
+        px = PlanExtraction.model_validate(tool_use.input)
+    except Exception as e:  # pydantic ValidationError
+        raise RuntimeError(f"tool output failed schema validation: {e}")
 
     usage = response.usage
     print(
