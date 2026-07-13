@@ -188,7 +188,10 @@ def assemble_plan(
     goals: list[ExtractedGoal] = []
     for gi, g in enumerate(px.goals, start=1):
         goal_number = g.goal_number or str(gi)
-        goal_id = build_goal_id(plan_id, goal_number)
+        # Key on the global sequence, NOT goal_number: a plan can restart numbering per
+        # layer (strategic 1-4 AND accountability 1-4), so goal_number is not unique
+        # within a plan and would collide on load. goal_number stays as the printed label.
+        goal_id = build_goal_id(plan_id, f"n{gi}")
         actions: list[ExtractedAction] = []
         for ai, a in enumerate(g.actions, start=1):
             action_number = a.action_number or f"{goal_number}.{ai}"
