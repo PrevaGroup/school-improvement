@@ -34,6 +34,7 @@ import argparse
 import base64
 import hashlib
 import pathlib
+import re
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -90,6 +91,11 @@ class ActionExtraction(BaseModel):
 
 class GoalExtraction(BaseModel):
     goal_number: Optional[str] = Field(None, description="label as printed, e.g. '1'")
+    goal_type: Optional[str] = Field(
+        None,
+        description="short snake_case label for the goal's role in the plan structure "
+        "(district-specific, free text), e.g. strategic_5yr | subject | accountability_measure",
+    )
     statement: str = Field(..., description="the goal statement / narrative")
     lcff_priority: Optional[int] = Field(None, description="LCFF state priority 1-8 (LCAP only), else null")
     target_group_id: Optional[str] = Field(None, description="conformed group_id or null")
@@ -118,20 +124,26 @@ class PlanExtraction(BaseModel):
 # --------------------------------------------------------------------------- #
 # Prompt
 # --------------------------------------------------------------------------- #
-def build_instruction(plan_year_hint: Optional[str]) -> str:
+def build_instruction(plan_year_hint: Optional[str], context: Optional[str] = None) -> str:
     metrics = ", ".join(CONFORMED_METRIC_IDS)
     groups = ", ".join(CONFORMED_GROUP_IDS)
     year_line = (
         f"The plan year is {plan_year_hint} unless the document clearly states otherwise."
         if plan_year_hint
-        else "Read the plan year (e.g. '2024-25') from the document."
+        else "Read the plan year from the document."
+    )
+    context_block = (
+        f"\nDistrict/format context (authoritative for structure and goal_type labels):\n{context}\n"
+        if context
+        else ""
     )
     return f"""You are extracting a California school-improvement plan (SPSA / LCAP / CSI / TSI / ATSI) from the attached PDF into structured JSON for human review.
 
 Rules:
 - Extract every goal, and under each goal every action/strategy. Do not summarize or merge.
+- Classify each goal with a short snake_case `goal_type` naming its role in this plan's structure. This varies by district — if the context below defines the district's scheme, use those labels. Common California SPSA layers: strategic_5yr (multi-year board targets), subject (current-year ELA/Math/EL/climate goals), accountability_measure (numbered budget/intervention measures).
 - For EVERY extracted fact (each goal, action, and metric link), fill `provenance` with the 1-based `page` and a VERBATIM `quote` copied from that page — no paraphrase. Set `confidence` in [0,1].
-- {year_line}
+- {year_line} Use the compact 'YYYY-YY' format (e.g. '2025-26').
 - For measurable targets (baselines, targets, "increase X from A% to B%"), create a `metric_links` entry:
   - `raw_metric_text`: the metric exactly as written in the plan.
   - `proposed_metric_id`: map to ONE of these conformed ids when it clearly matches, else null: {metrics}.
@@ -139,9 +151,10 @@ Rules:
   - `direction`: "increase" or "decrease" (the desired movement), or null.
   - Fill baseline_value/baseline_year/target_value/target_year when the plan states numbers; else null.
   - Always set `link_status` to "proposed".
-- Identity: fill `state_school_id` / `state_district_id` only if the CDS codes are actually printed. Fill `school_id` (NCES) only if printed. Otherwise null — do NOT guess.
+- Identity (IMPORTANT): the SPSA title/cover page names the school and lists the 14-digit County-District-School (CDS) code — read them. Put the CDS in `state_school_id` and its 7-digit prefix in `state_district_id`. Fill `school_id` (NCES) only if an NCES id is actually printed. Never guess a code; if truly absent, null.
+- If the plan states an approval/adoption date (e.g. "approved ... on 11/17/2025"), set `adopted_date` (YYYY-MM-DD) and keep `status` to a short label, not the whole sentence.
 - Anything you see but cannot confidently place goes in `unresolved` as a short note.
-
+{context_block}
 Return only the structured object."""
 
 
@@ -169,7 +182,8 @@ def assemble_plan(
     extracted_at: str,
 ) -> ExtractedPlan:
     school_scope = _scope_school_id(px, school_id_nces)
-    plan_id = build_plan_id(district_id, school_scope, px.plan_type.value, px.plan_year)
+    plan_year = _normalize_year(px.plan_year)
+    plan_id = build_plan_id(district_id, school_scope, px.plan_type.value, plan_year)
 
     goals: list[ExtractedGoal] = []
     for gi, g in enumerate(px.goals, start=1):
@@ -198,6 +212,7 @@ def assemble_plan(
             ExtractedGoal(
                 goal_id=goal_id,
                 goal_number=goal_number,
+                goal_type=g.goal_type,
                 statement=g.statement,
                 lcff_priority=g.lcff_priority,
                 target_group_id=g.target_group_id,
@@ -214,7 +229,7 @@ def assemble_plan(
         state_school_id=px.state_school_id,
         state_district_id=px.state_district_id,
         plan_type=px.plan_type,
-        plan_year=px.plan_year,
+        plan_year=plan_year,
         status=px.status,
         adopted_date=px.adopted_date,
         total_budget=px.total_budget,
@@ -235,6 +250,14 @@ def assemble_plan(
 # --------------------------------------------------------------------------- #
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _normalize_year(y: Optional[str]) -> str:
+    """'2025-2026' / '2025/26' / '2025-26' -> '2025-26' (compact YYYY-YY)."""
+    if not y:
+        return y or ""
+    m = re.match(r"\s*(\d{4})\D+(\d{2,4})", y)
+    return f"{m.group(1)}-{m.group(2)[-2:]}" if m else y.strip()
 
 
 def count_pages(data: bytes) -> int:
@@ -273,6 +296,7 @@ def extract_bytes(
     school_id_nces: Optional[str],
     plan_year_hint: Optional[str],
     gs_uri: Optional[str] = None,
+    context: Optional[str] = None,
     max_tokens: int = 16000,
     dry_run: bool = False,
 ) -> ExtractedPlan:
@@ -286,7 +310,7 @@ def extract_bytes(
     sha = sha256_hex(pdf_bytes)
     pages = count_pages(pdf_bytes)
     uri = gs_uri or default_uri
-    instruction = build_instruction(plan_year_hint)
+    instruction = build_instruction(plan_year_hint, context)
     extracted_at = datetime.now(timezone.utc).isoformat()
 
     print(
@@ -409,6 +433,7 @@ def extract(
     school_id_nces: Optional[str],
     plan_year_hint: Optional[str],
     gs_uri: Optional[str],
+    context: Optional[str] = None,
     max_tokens: int = 16000,
     dry_run: bool = False,
 ) -> ExtractedPlan:
@@ -422,6 +447,7 @@ def extract(
         school_id_nces=school_id_nces,
         plan_year_hint=plan_year_hint,
         gs_uri=gs_uri,
+        context=context,
         max_tokens=max_tokens,
         dry_run=dry_run,
     )
@@ -439,9 +465,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--school-id", default=None, help="federal NCES school id (12-digit), if known")
     ap.add_argument("--plan-year", default=None, help="school-year hint, e.g. 2024-25")
     ap.add_argument("--gs-uri", default=None, help="gs:// URI to record as the canonical source")
+    ap.add_argument("--context", default=None, help="district/format context injected into the prompt (goal_type scheme, structure notes)")
+    ap.add_argument("--context-file", type=Path, default=None, help="read --context from a file (overrides --context)")
     ap.add_argument("--max-tokens", type=int, default=16000)
     ap.add_argument("--dry-run", action="store_true", help="do everything except the API call")
     args = ap.parse_args(argv)
+
+    context = args.context
+    if args.context_file:
+        context = args.context_file.read_text(encoding="utf-8")
 
     try:
         plan = extract(
@@ -450,6 +482,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             school_id_nces=args.school_id,
             plan_year_hint=args.plan_year,
             gs_uri=args.gs_uri,
+            context=context,
             max_tokens=args.max_tokens,
             dry_run=args.dry_run,
         )

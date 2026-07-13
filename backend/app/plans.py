@@ -35,6 +35,7 @@ async def extract_plan(
     school_id: str | None = Form(None, description="federal NCES school id (12-digit), if known"),
     plan_year: str | None = Form(None, description="school-year hint, e.g. 2024-25"),
     gs_uri: str | None = Form(None, description="gs:// URI to record as the canonical source"),
+    context: str | None = Form(None, description="district/format context injected into the prompt"),
     tenant_id: str = Depends(get_current_tenant),
 ) -> ExtractedPlan:
     if file.content_type and file.content_type not in _PDF_TYPES:
@@ -57,6 +58,7 @@ async def extract_plan(
             school_id_nces=school_id,
             plan_year_hint=plan_year,
             gs_uri=gs_uri,
+            context=context,
         )
     except RuntimeError as e:  # model refusal / truncation / parse failure
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"extraction failed: {e}")

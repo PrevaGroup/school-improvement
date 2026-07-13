@@ -110,6 +110,11 @@ class ExtractedAction(BaseModel):
 class ExtractedGoal(BaseModel):
     goal_id: str = Field(..., description="deterministic; see build_goal_id()")
     goal_number: Optional[str] = Field(None, description="label as printed, e.g. 'Goal 1'")
+    goal_type: Optional[str] = Field(
+        None,
+        description="flexible, district-specific label for the goal's role in the plan "
+        "structure (free text, not an enum), e.g. strategic_5yr | subject | accountability_measure",
+    )
     statement: str = Field(..., description="the goal statement / narrative")
     lcff_priority: Optional[int] = Field(None, ge=1, le=8, description="LCFF state priority 1-8 (LCAP only)")
     target_group_id: Optional[str] = Field(None, description="dim_student_group.group_id")
