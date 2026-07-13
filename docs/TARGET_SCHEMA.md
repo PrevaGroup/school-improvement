@@ -41,13 +41,32 @@ raw ──▶ staging ──┬─▶ star ─────┐
   names; `marts` tables are plain or `mart_`-prefixed. The prefix signals dimensional role;
   outside the star it would mislead.
 - **School identity** is `school_id` — nationally the **NCES school ID**; state-native codes
-  (California CDS, etc.) are attributes plus a crosswalk. *The current California build
-  populates `school_id` from the 14-digit CDS.*
+  (California CDS) are attributes (`state_school_id` / `state_district_id`) plus a crosswalk.
+  *(The CA build originally loaded `school_id` from the 14-digit CDS; migration
+  `0002_nces_rekey` re-keys it to the NCES Fed ID via the directory crosswalk, retaining the
+  CDS as `state_school_id`.)*
 - **Time** is a dimension (`dim_period`), not a column. See §4.2.
 - **Tenancy**: tenant-scoped rows carry `tenant_id` + `visibility`; defaults follow
   `data_origin` (state → public, local → private). See §7.
 - **Rates vs counts**: rate/percentage measures are non-additive — never summed across rows.
   Store consistently (percent 0–100).
+
+### 1.3 Implementation status
+
+This document is the **target** design; the body specifies the destination, not the current
+database. Build status (2026-07):
+
+| Area | Status | Notes |
+|---|---|---|
+| Layer schemas (`star.` / `augment.` / `marts.`) | **Planned** | All tables currently live in the default `public` schema; DDL below is namespaced for the target. |
+| `fact_metric` + conformed `dim_*` (metric, student_group, period, instrument, peer_group, school) + crosswalk | **Built** | 8 public metrics loaded (~960k rows). |
+| Identity on NCES `school_id` (§1.2, §4.4) | **Built** | Re-keyed CDS→NCES via `0002_nces_rekey`; CDS kept as `state_school_id` / `state_district_id`. |
+| Tenancy + RLS: `dim_tenant` / `tenant_scope` / `tenant_membership`, `FORCE` RLS (§7) | **Built** | Consortium / `shared` read-cascade only partially implemented. |
+| `ref_benchmark` + benchmark/derived `fact_metric` columns (§4.9) | **Planned** | Columns exist; not yet populated (benchmarking step unbuilt). |
+| Operational event facts (§4.3), `dim_school_calendar`, `ref_calendar_event` | **Planned** | Student-grained facts deferred. |
+| Plan core `plan` / `plan_goal` / `plan_action` (§5.1) | **Built (minimal)** | Loaded via the SIP extractor; one linked metric per goal/action. |
+| Provenance & bridges: `doc_chunk`, `bridge_action_metric`, `bridge_action_program`, `plan_finding` (§5.2) | **Planned** | The SIP staging JSON captures provenance + multi-metric links; the DB tables to hold them are unbuilt. |
+| `marts` layer (§6) | **Planned** | None built. |
 
 ---
 
@@ -163,7 +182,7 @@ hardcoded date logic: `is_instructional_day, term, day_in_session, is_day_before
 is_day_after_holiday, is_state_testing_window, is_early_release`. Built by joining the
 district calendar to the public `ref_calendar_event` reference (§4.9).
 
-### 4.3 Operational event facts (atomic)
+### 4.3 Operational event facts (atomic) — *planned, not yet built*
 
 Progress and early-warning analysis at the **student** grain. Atomic, SIS-sourced,
 `data_origin='local_sis'` → always tenant-private (FERPA). Each is at its *natural* grain:
@@ -182,11 +201,12 @@ track"; annual periods answer compliance.**
 
 One row per school per year. Source: the public schools directory.
 
-Key columns: `school_id` (NCES; CDS-derived in CA), `cds_code` and other state-native ids,
-`school_name`, `district_id`/`district_name`, `county_name`, `school_level`, grade span,
+Key columns: `school_id` (12-digit NCES Fed ID; from the CDS→NCES crosswalk in CA),
+`state_school_id` (14-digit CA CDS) / `state_district_id`, `school_name`,
+`district_id` (7-digit NCES LEAID) / `district_name`, `county_name`, `school_level`, grade span,
 charter/Title I/DASS/ESSA-assistance flags, `locale`, `enroll_total`, student-composition
-percentages (feed peer grouping), lat/long, `peer_group_id`. Rolls up to `dim_district` /
-`dim_county` on the identity hierarchy.
+percentages (feed peer grouping), lat/long, `peer_group_id`. Roll-ups to `dim_district` /
+`dim_county` on the identity hierarchy are *planned* (not yet built).
 
 ### 4.5 `dim_metric` — the metric registry
 
@@ -357,7 +377,14 @@ Plan baselines/targets live here, not in `fact_metric` — `linked_metric_id` re
 `dim_metric` (the definition), so a local metric needs only a registry entry, not a fact row.
 Where a plan-asserted baseline and an authoritative value both exist, the gap is a finding.
 
-### 5.2 Provenance & bridges
+*Built:* `plan` / `plan_goal` / `plan_action` (minimal — one linked metric per goal/action,
+loaded by the SIP extractor). *Planned:* `plan_finding`, and the `source_chunk_id` /
+`target_metric_id` columns that depend on the §5.2 bridge/provenance tables.
+
+### 5.2 Provenance & bridges — *planned, not yet built*
+
+> The SIP staging JSON (`etl/ca/sip/schema.py`) already carries page-level provenance and
+> multi-metric link proposals; these DB tables to persist them are the next augment step.
 
 - `augment.doc_chunk` — the source spans behind every extracted value (`plan_id, page,
   section, text, embedding`), for citation and retrieval.
@@ -373,7 +400,7 @@ entities.
 
 ---
 
-## 6. Layer: `marts`
+## 6. Layer: `marts` — *planned, not yet built*
 
 The serving/semantic layer: purpose-built, opinionated tables that encode agreed definitions
 once, so applications and agents read a consistent foundation instead of re-deriving from
@@ -500,9 +527,10 @@ makes the GUC binding safe and aligns with the mart-coverage goal (§6.4).
 
 Managed identity simplifies authentication but does not replace RLS. **IAM is resource-level;
 RLS is row-level** — IAM cannot filter the public/private row mix. The backend authenticates to
-Cloud SQL via IAM DB auth + Auth Proxy (no DB passwords) as a service account; Google Sign-In
-(OIDC) yields the verified user → tenant. Because the backend is one service account, the
-typed-tools + `SET LOCAL` pattern is the natural default. Cloud SQL grants no full superuser, so
+Cloud SQL via the Auth Proxy (or the Cloud SQL Python Connector) as a service account using ADC,
+with the DB-role passwords held in **Secret Manager** (IAM DB auth is a later hardening option);
+**Google Cloud Identity Platform** (OIDC) yields the verified user → tenant. Because the backend
+is one service account, the typed-tools + `SET LOCAL` pattern is the natural default. Cloud SQL grants no full superuser, so
 run the public/state loader as the **table owner** (owners bypass RLS unless `FORCE`), not a
 `BYPASSRLS` role.
 
