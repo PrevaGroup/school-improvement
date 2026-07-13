@@ -312,27 +312,44 @@ def extract_bytes(
 
     # Key: ANTHROPIC_API_KEY (dev) else Secret Manager `anthropic-api-key` via ADC.
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key_value)
-    response = client.messages.parse(
-        model=MODEL_ID,
-        max_tokens=max_tokens,
-        output_format=PlanExtraction,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": b64,
+    try:
+        response = client.messages.parse(
+            model=MODEL_ID,
+            max_tokens=max_tokens,
+            output_format=PlanExtraction,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": b64,
+                            },
                         },
-                    },
-                    {"type": "text", "text": instruction},
-                ],
-            }
-        ],
-    )
+                        {"type": "text", "text": instruction},
+                    ],
+                }
+            ],
+        )
+    except anthropic.APIStatusError as e:
+        # Turn Anthropic's HTTP errors into a clean, actionable message (no stack trace).
+        detail = getattr(e, "message", str(e))
+        hint = ""
+        low = detail.lower()
+        if "credit balance" in low:
+            hint = " → add credits at console.anthropic.com (Plans & Billing)"
+        elif e.status_code == 401:
+            hint = " → check the anthropic-api-key secret / ANTHROPIC_API_KEY"
+        elif e.status_code == 429:
+            hint = " → rate limited; retry shortly"
+        raise RuntimeError(
+            f"Anthropic API {e.status_code}: {detail} (request_id={getattr(e, 'request_id', None)}){hint}"
+        )
+    except anthropic.APIConnectionError as e:
+        raise RuntimeError(f"Anthropic API connection error: {e}")
 
     if response.stop_reason == "refusal":
         raise RuntimeError(f"model refused: {getattr(response, 'stop_details', None)}")
@@ -417,6 +434,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     except (FileNotFoundError, OSError) as e:
         print(f"error: cannot read {args.pdf}: {e}", file=sys.stderr)
         return 2
+    except RuntimeError as e:  # Anthropic API error, refusal, truncation, parse failure
+        print(f"error: {e}", file=sys.stderr)
+        return 1
 
     basename = args.pdf.rstrip("/").rsplit("/", 1)[-1]
     out = args.out or Path(basename).with_suffix(".json")
