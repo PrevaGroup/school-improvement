@@ -14,9 +14,12 @@ Pipeline per PDF:
       → extract_sip.extract(..., school_id_nces=<NCES>, context=…)
       → gs://…/sip/extracted/<School>.json
 
+--district-id is matched against dim_school.district_id, which in the deployed DB is the
+7-digit CDS district (Long Beach = 1964725), NOT the NCES LEAID in the GCS path (0622710).
+
 Run in Cloud Shell (DB access via the loaders' engine + ADC), from backend/:
     python -m etl.ca.sip.batch_extract \
-      --district-id 0622710 \
+      --district-id 1964725 \
       --pdf-prefix gs://school-improvement-501916-raw/raw/ca/districts/0622710/sip \
       --out-prefix gs://school-improvement-501916-raw/raw/ca/districts/0622710/sip/extracted \
       --plan-year 2025-26 \
@@ -54,9 +57,12 @@ def _norm(s: Optional[str]) -> str:
 
 
 def load_schools(conn, district_id: str) -> list[dict]:
+    # NOTE: the deployed dim_school keys on the 14-digit CDS (school_id == cds_code),
+    # NOT federal NCES as schema.py/docs describe — a known drift. district_id here is
+    # the 7-digit CDS district (e.g. Long Beach = 1964725, not NCES 0622710).
     rows = conn.execute(
         text(
-            "SELECT school_id, state_school_id, school_name, district_name, school_level "
+            "SELECT school_id, cds_code, school_name, district_name, school_level "
             "FROM dim_school WHERE district_id = :d"
         ),
         {"d": district_id},
@@ -104,8 +110,7 @@ def resolve(name: str, by_norm: dict[str, list[dict]]) -> Optional[dict]:
 
 def build_context(school: dict, baselines: dict[str, tuple[float, str]], district_context: Optional[str]) -> str:
     parts = [
-        f'This plan is for {school["school_name"]} — CDS {school["state_school_id"]}, '
-        f'NCES {school["school_id"]}'
+        f'This plan is for {school["school_name"]} (CDS {school.get("cds_code")})'
         + (f', {school["district_name"]}' if school.get("district_name") else "")
         + ". Use this school identity."
     ]
@@ -137,7 +142,7 @@ def list_pdfs(prefix: str) -> list[tuple[str, str]]:
 
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Batch-extract a district's SPSA PDFs, resolving identity from dim_school.")
-    ap.add_argument("--district-id", required=True, help="federal NCES LEAID (7-digit), e.g. 0622710")
+    ap.add_argument("--district-id", required=True, help="dim_school.district_id — deployed DB uses the 7-digit CDS district (Long Beach = 1964725)")
     ap.add_argument("--pdf-prefix", required=True, help="gs:// prefix (or local dir) holding the source PDFs")
     ap.add_argument("--out-prefix", required=True, help="gs:// prefix (or local dir) to write <school>.json")
     ap.add_argument("--plan-year", default=None, help="school-year hint, e.g. 2025-26")
@@ -177,7 +182,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             unmatched.append(fname)
             print(f"[batch] UNMATCHED  {fname}", file=sys.stderr)
             continue
-        print(f"[batch] {fname}  ->  {school['school_name']} (NCES {school['school_id']})", file=sys.stderr)
+        print(f"[batch] {fname}  ->  {school['school_name']} (CDS {school['school_id']})", file=sys.stderr)
         if args.dry_run:
             matched.append((fname, school["school_id"]))
             continue
