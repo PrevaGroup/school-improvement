@@ -172,7 +172,7 @@ function Diagnostic({ s, peers, level }) {
       ${peers === null ? html`<div class="muted dots">loading peers</div>`
         : (peers.length ? html`
         <div class="tbl-wrap"><table class="tbl">
-          <thead><tr><th>#</th><th>School</th><th class="r">Enroll</th><th class="r">Econ-dis</th><th class="r">EL</th><th class="r">SWD</th><th>Locale</th><th class="r">Dist</th></tr></thead>
+          <thead><tr><th>#</th><th>School</th><th class="r">Enroll</th><th class="r">Econ-dis</th><th class="r">EL</th><th class="r">SWD</th><th>Locale</th><th class="r">Chronic abs</th></tr></thead>
           <tbody>
             ${peers.map((p, i) => html`<tr key=${i}>
               <td>${p.rank}</td>
@@ -182,11 +182,11 @@ function Diagnostic({ s, peers, level }) {
               <td class="r">${fmtPct(p.pct_el)}</td>
               <td class="r">${fmtPct(p.pct_swd)}</td>
               <td>${p.locale ?? "—"}</td>
-              <td class="r">${Number(p.distance).toFixed(2)}</td>
+              <td class="r">${p.chronic_absenteeism_rate == null ? "—" : p.chronic_absenteeism_rate + "%"}</td>
             </tr>`)}
           </tbody>
         </table></div>
-        <div class="muted" style=${{ fontSize: "11px", marginTop: "6px" }}>Dist = demographic distance (lower = more similar), on enrollment · econ-disadv · EL · SWD · locale.</div>`
+        <div class="muted" style=${{ fontSize: "11px", marginTop: "6px" }}>Ranked by demographic similarity (enrollment · econ-disadv · EL · SWD · locale). Chronic abs = each peer's latest chronic-absenteeism rate.</div>`
         : html`<div class="muted">No peer set for this school.</div>`)}
     </div>`;
 }

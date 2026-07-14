@@ -173,13 +173,35 @@ def fetch_like_schools(db: Session, school_id: str, k: int = 50, school_year: st
         ),
         {"sid": school_id, "yr": yr, "k": k},
     ).mappings().all()
+    # Attach each peer's chronic-absenteeism rate — DISPLAY ONLY. The matching stays
+    # outcome-free (D1); this is just context so "similar schools, different outcomes" shows.
+    peer_ids = [p["peer_school_id"] for p in peers]
+    chronic: dict[str, tuple[float, str]] = {}
+    if peer_ids:
+        stmt = text(
+            "SELECT f.school_id, f.value, dp.school_year "
+            "FROM fact_metric f JOIN dim_period dp ON f.period_id = dp.period_id "
+            "WHERE f.metric_id = :m AND f.student_group_id = 'all' AND f.value IS NOT NULL "
+            "AND f.school_id IN :ids"
+        ).bindparams(bindparam("ids", expanding=True))
+        for r in db.execute(stmt, {"m": ATT_METRIC, "ids": peer_ids}).mappings():
+            cur = chronic.get(r["school_id"])
+            y = r["school_year"] or ""
+            if cur is None or y > cur[1]:
+                chronic[r["school_id"]] = (float(r["value"]), y)
+    peers_out = []
+    for p in peers:
+        d = dict(p)
+        ch = chronic.get(p["peer_school_id"])
+        d["chronic_absenteeism_rate"] = ch[0] if ch else None
+        peers_out.append(d)
     return {
         "school_id": school_id,
         "school_name": self_row["school_name"] if self_row else None,
         "school_level": self_row["school_level"] if self_row else None,
         "school_year": yr,
         "peer_count": len(peers),
-        "peers": [dict(p) for p in peers],
+        "peers": peers_out,
     }
 
 
