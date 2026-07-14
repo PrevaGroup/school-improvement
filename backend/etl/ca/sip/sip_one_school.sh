@@ -77,11 +77,10 @@ case "$CMD" in
     yr=();  [[ -n "$PLAN_YEAR" ]]    && yr=(--plan-year "$PLAN_YEAR")
     dist=(); [[ -n "$DISTRICT_ID" ]] && dist=(--district-id "$DISTRICT_ID")
 
-    note "dry-run first (reads PDF, hashes, counts pages — no token spend)…"
-    python -m etl.ca.sip.extract_sip "$PDF" "${dist[@]}" "${yr[@]}" "${ctx[@]}" \
-      --out "$OUT" --dry-run "${EXTRA[@]}"
-
-    note "dry-run ok. Running the real (billed) extraction…"
+    # The extractor reads + hashes + counts pages and enforces the size cap BEFORE the billed
+    # API call, so it already fails fast on an unreadable/oversize PDF. No separate --dry-run
+    # pass (which would re-download the whole PDF); use `check` for a no-spend plumbing test.
+    note "extracting (reads the PDF once, then the billed API call)…"
     python -m etl.ca.sip.extract_sip "$PDF" "${dist[@]}" "${yr[@]}" "${ctx[@]}" \
       --out "$OUT" "${EXTRA[@]}"
 
