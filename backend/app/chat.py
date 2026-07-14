@@ -19,7 +19,12 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_db_public
-from .marts import fetch_attendance_plans, fetch_like_schools, fetch_peer_benchmark
+from .marts import (
+    fetch_attendance_plans,
+    fetch_like_schools,
+    fetch_metric_by_subgroup,
+    fetch_peer_benchmark,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -40,6 +45,7 @@ Always call a tool for real data; never invent schools, numbers, budgets, plan t
 - query_school_attendance_plans — attendance goals + funded strategies (budgets, funding sources, verbatim plan text + page cites) for these schools, optionally one school.
 - find_similar_schools — the demographically-matched peer schools (statewide, same level) for a school. Answers "who is X like?".
 - compare_to_peers — a school's actual metric value (default: chronic absenteeism) vs its peer-group distribution, with `peer_performance_percentile` where HIGHER always means doing better than peers.
+- query_subgroup_metrics — a school's metric DISAGGREGATED BY STUDENT SUBGROUP (race/ethnicity, gender, English learners, students with disabilities, socioeconomically disadvantaged, foster, homeless). Use this for any "by subgroup", equity, or "which groups are behind" question; each subgroup carries its `gap_vs_all`.
 
 Ground every claim in tool output. When comparing performance, lead with the peer-relative finding via `peer_performance_percentile` (e.g. "worse than ~70% of similar schools"), then cite concrete strategies/budgets/quotes.
 
@@ -102,6 +108,27 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "school_name": {"type": "string", "description": "the school, by (partial) name."},
+                "metric_id": {"type": "string", "description": "conformed metric id (default chronic_absenteeism_rate)."},
+            },
+            "required": ["school_name"],
+        },
+    },
+    {
+        "name": "query_subgroup_metrics",
+        "description": (
+            "One school's metric BROKEN DOWN BY STUDENT SUBGROUP — race/ethnicity, "
+            "gender, English learners, students with disabilities, socioeconomically "
+            "disadvantaged, foster, homeless, migrant. Returns each subgroup's value, its "
+            "gap vs. All Students, and value_status (a suppressed value is privacy-withheld for "
+            "small n — UNKNOWN, not 0). Use this for 'attendance for X by subgroup', 'which "
+            "groups are behind', or any equity/disaggregation question. Default metric is "
+            "chronic_absenteeism_rate; others: suspension_rate, expulsion_rate, grad_rate_acgr, "
+            "college_going_rate, stability_rate, enrollment."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "school_name": {"type": "string", "description": "the school, by (partial) name, e.g. 'Reid'."},
                 "metric_id": {"type": "string", "description": "conformed metric id (default chronic_absenteeism_rate)."},
             },
             "required": ["school_name"],
@@ -187,6 +214,11 @@ def _run_tool(name: str, ti: dict, db: Session, school_level: str) -> dict:
             bench["value_status"] = ("this school's value for this metric is not available (it may be "
                                      "privacy-suppressed for small enrollment) — treat as UNKNOWN, never 0.")
         return bench
+    if name == "query_subgroup_metrics":
+        school = _resolve_school(db, ti.get("school_name"), school_level)
+        if not school:
+            return {"error": f"no {school_level} school found matching '{ti.get('school_name')}' in the loaded districts"}
+        return fetch_metric_by_subgroup(db, school["school_id"], ti.get("metric_id") or "chronic_absenteeism_rate")
     return {"error": f"unknown tool: {name}"}
 
 

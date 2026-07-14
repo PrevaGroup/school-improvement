@@ -320,6 +320,103 @@ def fetch_peer_benchmark(db: Session, school_id: str, metric_id: str, school_yea
     }
 
 
+# --------------------------------------------------------------------------- #
+# Subgroup breakdown — the same metric disaggregated by student group.
+# fact_metric is already loaded at the school × period × metric × GROUP grain
+# (etl.ca._shared.load_metric_file writes every mapped ReportingCategory), so
+# this just stops filtering to student_group_id='all' and returns the fan-out.
+# --------------------------------------------------------------------------- #
+def fetch_metric_by_subgroup(
+    db: Session, school_id: str, metric_id: str = ATT_METRIC, school_year: str | None = None
+) -> dict:
+    """One school's metric disaggregated by student group (race, gender, EL, SWD, SES, ...).
+
+    Returns every student group that has a row for the latest year the metric is present, each
+    with its value, `value_status`, n_size, and `gap_vs_all` (subgroup − All Students, raw). A
+    suppressed/absent value is UNKNOWN (small-n privacy suppression), never 0 — `value_status`
+    says which, mirroring the DATA HONESTY contract the chat layer enforces.
+    """
+    meta = db.execute(
+        text("SELECT display_name, direction, unit FROM dim_metric WHERE metric_id = :m"),
+        {"m": metric_id},
+    ).mappings().first()
+    if not meta:
+        return {"error": f"unknown metric_id '{metric_id}'"}
+    # Latest year this metric actually reports a value at this school (subgroups share the period).
+    yr = school_year or db.execute(
+        text(
+            "SELECT max(p.school_year) FROM fact_metric f JOIN dim_period p ON f.period_id = p.period_id "
+            "WHERE f.school_id = :s AND f.metric_id = :m AND f.value IS NOT NULL"
+        ),
+        {"s": school_id, "m": metric_id},
+    ).scalar()
+    if not yr:
+        return {
+            "school_id": school_id, "metric_id": metric_id, "display_name": meta["display_name"],
+            "direction": meta["direction"], "school_year": None, "subgroups": [],
+            "note": "no data for this metric at this school (may not be collected at this level, or not loaded yet)",
+        }
+    rows = db.execute(
+        text(
+            "SELECT f.student_group_id, g.label, g.dimension, f.value, f.value_status, f.n_size "
+            "FROM fact_metric f "
+            "JOIN dim_period p ON f.period_id = p.period_id "
+            "JOIN dim_student_group g ON g.student_group_id = f.student_group_id "
+            "WHERE f.school_id = :s AND f.metric_id = :m AND p.school_year = :y "
+            "ORDER BY (g.dimension = 'total') DESC, g.dimension, g.student_group_id"
+        ),
+        {"s": school_id, "m": metric_id, "y": yr},
+    ).mappings().all()
+    out = subgroup_slice(rows)
+    return {
+        "school_id": school_id, "metric_id": metric_id, "display_name": meta["display_name"],
+        "direction": meta["direction"], "unit": meta["unit"], "school_year": yr,
+        **out,
+        "reading": (
+            "gap_vs_all is the raw (subgroup − All Students) difference; use `direction` to read "
+            "sign (for lower_better metrics a positive gap = the subgroup is doing WORSE). A null "
+            "value with value_status 'suppressed' is privacy-withheld for small n — UNKNOWN, not 0."
+        ),
+    }
+
+
+def subgroup_slice(rows: list[dict]) -> dict:
+    """Shape the per-group fact rows into the subgroup response (pure — no DB).
+
+    Detects the All Students value, then attaches each subgroup's raw `gap_vs_all`. A null value
+    (suppressed / not collected) stays null and gets no gap — never coerced to 0, so a
+    privacy-withheld group is never read as "zero absenteeism". Extracted from the query so the
+    gap/missingness logic is unit-testable without a database (cf. `attendance_slice`).
+    """
+    all_value = next(
+        (float(r["value"]) for r in rows if r["student_group_id"] == "all" and r["value"] is not None),
+        None,
+    )
+    subgroups = []
+    for r in rows:
+        v = float(r["value"]) if r["value"] is not None else None
+        subgroups.append({
+            "student_group_id": r["student_group_id"], "label": r["label"], "dimension": r["dimension"],
+            "value": v, "value_status": r["value_status"], "n_size": r["n_size"],
+            "gap_vs_all": (
+                round(v - all_value, 2)
+                if v is not None and all_value is not None and r["student_group_id"] != "all"
+                else None
+            ),
+        })
+    return {"all_students_value": all_value, "subgroup_count": len(subgroups), "subgroups": subgroups}
+
+
+@router.get("/subgroup-metrics")
+def subgroup_metrics_ep(
+    school_id: str,
+    metric_id: str = ATT_METRIC,
+    db: Session = Depends(get_db_public),
+) -> dict:
+    """One school's metric disaggregated by student group (default: chronic absenteeism)."""
+    return fetch_metric_by_subgroup(db, school_id, metric_id)
+
+
 @router.get("/like-schools")
 def like_schools_ep(school_id: str, k: int = 50, db: Session = Depends(get_db_public)) -> dict:
     """Schools most demographically similar to `school_id` (default k=50)."""

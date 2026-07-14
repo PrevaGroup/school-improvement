@@ -10,7 +10,7 @@ real attendance target sharing one set of strategies) must NOT miscount its shar
 attendance response, while its real attendance target is still surfaced. This is the Wilson HS
 case. Durable fix (structured tags at extraction): docs/design/plan-relevance-tagging.md.
 """
-from app.marts import attendance_slice
+from app.marts import attendance_slice, subgroup_slice
 
 
 def _link(raw: str, metric_id: str | None = None) -> dict:
@@ -94,3 +94,43 @@ def test_unrelated_goal_is_omitted():
         actions=[_action("Instructional coaching")],
     )
     assert attendance_slice({"goals": [goal]}) == []
+
+
+# --------------------------------------------------------------------------- #
+# subgroup_slice — the pure shaping half of fetch_metric_by_subgroup (no DB).
+# --------------------------------------------------------------------------- #
+def _grow(gid: str, dim: str, value, status="reported", n=100) -> dict:
+    return {"student_group_id": gid, "label": gid, "dimension": dim,
+            "value": value, "value_status": status, "n_size": n}
+
+
+def test_subgroup_slice_computes_gap_vs_all():
+    """Each subgroup gets a raw (value − All Students) gap; All Students itself gets none."""
+    rows = [_grow("all", "total", 20.0), _grow("race_black", "race", 32.0), _grow("race_white", "race", 12.5)]
+    out = subgroup_slice(rows)
+    assert out["all_students_value"] == 20.0
+    assert out["subgroup_count"] == 3
+    by_id = {s["student_group_id"]: s for s in out["subgroups"]}
+    assert by_id["all"]["gap_vs_all"] is None            # All Students isn't compared to itself
+    assert by_id["race_black"]["gap_vs_all"] == 12.0     # worse (lower_better metric): positive gap
+    assert by_id["race_white"]["gap_vs_all"] == -7.5
+
+
+def test_subgroup_slice_suppressed_value_stays_unknown():
+    """A suppressed subgroup keeps value=None and gets NO gap — never coerced to 0."""
+    rows = [_grow("all", "total", 20.0), _grow("foster", "program", None, status="suppressed", n=None)]
+    out = subgroup_slice(rows)
+    foster = next(s for s in out["subgroups"] if s["student_group_id"] == "foster")
+    assert foster["value"] is None
+    assert foster["value_status"] == "suppressed"
+    assert foster["gap_vs_all"] is None                  # no false "0% → same as everyone" claim
+
+
+def test_subgroup_slice_missing_all_row_yields_no_gaps():
+    """If the All Students value is absent, gaps are undefined (None), not computed off a subgroup."""
+    rows = [_grow("all", "total", None, status="suppressed"), _grow("race_hispanic", "race", 25.0)]
+    out = subgroup_slice(rows)
+    assert out["all_students_value"] is None
+    hisp = next(s for s in out["subgroups"] if s["student_group_id"] == "race_hispanic")
+    assert hisp["value"] == 25.0
+    assert hisp["gap_vs_all"] is None
