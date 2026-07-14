@@ -8,11 +8,11 @@ another machine). To keep that true, follow these rules.
 
 > **Stay inside one module per session, and depend only on `core` — never on another module.**
 
-A file in `backend/modules/<X>/` may import from:
+A file in a feature module `backend/<X>/` (e.g. `backend/likeschools/`) may import from:
 - `core` (the shared contract — star schema, db, security, config, vocab), and
-- its own module `backend/modules/<X>/`.
+- its own module `backend/<X>/`.
 
-It may **not** import from `backend/modules/<Y>/`. Modules talk to each other only through
+It may **not** import from another module `backend/<Y>/`. Modules talk to each other only through
 **database tables** (a produced table is a contract) or through `core`. If you think you need
 a cross-module import, stop — that's a design smell; raise it instead of wiring it.
 
@@ -41,8 +41,10 @@ human, don't fold it silently into a feature change.
 - `docs/MODULES.md` — the module registry: every module, what it owns, what it reads, current
   file locations, and reorg status. **Start here to find a feature's components.**
 - `ARCHITECTURE.md` — the logical model (5 data layers, trust boundary, pipelines).
-- `core/` — the shared contract (see above).
-- `backend/modules/<X>/` — feature modules (self-contained vertical slices).
+- `backend/core/` — the shared contract (see above).
+- `backend/<X>/` — feature modules, one folder each (e.g. `likeschools`, `sip`, `public_metrics`,
+  `plan_marts`, `chat`): self-contained vertical slices, sitting alongside `app/` and `etl/`
+  until the code they map is relocated.
 
 ## Reorg in progress
 

@@ -13,7 +13,8 @@ core                      the frozen contract — everything depends on it, chan
   ├─ conformed vocab      student groups, metric registry
   └─ migrations spine     the single Alembic history (ordering matters)
 
-backend/modules/<X>       swappable feature slices — depend ONLY on core, never on each other
+backend/<X>               swappable feature slices, one folder each (likeschools, sip,
+                          public_metrics, plan_marts, chat) — depend ONLY on core, never each other
   each owns: README.md · CLAUDE.md · its code · the DB tables it writes · tests
   modules integrate through TABLES (a produced table is the contract), not imports
 ```
@@ -38,6 +39,9 @@ layout. See each module's README for its component map, and the reorg checklist 
 
 ## Target physical layout
 
+Feature modules sit **directly under `backend/`** (honoring the existing `backend/likeschools/`),
+alongside `app/` and `etl/` during the transition — not nested in a new `backend/modules/` layer.
+
 ```
 backend/
   core/                     ← was app/{config,db,security}.py, app/models/{base,reference,tenant}.py
@@ -49,12 +53,11 @@ backend/
     CONTRACT.md               the tables + vocab modules are allowed to depend on
   app/
     main.py                 ← thin composition root: mount each module's router
-  modules/
-    public_metrics/         ← was etl/ca/*.py, _shared.py, seed_ca_dims.py
-    sip/                    ← was etl/ca/sip/*, app/plans.py, app/plan_loader.py, migration 0003
-    likeschools/            ← was likeschools/*.md, etl/peers/*, the 3 mart models, migration 0004
-    plan_marts/             ← was app/marts.py
-    chat/                   ← was app/chat.py
+  likeschools/              ← + etl/peers/*, the 3 mart models, migration 0004 (docs already here)
+  sip/                      ← was etl/ca/sip/*, app/plans.py, app/plan_loader.py, migration 0003
+  public_metrics/           ← was etl/ca/*.py, _shared.py, seed_ca_dims.py
+  plan_marts/               ← was app/marts.py (plan-content marts only)
+  chat/                     ← was app/chat.py
 frontend/                   ← React + Vite (not yet built)
 ```
 
@@ -73,16 +76,24 @@ branch label later only if it genuinely needs an independent deploy cadence.
 - [ ] `README.md` — component map + how-to-change runbook, reconciled to the code
 - [ ] `CLAUDE.md` — module scope + guardrails
 - [ ] `CONTRACT.md` — tables owned, tables/vocab read from core, migration revisions
-- [ ] code moved under `backend/modules/<X>/`, imports updated
+- [ ] code moved under `backend/<X>/`, imports updated
 - [ ] owned migration file(s) relocated + wired via `version_locations`
 - [ ] tests (at minimum a characterization test of current behavior)
 - [ ] boundary test passes (no import into another module)
 
 ## Status
 
+**Docs & scaffolding (done — no runtime code changed):**
 - [x] `CLAUDE.md` (repo rules) + this registry
-- [x] `likeschools` — README component map + module CLAUDE.md (docs; code not yet relocated)
+- [x] Scaffold folders with component-map READMEs: `backend/core/`, `backend/likeschools/`,
+      `backend/sip/`, `backend/public_metrics/`, `backend/plan_marts/`, `backend/chat/`
+- [x] `likeschools` — full README component map + module `CLAUDE.md`
+- [x] Reconciled the drifted design docs (status banners → code is source of truth)
+
+**Code relocation (NOT started — deferred until there's a test safety net and the prototype
+milestone is clear):**
 - [ ] `core/` carve-out
-- [ ] `likeschools` code relocation (decouple the 3 mart models from `core` `reference.py` first)
+- [ ] `likeschools` code relocation (first safe step: decouple the 3 mart models from `core`
+      `reference.py` — grep-confirmed only `build_peers.py` imports them)
 - [ ] remaining modules
-- [ ] cross-module boundary test
+- [ ] import smoke-test + cross-module boundary test

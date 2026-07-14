@@ -1,5 +1,10 @@
 # School Classification ("Schools Like You") — Concept
 
+> **⚠ STATUS — design doc, not current-state.** This captures the original *why* and dev
+> alternatives, which have drifted from what shipped. For what the system actually does, the
+> **source of truth is the code** (`backend/etl/peers/build_peers.py`) and the reconciled
+> **[`README.md`](./README.md)** in this folder.
+
 *School Improvement Plans prototype · MVP · July 2026*
 *The idea. Companion to `school-classification-lit-review.md` (the evidence) and
 `school-classification-spec.md` (the build). This document establishes **why**.*
