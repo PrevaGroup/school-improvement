@@ -41,7 +41,18 @@ Always call a tool for real data; never invent schools, numbers, budgets, plan t
 - find_similar_schools — the demographically-matched peer schools (statewide, same level) for a Long Beach school. Answers "who is X like?".
 - compare_to_peers — a school's actual metric value (default: chronic absenteeism) vs its peer-group distribution, with `peer_performance_percentile` where HIGHER always means doing better than peers.
 
-Ground every claim in tool output. When comparing performance, lead with the peer-relative finding via `peer_performance_percentile` (e.g. "worse than ~70% of similar schools"), then cite concrete strategies/budgets/quotes. Extracted plan detail is currently richest for High schools; peers and metrics are available at other levels even where plan text isn't. If asked about something outside attendance plans or peer comparison, say this prototype covers those for Long Beach."""
+Ground every claim in tool output. When comparing performance, lead with the peer-relative finding via `peer_performance_percentile` (e.g. "worse than ~70% of similar schools"), then cite concrete strategies/budgets/quotes.
+
+DATA HONESTY — absence of data is NOT absence of the thing. This is critical: education data is full of gaps, and treating a gap as a fact produces false, unfair claims about real schools.
+- Respect the `plan_status` on each school and the `coverage` block:
+  - `not_on_file` → the school's SPSA has not been extracted/loaded YET. Say "I don't have <school>'s plan on file yet" and that its attendance planning is unknown. NEVER say the school "has no attendance plan / no goals / no funded strategies / no accountability" — that is false and defamatory.
+  - `no_attendance_section` → the plan IS on file but funds no attendance action. THIS is a real, reportable finding.
+  - `has_attendance_plan` → cite its goals, budgets, and quotes.
+- A missing/null metric value is UNKNOWN (it may be privacy-suppressed for small enrollment) — never report it as 0 or "none".
+- Metrics (chronic absenteeism, peer percentile) are densely covered — state them confidently. Plan detail is sparse — be explicit only when a claim depends on a plan you don't have.
+- Never infer that a school lacks a policy, goal, action, or outcome from missing data.
+
+If asked about something outside attendance plans or peer comparison, say this prototype covers those for Long Beach."""
 
 
 TOOLS = [
@@ -124,10 +135,28 @@ def _resolve_lb_school(db: Session, name: str | None, school_level: str) -> dict
 def _run_tool(name: str, ti: dict, db: Session, school_level: str) -> dict:
     if name == "query_school_attendance_plans":
         data = fetch_attendance_plans(db, district_id=DISTRICT_ID, level=school_level)
+        # Level-wide coverage, computed BEFORE any name filter, so the model knows how much
+        # of the plan layer actually exists vs. is just not loaded yet.
+        at_level = len(data["schools"])
+        on_file = sum(1 for s in data["schools"] if s.get("has_plan"))
         needle = (ti.get("school_name") or "").strip().lower()
         if needle:
             data["schools"] = [s for s in data["schools"] if needle in (s["school_name"] or "").lower()]
-            data["school_count"] = len(data["schools"])
+        # Tri-state status per school so the model NEVER reads "no rows" as "no plan exists".
+        for s in data["schools"]:
+            if not s.get("has_plan"):
+                s["plan_status"] = "not_on_file"          # SPSA not extracted/loaded yet — UNKNOWN, not absent
+            elif s.get("attendance_goals"):
+                s["plan_status"] = "has_attendance_plan"   # plan on file WITH attendance actions
+            else:
+                s["plan_status"] = "no_attendance_section"  # plan on file, no attendance goal — a REAL finding
+        data["school_count"] = len(data["schools"])
+        data["coverage"] = {
+            "level": school_level, "schools_at_level": at_level, "plans_on_file_at_level": on_file,
+            "meaning": ("plan_status 'not_on_file' = the school's SPSA has not been extracted/loaded YET, so its "
+                        "attendance planning is UNKNOWN — do NOT report it as having no plan/goals/actions. "
+                        "'no_attendance_section' = plan IS on file but funds no attendance action (a real finding)."),
+        }
         return data
     if name == "find_similar_schools":
         school = _resolve_lb_school(db, ti.get("school_name"), school_level)
@@ -138,7 +167,13 @@ def _run_tool(name: str, ti: dict, db: Session, school_level: str) -> dict:
         school = _resolve_lb_school(db, ti.get("school_name"), school_level)
         if not school:
             return {"error": f"no Long Beach {school_level} school matching '{ti.get('school_name')}'"}
-        return fetch_peer_benchmark(db, school["school_id"], ti.get("metric_id") or "chronic_absenteeism_rate")
+        bench = fetch_peer_benchmark(db, school["school_id"], ti.get("metric_id") or "chronic_absenteeism_rate")
+        if isinstance(bench, dict) and bench.get("target_value") is None:
+            # A missing metric is UNKNOWN (possibly privacy-suppressed for small enrollment),
+            # not zero — say so rather than letting the model infer a value.
+            bench["value_status"] = ("this school's value for this metric is not available (it may be "
+                                     "privacy-suppressed for small enrollment) — treat as UNKNOWN, never 0.")
+        return bench
     return {"error": f"unknown tool: {name}"}
 
 
