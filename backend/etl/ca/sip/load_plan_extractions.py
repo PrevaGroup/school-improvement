@@ -27,14 +27,14 @@ from app.models.reference import PlanExtraction
 from .._shared import _engine
 
 
-def list_json(prefix: str) -> list[tuple[str, str]]:
+def list_json(prefix: str):
     fs, _ = fsspec.core.url_to_fs(prefix)
     scheme = prefix.split("://", 1)[0] if "://" in prefix else None
     out = []
     for p in fs.glob(prefix.rstrip("/") + "/*.json"):
         src = p if ("://" in p or scheme is None) else f"{scheme}://{p}"
         out.append((p.rsplit("/", 1)[-1], src))
-    return sorted(out)
+    return fs, sorted(out)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -44,16 +44,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
-    files = list_json(args.in_prefix)
+    fs, files = list_json(args.in_prefix)
     if args.limit:
         files = files[: args.limit]
-    print(f"[extractions] {len(files)} JSONs under {args.in_prefix}", file=sys.stderr)
+    n = len(files)
+    print(f"[extractions] {n} JSONs under {args.in_prefix}", file=sys.stderr, flush=True)
 
     rows, errors = [], []
-    for fname, src in files:
+    for i, (fname, src) in enumerate(files, 1):
+        print(f"[extractions] ({i}/{n}) reading {fname}", file=sys.stderr, flush=True)
         try:
-            with fsspec.open(src, "r", encoding="utf-8") as fh:
-                doc = json.load(fh)
+            # one GET per file (via the already-authed fs) instead of block-streaming
+            doc = json.loads(fs.cat_file(src))
             rows.append(dict(
                 plan_id=doc["plan_id"],
                 school_id=doc.get("school_id"),
@@ -66,7 +68,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             errors.append((fname, str(e)))
             print(f"[extractions] ERROR {fname}: {e}", file=sys.stderr)
 
-    print(f"[extractions] parsed {len(rows)} ok, {len(errors)} errors", file=sys.stderr)
+    print(f"[extractions] parsed {len(rows)} ok, {len(errors)} errors", file=sys.stderr, flush=True)
     if args.dry_run or not rows:
         for r in rows:
             print(f"  would upsert {r['plan_id']} (school {r['school_id']})", file=sys.stderr)
