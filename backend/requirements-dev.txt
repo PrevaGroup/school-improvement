@@ -1,0 +1,6 @@
+# Test/dev-only deps. Runtime deps are in requirements.txt (the tests import the
+# real ETL modules, so those must be installed too):
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   python -m pytest
+-r requirements.txt
+pytest
