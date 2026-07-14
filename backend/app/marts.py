@@ -245,3 +245,70 @@ def peer_benchmark_ep(
 ) -> dict:
     """A school's metric value vs. its peer group (default: chronic absenteeism)."""
     return fetch_peer_benchmark(db, school_id, metric_id)
+
+
+# --------------------------------------------------------------------------- #
+# Attendance diagnostic — NEED (peer-relative) vs. RESPONSE (what the plan funds).
+# The evaluative signal that drives the UI: surfaces schools with a glaring
+# attendance need AND a thin/absent attendance plan ("unmet_need").
+# --------------------------------------------------------------------------- #
+def fetch_attendance_diagnostic(
+    db: Session,
+    district_id: str = "0622500",
+    level: str | None = "High",
+    metric_id: str = "chronic_absenteeism_rate",
+) -> dict:
+    plans = fetch_attendance_plans(db, district_id, level)
+    out = []
+    for s in plans["schools"]:
+        goals = s.get("attendance_goals") or []
+        actions = [a for g in goals for a in (g.get("actions") or [])]
+        budget = sum((a.get("budgeted_amount") or 0) for a in actions)
+        bench = fetch_peer_benchmark(db, s["school_id"], metric_id)
+        perf = bench.get("peer_performance_percentile")  # higher = better than peers
+
+        if perf is None:
+            need = "unknown"
+        elif perf < 34:
+            need = "high"          # worse than ~2/3 of peers
+        elif perf < 67:
+            need = "moderate"
+        else:
+            need = "low"
+        thin = len(actions) == 0 or budget < 1
+
+        if need == "high" and thin:
+            alignment = "unmet_need"     # the flag that matters: big need, no funded response
+        elif need in ("high", "moderate") and not thin:
+            alignment = "responsive"
+        elif thin:
+            alignment = "no_response"
+        else:
+            alignment = "ok"
+
+        out.append({
+            "school_id": s["school_id"], "school_name": s["school_name"],
+            "chronic_absenteeism_rate": s.get("chronic_absenteeism_rate"),
+            "chronic_absenteeism_year": s.get("chronic_absenteeism_year"),
+            "peer_performance_percentile": perf,
+            "peer_distribution": bench.get("peer_distribution"),
+            "need": need,
+            "attendance_action_count": len(actions),
+            "attendance_budget": round(budget, 2),
+            "alignment": alignment,
+            "attendance_goals": goals,
+        })
+
+    order = {"unmet_need": 0, "no_response": 1, "responsive": 2, "ok": 3, "unknown": 4}
+    out.sort(key=lambda r: (order.get(r["alignment"], 9), -(r["chronic_absenteeism_rate"] or 0)))
+    return {"district_id": district_id, "level": level, "school_count": len(out), "schools": out}
+
+
+@router.get("/attendance-diagnostic")
+def attendance_diagnostic_ep(
+    district_id: str = "0622500",
+    level: str | None = "High",
+    db: Session = Depends(get_db_public),
+) -> dict:
+    """Per-school attendance need vs. plan response, sorted with 'unmet_need' first."""
+    return fetch_attendance_diagnostic(db, district_id, level)
