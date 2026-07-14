@@ -34,13 +34,13 @@ Two separate things fail, with different fixes:
 ## Deploy
 
 ```bash
+# NOTE: all env vars go in ONE --set-env-vars flag — repeating the flag overwrites
+# (last wins), which would silently drop GCP_PROJECT + INSTANCE_CONNECTION_NAME.
 gcloud run deploy sip-api \
   --source backend \
   --region us-central1 \
   --add-cloudsql-instances school-improvement-501916:us-central1:school-improvement-sql \
-  --set-env-vars GCP_PROJECT=school-improvement-501916 \
-  --set-env-vars INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql \
-  --set-env-vars DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false \
+  --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false \
   --min-instances 0 \
   --max-instances 4 \
   --no-allow-unauthenticated
