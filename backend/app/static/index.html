@@ -3,167 +3,214 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Long Beach — schools like you</title>
+<title>Long Beach — attendance diagnostics</title>
 <style>
   :root {
-    --bg: #f7f7f5; --panel: #fff; --ink: #1c1c1a; --muted: #6b6b66;
-    --line: #e4e4df; --user: #2f6f4f; --accent: #b5533a;
+    --bg:#f4f1ea; --panel:#fff; --ink:#211f1b; --muted:#6b675e; --line:#e2ddd2;
+    --green:#2f6f4f; --amber:#c98a2b; --red:#b5423a; --accent:#b5533a;
   }
   * { box-sizing: border-box; }
+  html, body, #root { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    display: flex; justify-content: center;
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-  .app { width: 100%; max-width: 780px; min-height: 100vh; display: flex; flex-direction: column; }
-  header { padding: 20px 20px 10px; border-bottom: 1px solid var(--line); }
-  header h1 { margin: 0; font-size: 19px; }
-  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-  .levels { display: flex; gap: 6px; margin-top: 12px; }
-  .lvl {
-    font-size: 13px; padding: 6px 16px; border: 1px solid var(--line); background: var(--panel);
-    border-radius: 8px; cursor: pointer; color: var(--muted);
-  }
-  .lvl.active { background: var(--user); color: #fff; border-color: var(--user); }
-  #log { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
-  .msg { max-width: 88%; padding: 11px 14px; border-radius: 14px; white-space: pre-wrap; word-wrap: break-word; }
-  .user { align-self: flex-end; background: var(--user); color: #fff; border-bottom-right-radius: 4px; }
-  .bot  { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
-  .tools { align-self: flex-start; font-size: 12px; color: var(--muted); margin-top: -8px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 20px 12px; }
-  .chip {
-    font-size: 13px; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
-    border-radius: 999px; padding: 7px 12px; cursor: pointer;
-  }
-  .chip:hover { border-color: var(--accent); }
-  form { display: flex; gap: 8px; padding: 12px 20px 20px; border-top: 1px solid var(--line); background: var(--bg); }
-  #q { flex: 1; padding: 11px 14px; border: 1px solid var(--line); border-radius: 12px; font: inherit; background: var(--panel); }
-  button { padding: 0 18px; border: 0; border-radius: 12px; background: var(--user); color: #fff; font: inherit; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-  .dots::after { content: "…"; animation: d 1.2s steps(4,end) infinite; }
+  .hdr { padding: 14px 22px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; background: var(--panel); }
+  .hdr h1 { font-size: 17px; margin: 0; }
+  .hdr .sub { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+  select, .seg button { font: inherit; }
+  .seg { display: inline-flex; gap: 4px; }
+  .seg button { font-size: 13px; padding: 5px 12px; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; color: var(--muted); cursor: pointer; }
+  .seg button.on { background: var(--green); color: #fff; border-color: var(--green); }
+  select { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+  .cols { display: grid; grid-template-columns: 1fr 380px; height: calc(100% - 58px); }
+  .diag { overflow-y: auto; padding: 20px 22px; }
+  .chat { border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
+  .banner { border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; color: #fff; font-weight: 600; }
+  .b-unmet_need { background: var(--red); }
+  .b-no_response { background: var(--amber); }
+  .b-responsive { background: var(--green); }
+  .b-ok { background: #6b675e; }
+  .b-unknown { background: #9a958a; }
+  .kpi { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; }
+  .kpi .big { font-size: 34px; font-weight: 700; line-height: 1; }
+  .kpi .lab { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: #fff; text-transform: uppercase; letter-spacing: .03em; }
+  .n-high { background: var(--red); } .n-moderate { background: var(--amber); } .n-low { background: var(--green); } .n-unknown { background: #9a958a; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+  .goal { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  .goal:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .act { font-size: 14px; padding: 6px 0; }
+  .act .meta { color: var(--muted); font-size: 12px; }
+  .quote { color: var(--muted); font-size: 12px; font-style: italic; border-left: 2px solid var(--line); padding-left: 8px; margin-top: 3px; }
+  .peer { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-top: 1px solid var(--line); }
+  .peer:first-child { border-top: 0; }
+  .peer .d { color: var(--muted); }
+  .msgs { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .m { max-width: 90%; padding: 9px 12px; border-radius: 12px; white-space: pre-wrap; font-size: 14px; }
+  .m.u { align-self: flex-end; background: var(--green); color: #fff; }
+  .m.a { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); }
+  .tools { align-self: flex-start; font-size: 11px; color: var(--muted); margin-top: -6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 8px; }
+  .chip { font-size: 12px; border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 5px 10px; cursor: pointer; }
+  form { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); }
+  form input { flex: 1; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; font: inherit; }
+  form button { padding: 0 14px; border: 0; border-radius: 10px; background: var(--green); color: #fff; cursor: pointer; }
+  .muted { color: var(--muted); }
+  .dots::after { content:"…"; animation: d 1.2s steps(4,end) infinite; }
   @keyframes d { 0%{content:""} 25%{content:"."} 50%{content:".."} 75%{content:"..."} }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#1a1a18; --panel:#242422; --ink:#ececea; --muted:#a0a09a; --line:#33332f; }
+    :root { --bg:#1a1917; --panel:#242320; --ink:#ecebe6; --muted:#a29d92; --line:#34322c; }
   }
 </style>
 </head>
 <body>
-<div class="app">
-  <header>
-    <h1>Long Beach — schools like you</h1>
-    <p>How Long Beach schools plan to improve attendance, and how each compares to demographically similar schools statewide.</p>
-    <div class="levels" id="levels">
-      <div class="lvl active" data-level="High">High</div>
-      <div class="lvl" data-level="Middle">Middle</div>
-      <div class="lvl" data-level="Primary">Primary</div>
+<div id="root"></div>
+<script type="module">
+import React, { useState, useEffect, useMemo } from "https://esm.sh/react@18.3.1";
+import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
+import htm from "https://esm.sh/htm@3.1.1";
+const html = htm.bind(React.createElement);
+const fmtUSD = (n) => n == null ? "—" : "$" + Math.round(n).toLocaleString();
+
+function PeerChart({ dist, value, direction }) {
+  if (!dist || value == null) return html`<div class="muted">No comparable peer data.</div>`;
+  const lo = Math.min(dist.min, value), hi = Math.max(dist.max, value);
+  const span = (hi - lo) || 1, W = 320, x = (v) => ((v - lo) / span) * W;
+  return html`
+    <svg width="100%" viewBox="0 0 ${W} 44" style=${{ overflow: "visible" }}>
+      <line x1="0" y1="22" x2=${W} y2="22" stroke="var(--line)" stroke-width="2" />
+      <rect x=${x(dist.p25)} y="14" width=${Math.max(1, x(dist.p75) - x(dist.p25))} height="16" fill="var(--line)" rx="3" />
+      <line x1=${x(dist.median)} y1="12" x2=${x(dist.median)} y2="32" stroke="var(--muted)" stroke-width="2" />
+      <circle cx=${x(value)} cy="22" r="7" fill="var(--red)" />
+      <text x=${x(value)} y="10" text-anchor="middle" font-size="11" fill="var(--ink)">${value}</text>
+      <text x="0" y="44" font-size="10" fill="var(--muted)">${dist.min}</text>
+      <text x=${W} y="44" text-anchor="end" font-size="10" fill="var(--muted)">${dist.max}</text>
+    </svg>
+    <div class="muted" style=${{ fontSize: "12px", marginTop: "4px" }}>peer median ${dist.median} · ${direction === "lower_better" ? "lower is better" : "higher is better"} · n=${dist.n}</div>`;
+}
+
+function Diagnostic({ s, peers }) {
+  if (!s) return html`<div class="muted">Select a school.</div>`;
+  const perf = s.peer_performance_percentile;
+  const worseThan = perf == null ? null : Math.round(100 - perf);
+  const bannerText = {
+    unmet_need: `Unmet need — worse than ${worseThan}% of similar schools on chronic absenteeism, with little or no funded attendance response.`,
+    no_response: `Thin response — the plan funds little or no attendance action.`,
+    responsive: `Responsive — a real need met with funded attendance strategies.`,
+    ok: `On track relative to peers.`,
+    unknown: `Not enough data to assess.`,
+  }[s.alignment];
+  return html`
+    <div class=${"banner b-" + s.alignment}>${bannerText}</div>
+    <div class="card">
+      <div class="kpi">
+        <div><div class="big">${s.chronic_absenteeism_rate ?? "—"}%</div><div class="lab">chronic absenteeism ${s.chronic_absenteeism_year ? "(" + s.chronic_absenteeism_year + ")" : ""}</div></div>
+        <div><div class="big">${perf == null ? "—" : perf}</div><div class="lab">percentile vs. peers <span class=${"badge n-" + s.need}>${s.need} need</span></div></div>
+        <div><div class="big">${s.attendance_action_count}</div><div class="lab">funded attendance actions</div></div>
+        <div><div class="big">${fmtUSD(s.attendance_budget)}</div><div class="lab">attendance budget</div></div>
+      </div>
+      <div style=${{ marginTop: "14px" }}>${html`<${PeerChart} dist=${s.peer_distribution} value=${s.chronic_absenteeism_rate} direction="lower_better" />`}</div>
     </div>
-  </header>
-  <div id="log"></div>
-  <div class="chips" id="chips"></div>
-  <form id="f">
-    <input id="q" autocomplete="off" placeholder="Ask about Long Beach schools…" />
-    <button id="send" type="submit">Send</button>
-  </form>
-</div>
-<script>
-  const log = document.getElementById("log");
-  const form = document.getElementById("f");
-  const input = document.getElementById("q");
-  const send = document.getElementById("send");
-  const chipsBox = document.getElementById("chips");
-  const levels = document.getElementById("levels");
-  let level = "High";
-  let history = [];
 
-  const CHIPS = {
-    High: [
-      "Who is Jordan High most like, and how does its attendance compare?",
-      "Compare how Long Beach high schools plan to address attendance",
-      "Which high schools are doing worse than their peers on chronic absenteeism?",
-    ],
-    Middle: [
-      "Who are Hamilton Middle's demographic peers?",
-      "How does Stephens Middle's chronic absenteeism compare to similar schools?",
-    ],
-    Primary: [
-      "Who is Addams Elementary most like?",
-      "How does Addams' attendance compare to its peer schools?",
-    ],
-  };
+    <div class="card">
+      <h3>What the plan funds for attendance</h3>
+      ${(s.attendance_goals && s.attendance_goals.length) ? s.attendance_goals.map((g, gi) => html`
+        <div class="goal" key=${gi}>
+          <div><strong>${g.goal_type || "goal"} ${g.goal_number || ""}</strong> — ${(g.statement || "").slice(0, 140)}</div>
+          ${(g.actions || []).map((a, ai) => html`
+            <div class="act" key=${ai}>
+              • ${a.strategy_text}
+              <div class="meta">${fmtUSD(a.budgeted_amount)}${a.funding_source_raw ? " · " + a.funding_source_raw : ""}${a.provenance ? " · p" + a.provenance.page : ""}</div>
+              ${a.provenance && a.provenance.quote ? html`<div class="quote">"${a.provenance.quote}"</div>` : null}
+            </div>`)}
+        </div>`) : html`<div class="muted">No attendance-specific goals or actions found in this plan.</div>`}
+    </div>
 
-  function renderChips() {
-    chipsBox.innerHTML = "";
-    for (const t of CHIPS[level]) {
-      const c = document.createElement("div");
-      c.className = "chip";
-      c.textContent = t;
-      chipsBox.appendChild(c);
-    }
-    chipsBox.style.display = "flex";
-  }
+    <div class="card">
+      <h3>Schools like this one</h3>
+      ${peers === null ? html`<div class="muted dots">loading peers</div>`
+        : (peers.length ? peers.map((p, i) => html`
+        <div class="peer" key=${i}>
+          <div>${p.rank}. ${p.school_name} <span class="d">· ${p.district_name}</span></div>
+          <div class="d">${p.enroll_total} · SED ${p.pct_sed}% · d ${Number(p.distance).toFixed(2)}</div>
+        </div>`) : html`<div class="muted">No peer set for this school.</div>`)}
+    </div>`;
+}
 
-  function bubble(text, cls) {
-    const el = document.createElement("div");
-    el.className = "msg " + cls;
-    el.textContent = text;
-    log.appendChild(el);
-    log.scrollTop = log.scrollHeight;
-    return el;
-  }
+function Chat({ school, level }) {
+  const [msgs, setMsgs] = useState([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const scoped = school ? school.school_name : "these schools";
+  const chips = school ? [
+    `Why is ${school.school_name} a concern on attendance?`,
+    `What are ${school.school_name}'s peers doing that it isn't?`,
+  ] : [`Compare Long Beach ${level} schools on attendance`];
 
   async function ask(text) {
-    chipsBox.style.display = "none";
-    bubble(text, "user");
-    history.push({ role: "user", content: text });
-    input.value = "";
-    send.disabled = true;
-    const thinking = bubble("thinking", "bot");
-    thinking.className = "msg bot dots";
+    const next = [...msgs, { role: "user", content: text }];
+    setMsgs(next); setInput(""); setBusy(true);
     try {
-      const res = await fetch("/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, level }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-      const data = await res.json();
-      thinking.remove();
-      bubble(data.reply, "bot");
-      if (data.tools_used && data.tools_used.length) {
-        const t = document.createElement("div");
-        t.className = "tools";
-        t.textContent = "queried: " + data.tools_used.join(", ");
-        log.appendChild(t);
-      }
-      history.push({ role: "assistant", content: data.reply });
-    } catch (e) {
-      thinking.remove();
-      bubble("Error: " + e.message, "bot");
-    } finally {
-      send.disabled = false;
-      input.focus();
-    }
+      const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: next, level }) });
+      const d = r.ok ? await r.json() : { reply: "Error: " + ((await r.json()).detail || r.statusText) };
+      setMsgs([...next, { role: "assistant", content: d.reply, tools: d.tools_used }]);
+    } catch (e) { setMsgs([...next, { role: "assistant", content: "Error: " + e.message }]); }
+    finally { setBusy(false); }
   }
+  return html`
+    <div class="msgs">
+      ${msgs.length === 0 ? html`<div class="muted" style=${{ fontSize: "13px" }}>Ask about ${scoped} — grounded in the plans, metrics, and peer data.</div>` : null}
+      ${msgs.map((m, i) => html`<div class=${"m " + (m.role === "user" ? "u" : "a")} key=${i}>${m.content}</div>`)}
+      ${busy ? html`<div class="m a dots">thinking</div>` : null}
+    </div>
+    <div class="chips">${chips.map((c, i) => html`<div class="chip" key=${i} onClick=${() => ask(c)}>${c}</div>`)}</div>
+    <form onSubmit=${(e) => { e.preventDefault(); if (input.trim() && !busy) ask(input.trim()); }}>
+      <input value=${input} placeholder=${"Ask about " + scoped + "…"} onInput=${(e) => setInput(e.target.value)} />
+      <button disabled=${busy}>Send</button>
+    </form>`;
+}
 
-  levels.addEventListener("click", (e) => {
-    const b = e.target.closest(".lvl");
-    if (!b || b.dataset.level === level) return;
-    level = b.dataset.level;
-    for (const el of levels.children) el.classList.toggle("active", el === b);
-    history = [];        // switching level changes scope — start fresh
-    log.innerHTML = "";
-    renderChips();
-  });
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const text = input.value.trim();
-    if (text) ask(text);
-  });
-  chipsBox.addEventListener("click", (e) => {
-    if (e.target.classList.contains("chip")) ask(e.target.textContent);
-  });
-  renderChips();
-  input.focus();
+function App() {
+  const [level, setLevel] = useState("High");
+  const [schools, setSchools] = useState([]);
+  const [sel, setSel] = useState(null);
+  const [peers, setPeers] = useState(null);
+
+  useEffect(() => {
+    setSchools([]); setSel(null);
+    fetch(`/marts/attendance-diagnostic?level=${level}`).then(r => r.json()).then(d => {
+      setSchools(d.schools || []);
+      setSel((d.schools || [])[0] || null);
+    });
+  }, [level]);
+
+  const current = useMemo(() => schools.find(s => sel && s.school_id === sel.school_id) || sel, [schools, sel]);
+
+  useEffect(() => {
+    if (!current) { setPeers(null); return; }
+    setPeers(null);
+    fetch(`/marts/like-schools?school_id=${current.school_id}&k=6`).then(r => r.json()).then(d => setPeers(d.peers || []));
+  }, [current && current.school_id]);
+
+  return html`
+    <div class="hdr">
+      <div><h1>Long Beach — attendance diagnostics</h1><div class="sub">need vs. plan, read against demographically similar schools</div></div>
+      <div class="spacer"></div>
+      <div class="seg">${["High", "Middle", "Primary"].map(l => html`<button key=${l} class=${l === level ? "on" : ""} onClick=${() => setLevel(l)}>${l}</button>`)}</div>
+      <select value=${current ? current.school_id : ""} onChange=${(e) => setSel(schools.find(s => s.school_id === e.target.value))}>
+        ${schools.length === 0 ? html`<option>loading…</option>` : schools.map(s => html`<option key=${s.school_id} value=${s.school_id}>${s.alignment === "unmet_need" ? "⚠ " : ""}${s.school_name}</option>`)}
+      </select>
+    </div>
+    <div class="cols">
+      <div class="diag">${html`<${Diagnostic} s=${current} peers=${peers} />`}</div>
+      <div class="chat">${html`<${Chat} school=${current} level=${level} />`}</div>
+    </div>`;
+}
+
+createRoot(document.getElementById("root")).render(html`<${App} />`);
 </script>
 </body>
 </html>
