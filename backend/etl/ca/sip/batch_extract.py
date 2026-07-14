@@ -235,7 +235,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 context=ctx,
                 max_tokens=args.max_tokens,
             )
-        except RuntimeError as e:
+        except Exception as e:  # any per-school failure is non-fatal — log, skip, keep going
             errors.append((fname, str(e)))
             print(f"[batch] ERROR      {fname}: {e}", file=sys.stderr)
             continue

@@ -7,6 +7,12 @@ assembled with `sqlalchemy.URL.create`, which escapes any special characters.
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
+# Resolved secrets are cached per-process: without this, each Secret Manager fetch
+# is a fresh ADC/metadata call, and a long batch that re-resolves the key per item
+# (e.g. the SIP extractor's per-PDF Anthropic client) gets N chances to hit a
+# transient metadata failure — one of which killed a run. Fetch each secret once.
+_SECRET_CACHE: dict[str, str] = {}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -56,7 +62,9 @@ class Settings(BaseSettings):
         return self.google_oauth_audience or self.gcp_project
 
     def _secret(self, secret_id: str) -> str:
-        """Fetch a secret's latest version via Application Default Credentials."""
+        """Fetch a secret's latest version via ADC. Cached per-process (see _SECRET_CACHE)."""
+        if secret_id in _SECRET_CACHE:
+            return _SECRET_CACHE[secret_id]
         from google.cloud import secretmanager
 
         if not self.gcp_project:
@@ -66,7 +74,9 @@ class Settings(BaseSettings):
             )
         client = secretmanager.SecretManagerServiceClient()
         name = f"projects/{self.gcp_project}/secrets/{secret_id}/versions/latest"
-        return client.access_secret_version(name=name).payload.data.decode("utf-8")
+        value = client.access_secret_version(name=name).payload.data.decode("utf-8")
+        _SECRET_CACHE[secret_id] = value
+        return value
 
     def _url(self, user: str, password: str) -> URL:
         return URL.create(

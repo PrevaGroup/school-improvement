@@ -309,6 +309,13 @@ def extract_bytes(
     unless `gs_uri` overrides it. Returns a validated `ExtractedPlan` (never writes
     to the DB — that is the loader's job, after human review).
     """
+    # Anthropic caps a request at ~32 MB; a huge scanned PDF 413s. Fail fast + clear.
+    max_pdf_mb = 30
+    if len(pdf_bytes) > max_pdf_mb * 1024 * 1024:
+        raise RuntimeError(
+            f"PDF too large for the API: {len(pdf_bytes) / 1024 / 1024:.0f} MB "
+            f"> ~{max_pdf_mb} MB limit — needs compression or splitting"
+        )
     b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
     sha = sha256_hex(pdf_bytes)
     pages = count_pages(pdf_bytes)
