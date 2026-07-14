@@ -31,6 +31,16 @@
   .school-hd { margin-bottom: 14px; }
   .school-name { font-size: 26px; font-weight: 700; line-height: 1.1; }
   .school-sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .feats { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; font-size: 12px; }
+  .feats > div { color: var(--muted); }
+  .feats b { color: var(--ink); font-weight: 700; }
+  .plan-sum { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  .tbl-wrap { overflow-x: auto; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .tbl td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .tbl td.r, .tbl th.r { text-align: right; white-space: nowrap; }
+  .tbl .d { color: var(--muted); font-size: 11px; }
   .banner { border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; color: #fff; font-weight: 600; }
   .b-unmet_need { background: var(--red); }
   .b-no_response { background: var(--amber); }
@@ -79,18 +89,21 @@ import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
 const html = htm.bind(React.createElement);
 const fmtUSD = (n) => n == null ? "—" : "$" + Math.round(n).toLocaleString();
+const fmtPct = (n) => n == null ? "—" : Math.round(n) + "%";
+const fmtNum = (n) => n == null ? "—" : Number(n).toLocaleString();
 
 function PeerChart({ dist, value, direction }) {
   if (!dist || value == null) return html`<div class="muted">No comparable peer data.</div>`;
   const lo = Math.min(dist.min, value), hi = Math.max(dist.max, value);
   const span = (hi - lo) || 1, W = 320, x = (v) => ((v - lo) / span) * W;
+  const vx = x(value), vAnchor = vx > W - 22 ? "end" : (vx < 22 ? "start" : "middle");
   return html`
     <svg width="100%" viewBox="0 0 ${W} 44" style=${{ overflow: "visible" }}>
       <line x1="0" y1="22" x2=${W} y2="22" stroke="var(--line)" stroke-width="2" />
       <rect x=${x(dist.p25)} y="14" width=${Math.max(1, x(dist.p75) - x(dist.p25))} height="16" fill="var(--line)" rx="3" />
       <line x1=${x(dist.median)} y1="12" x2=${x(dist.median)} y2="32" stroke="var(--muted)" stroke-width="2" />
       <circle cx=${x(value)} cy="22" r="7" fill="var(--red)" />
-      <text x=${x(value)} y="10" text-anchor="middle" font-size="11" fill="var(--ink)">${value}</text>
+      <text x=${vx} y="10" text-anchor=${vAnchor} font-size="11" fill="var(--ink)">${value}</text>
       <text x="0" y="44" font-size="10" fill="var(--muted)">${lo}</text>
       <text x=${W} y="44" text-anchor="end" font-size="10" fill="var(--muted)">${hi}</text>
     </svg>
@@ -111,44 +124,70 @@ function Diagnostic({ s, peers, level }) {
       : `Worse than ${worseThan}% of similar schools on chronic absenteeism — attendance plan not yet extracted, so the response isn't assessed.`,
     unknown: `Not enough data to assess.`,
   }[s.alignment];
+  const feat = (v, kind, lab) => html`<div><b>${v == null ? "—" : kind === "pct" ? fmtPct(v) : kind === "num" ? fmtNum(v) : v}</b> <span>${lab}</span></div>`;
   return html`
     <div class="school-hd">
       <div class="school-name">${s.school_name}</div>
       <div class="school-sub">Long Beach Unified${level ? " · " + level + " school" : ""}</div>
+      <div class="feats">
+        ${feat(s.enroll_total, "num", "enrollment")}
+        ${feat(s.pct_sed, "pct", "econ-disadv")}
+        ${feat(s.pct_el, "pct", "English learners")}
+        ${feat(s.pct_swd, "pct", "students w/ disab.")}
+        ${feat(s.locale, "str", "locale")}
+      </div>
     </div>
     <div class=${"banner b-" + s.alignment}>${bannerText}</div>
     <div class="card">
+      <h3>Indicators</h3>
       <div class="kpi">
         <div><div class="big">${s.chronic_absenteeism_rate ?? "—"}%</div><div class="lab">chronic absenteeism ${s.chronic_absenteeism_year ? "(" + s.chronic_absenteeism_year + ")" : ""}</div></div>
         <div><div class="big">${perf == null ? "—" : perf}</div><div class="lab">percentile in its band <span class=${"badge n-" + s.need}>${s.need} need</span></div></div>
-        <div><div class="big">${s.attendance_action_count}</div><div class="lab">funded attendance actions</div></div>
-        <div><div class="big">${fmtUSD(s.attendance_budget)}</div><div class="lab">attendance budget</div></div>
       </div>
       <div style=${{ marginTop: "14px" }}>${html`<${PeerChart} dist=${s.peer_distribution} value=${s.chronic_absenteeism_rate} direction="lower_better" />`}</div>
     </div>
 
     <div class="card">
-      <h3>What the plan funds for attendance</h3>
-      ${(s.attendance_goals && s.attendance_goals.length) ? s.attendance_goals.map((g, gi) => html`
-        <div class="goal" key=${gi}>
-          <div><strong>${g.goal_type || "goal"} ${g.goal_number || ""}</strong> — ${(g.statement || "").slice(0, 140)}</div>
-          ${(g.actions || []).map((a, ai) => html`
-            <div class="act" key=${ai}>
-              • ${a.strategy_text}
-              <div class="meta">${fmtUSD(a.budgeted_amount)}${a.funding_source_raw ? " · " + a.funding_source_raw : ""}${a.provenance ? " · p" + a.provenance.page : ""}</div>
-              ${a.provenance && a.provenance.quote ? html`<div class="quote">"${a.provenance.quote}"</div>` : null}
-            </div>`)}
-        </div>`) : html`<div class="muted">${s.has_plan ? "No attendance-specific goals or actions found in this plan." : "No attendance plan has been extracted for this school yet — its metrics and peers are shown above."}</div>`}
+      <h3>Attendance plan</h3>
+      ${!s.has_plan
+        ? html`<div class="muted">No SPSA on file for this school yet — its attendance planning is unknown (not zero). The indicators and peers above are unaffected.</div>`
+        : ((s.attendance_goals && s.attendance_goals.length)
+          ? html`
+            <div class="plan-sum">${s.attendance_action_count} attendance ${s.attendance_action_count === 1 ? "action" : "actions"}${s.attendance_budget > 0 ? " · " + fmtUSD(s.attendance_budget) + " funded" : ""}</div>
+            ${s.attendance_goals.map((g, gi) => html`
+              <div class="goal" key=${gi}>
+                <div><strong>${g.goal_type || "goal"} ${g.goal_number || ""}</strong> — ${(g.statement || "").slice(0, 140)}</div>
+                ${(g.actions || []).map((a, ai) => html`
+                  <div class="act" key=${ai}>
+                    • ${a.strategy_text}
+                    <div class="meta">${a.budgeted_amount != null ? fmtUSD(a.budgeted_amount) : "no funding listed"}${a.funding_source_raw ? " · " + a.funding_source_raw : ""}${a.provenance ? " · p" + a.provenance.page : ""}</div>
+                    ${a.provenance && a.provenance.quote ? html`<div class="quote">"${a.provenance.quote}"</div>` : null}
+                  </div>`)}
+              </div>`)}`
+          : html`<div class="muted">The SPSA is on file, but it funds no attendance-specific action — a real gap.</div>`)}
     </div>
 
     <div class="card">
       <h3>Schools like this one</h3>
       ${peers === null ? html`<div class="muted dots">loading peers</div>`
-        : (peers.length ? peers.map((p, i) => html`
-        <div class="peer" key=${i}>
-          <div>${p.rank}. ${p.school_name} <span class="d">· ${p.district_name}</span></div>
-          <div class="d">${p.enroll_total} · SED ${p.pct_sed}% · d ${Number(p.distance).toFixed(2)}</div>
-        </div>`) : html`<div class="muted">No peer set for this school.</div>`)}
+        : (peers.length ? html`
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>#</th><th>School</th><th class="r">Enroll</th><th class="r">Econ-dis</th><th class="r">EL</th><th class="r">SWD</th><th>Locale</th><th class="r">Dist</th></tr></thead>
+          <tbody>
+            ${peers.map((p, i) => html`<tr key=${i}>
+              <td>${p.rank}</td>
+              <td>${p.school_name}<div class="d">${p.district_name}</div></td>
+              <td class="r">${fmtNum(p.enroll_total)}</td>
+              <td class="r">${fmtPct(p.pct_sed)}</td>
+              <td class="r">${fmtPct(p.pct_el)}</td>
+              <td class="r">${fmtPct(p.pct_swd)}</td>
+              <td>${p.locale ?? "—"}</td>
+              <td class="r">${Number(p.distance).toFixed(2)}</td>
+            </tr>`)}
+          </tbody>
+        </table></div>
+        <div class="muted" style=${{ fontSize: "11px", marginTop: "6px" }}>Dist = demographic distance (lower = more similar), on enrollment · econ-disadv · EL · SWD · locale.</div>`
+        : html`<div class="muted">No peer set for this school.</div>`)}
     </div>`;
 }
 

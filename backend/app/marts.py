@@ -79,6 +79,7 @@ def fetch_attendance_plans(
     rows = db.execute(
         text(
             "SELECT s.school_id, s.school_name, s.school_level, "
+            "       s.enroll_total, s.pct_sed, s.pct_el, s.pct_swd, s.locale, "
             "       pe.plan_id, pe.plan_year, pe.document "
             "FROM dim_school s "
             "LEFT JOIN LATERAL ("
@@ -116,6 +117,12 @@ def fetch_attendance_plans(
             "school_id": r["school_id"],
             "school_name": r["school_name"],
             "school_level": r["school_level"],
+            # Peer-match features (what "schools like you" is computed from) — shown under the title.
+            "enroll_total": r["enroll_total"],
+            "pct_sed": float(r["pct_sed"]) if r["pct_sed"] is not None else None,
+            "pct_el": float(r["pct_el"]) if r["pct_el"] is not None else None,
+            "pct_swd": float(r["pct_swd"]) if r["pct_swd"] is not None else None,
+            "locale": r["locale"],
             "has_plan": r["plan_id"] is not None,
             "plan_year": r["plan_year"],
             "chronic_absenteeism_rate": ch[0] if ch else None,
@@ -160,7 +167,7 @@ def fetch_like_schools(db: Session, school_id: str, k: int = 50, school_year: st
         text(
             "SELECT p.rank, p.distance, p.low_confidence, p.level_bucket, p.peer_school_id, "
             "       s.school_name, s.district_name, s.school_level, s.enroll_total, "
-            "       s.pct_sed, s.pct_el, s.pct_swd "
+            "       s.pct_sed, s.pct_el, s.pct_swd, s.locale "
             "FROM mart_school_peer p JOIN dim_school s ON s.school_id = p.peer_school_id "
             "WHERE p.school_id = :sid AND p.school_year = :yr AND p.rank <= :k ORDER BY p.rank"
         ),
@@ -320,6 +327,8 @@ def fetch_attendance_diagnostic(
         out.append({
             "school_id": s["school_id"], "school_name": s["school_name"],
             "has_plan": has_plan,
+            "enroll_total": s.get("enroll_total"), "pct_sed": s.get("pct_sed"),
+            "pct_el": s.get("pct_el"), "pct_swd": s.get("pct_swd"), "locale": s.get("locale"),
             "chronic_absenteeism_rate": s.get("chronic_absenteeism_rate"),
             "chronic_absenteeism_year": s.get("chronic_absenteeism_year"),
             "peer_performance_percentile": perf,
