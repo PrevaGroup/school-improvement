@@ -35,7 +35,13 @@
   .feats > div { color: var(--muted); }
   .feats b { color: var(--ink); font-weight: 700; }
   .plan-sum { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
-  .tbl-wrap { overflow: auto; max-height: 340px; }
+  /* Always show a reserved (non-overlay) scrollbar so it can't hide, resize, or paint over
+     the last column. scrollbar-gutter reserves the track's space outside the content. */
+  .tbl-wrap { overflow-x: auto; overflow-y: scroll; max-height: 340px; scrollbar-gutter: stable;
+    scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
+  .tbl-wrap::-webkit-scrollbar { width: 10px; height: 10px; }
+  .tbl-wrap::-webkit-scrollbar-track { background: transparent; }
+  .tbl-wrap::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 6px; border: 2px solid var(--panel); }
   .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .tbl th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; position: sticky; top: 0; background: var(--panel); z-index: 1; }
   .sip-dot { color: var(--green); font-size: 9px; margin-left: 6px; vertical-align: middle; }
