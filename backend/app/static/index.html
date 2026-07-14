@@ -178,13 +178,15 @@ function App() {
   const [schools, setSchools] = useState([]);
   const [sel, setSel] = useState(null);
   const [peers, setPeers] = useState(null);
+  const [loadState, setLoadState] = useState("loading"); // loading | ready | error
 
   useEffect(() => {
-    setSchools([]); setSel(null);
+    setSchools([]); setSel(null); setLoadState("loading");
     fetch(`/marts/attendance-diagnostic?level=${level}`).then(r => r.json()).then(d => {
       setSchools(d.schools || []);
       setSel((d.schools || [])[0] || null);
-    });
+      setLoadState("ready");
+    }).catch(() => setLoadState("error"));
   }, [level]);
 
   const current = useMemo(() => schools.find(s => sel && s.school_id === sel.school_id) || sel, [schools, sel]);
@@ -201,7 +203,7 @@ function App() {
       <div class="spacer"></div>
       <div class="seg">${["High", "Middle", "Primary"].map(l => html`<button key=${l} class=${l === level ? "on" : ""} onClick=${() => setLevel(l)}>${l}</button>`)}</div>
       <select value=${current ? current.school_id : ""} onChange=${(e) => setSel(schools.find(s => s.school_id === e.target.value))}>
-        ${schools.length === 0 ? html`<option>loading…</option>` : schools.map(s => html`<option key=${s.school_id} value=${s.school_id}>${s.alignment === "unmet_need" ? "⚠ " : ""}${s.school_name}</option>`)}
+        ${schools.length === 0 ? html`<option>${loadState === "loading" ? "loading…" : loadState === "error" ? "failed to load — check the API" : "no plans loaded yet — run load_plan_extractions"}</option>` : schools.map(s => html`<option key=${s.school_id} value=${s.school_id}>${s.alignment === "unmet_need" ? "⚠ " : ""}${s.school_name}</option>`)}
       </select>
     </div>
     <div class="cols">
