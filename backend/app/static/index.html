@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Long Beach Attendance Plans</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #fff; --ink: #1c1c1a; --muted: #6b6b66;
+    --line: #e4e4df; --user: #2f6f4f; --accent: #b5533a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center;
+  }
+  .app { width: 100%; max-width: 780px; min-height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 20px 20px 8px; }
+  header h1 { margin: 0; font-size: 19px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  #log { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 88%; padding: 11px 14px; border-radius: 14px; white-space: pre-wrap; word-wrap: break-word; }
+  .user { align-self: flex-end; background: var(--user); color: #fff; border-bottom-right-radius: 4px; }
+  .bot  { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .tools { align-self: flex-start; font-size: 12px; color: var(--muted); margin-top: -8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 20px 12px; }
+  .chip {
+    font-size: 13px; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 999px; padding: 7px 12px; cursor: pointer;
+  }
+  .chip:hover { border-color: var(--accent); }
+  form { display: flex; gap: 8px; padding: 12px 20px 20px; border-top: 1px solid var(--line); background: var(--bg); }
+  #q { flex: 1; padding: 11px 14px; border: 1px solid var(--line); border-radius: 12px; font: inherit; background: var(--panel); }
+  button { padding: 0 18px; border: 0; border-radius: 12px; background: var(--user); color: #fff; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .dots::after { content: "…"; animation: d 1.2s steps(4,end) infinite; }
+  @keyframes d { 0%{content:""} 25%{content:"."} 50%{content:".."} 75%{content:"..."} }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1a1a18; --panel:#242422; --ink:#ececea; --muted:#a0a09a; --line:#33332f; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Long Beach attendance plans</h1>
+    <p>Ask how Long Beach Unified schools plan to improve attendance — grounded in their SPSA plans and real chronic-absenteeism rates.</p>
+  </header>
+  <div id="log"></div>
+  <div class="chips" id="chips">
+    <div class="chip">Compare how Long Beach high schools plan to address attendance</div>
+    <div class="chip">What is Wilson High doing about chronic absenteeism, and what does it cost?</div>
+    <div class="chip">Which school funds the most attendance-specific staffing?</div>
+  </div>
+  <form id="f">
+    <input id="q" autocomplete="off" placeholder="Ask about Long Beach attendance plans…" />
+    <button id="send" type="submit">Send</button>
+  </form>
+</div>
+<script>
+  const log = document.getElementById("log");
+  const form = document.getElementById("f");
+  const input = document.getElementById("q");
+  const send = document.getElementById("send");
+  const chips = document.getElementById("chips");
+  const history = [];
+
+  function bubble(text, cls) {
+    const el = document.createElement("div");
+    el.className = "msg " + cls;
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+
+  async function ask(text) {
+    chips.style.display = "none";
+    bubble(text, "user");
+    history.push({ role: "user", content: text });
+    input.value = "";
+    send.disabled = true;
+    const thinking = bubble("thinking", "bot");
+    thinking.className = "msg bot dots";
+    try {
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: history }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      const data = await res.json();
+      thinking.remove();
+      bubble(data.reply, "bot");
+      if (data.tools_used && data.tools_used.length) {
+        const t = document.createElement("div");
+        t.className = "tools";
+        t.textContent = "queried: " + data.tools_used.join(", ");
+        log.appendChild(t);
+      }
+      history.push({ role: "assistant", content: data.reply });
+    } catch (e) {
+      thinking.remove();
+      bubble("Error: " + e.message, "bot");
+    } finally {
+      send.disabled = false;
+      input.focus();
+    }
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (text) ask(text);
+  });
+  chips.addEventListener("click", (e) => {
+    if (e.target.classList.contains("chip")) ask(e.target.textContent);
+  });
+  input.focus();
+</script>
+</body>
+</html>

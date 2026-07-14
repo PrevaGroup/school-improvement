@@ -51,6 +51,25 @@ gcloud run deploy sip-api \
 - **`--min-instances 0`** for MVP — accept occasional cold starts (free).
 - The Anthropic key is read from Secret Manager via ADC at request time; no env var
   needed in prod. (Set `ANTHROPIC_API_KEY` only for a local dev fallback.)
+- **`--no-allow-unauthenticated`** is the access gate: only Google identities you grant
+  `roles/run.invoker` can reach the service (this is how "who's asking" and your Claude
+  spend are controlled — see below). No app-level login is built.
+
+## Chat UI (`GET /` + `POST /chat`)
+
+The chat page is served from the app itself (`app/static/index.html`), so it's **one Cloud
+Run service behind one IAM gate** — no separate frontend host, no CORS. It calls
+`POST /chat`, which runs Claude (`settings.chat_model`, Haiku by default for cost) with an
+inline tool over the public `plan_extraction` + `fact_metric` marts. All reads are public
+(SPSAs are public docs), so there's no tenant/auth in the app — access is the IAM gate.
+
+Grant demo users access:
+```bash
+gcloud run services add-iam-policy-binding sip-api --region us-central1 \
+  --member="user:teammate@example.com" --role="roles/run.invoker"
+```
+They then reach it via an identity-aware proxy token (or `gcloud run services proxy sip-api
+--region us-central1` for a local authenticated tunnel).
 
 ## Auth (GCIP)
 

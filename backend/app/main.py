@@ -6,10 +6,14 @@ private data depends on `get_db`, which binds the tenant + turns on RLS.
 """
 from __future__ import annotations
 
+import pathlib
+
 from fastapi import Depends, FastAPI
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .chat import router as chat_router
 from .db import get_db
 from .marts import router as marts_router
 from .models import DimSchool, FactMetric
@@ -18,6 +22,15 @@ from .plans import router as plans_router
 app = FastAPI(title="School Improvement Platform API", version="0.1.0")
 app.include_router(plans_router)
 app.include_router(marts_router)
+app.include_router(chat_router)
+
+_STATIC = pathlib.Path(__file__).parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+def index() -> FileResponse:
+    """Serve the chat UI from the same origin (one Cloud Run service, one IAM gate)."""
+    return FileResponse(_STATIC / "index.html")
 
 
 @app.get("/health")

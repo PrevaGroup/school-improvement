@@ -62,13 +62,15 @@ def attendance_slice(doc: dict) -> list[dict]:
     return goals_out
 
 
-@router.get("/attendance-plans")
-def attendance_plans(
+def fetch_attendance_plans(
+    db: Session,
     district_id: str = "0622500",
     level: str | None = "High",
-    db: Session = Depends(get_db_public),
 ) -> dict:
-    """Attendance plans across a district's schools (default: Long Beach high schools)."""
+    """Core query: attendance plans across a district's schools (default LB high schools).
+
+    Reusable by both the HTTP route and the chat tool. Public reads only.
+    """
     rows = db.execute(
         text(
             "SELECT pe.plan_id, pe.plan_year, pe.document, "
@@ -108,3 +110,13 @@ def attendance_plans(
             "attendance_goals": attendance_slice(r["document"] or {}),
         })
     return {"district_id": district_id, "level": level, "school_count": len(schools), "schools": schools}
+
+
+@router.get("/attendance-plans")
+def attendance_plans(
+    district_id: str = "0622500",
+    level: str | None = "High",
+    db: Session = Depends(get_db_public),
+) -> dict:
+    """Attendance plans across a district's schools (default: Long Beach high schools)."""
+    return fetch_attendance_plans(db, district_id, level)

@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # ANTHROPIC_API_KEY env var (pydantic maps the field name to it).
     anthropic_api_key: str | None = None
     anthropic_api_key_secret: str = "anthropic-api-key"
+    # Chat-mart model. Haiku for cost (Claude spend is gated per the deploy); switch to
+    # claude-opus-4-8 for more depth. NB: Haiku 4.5 has no thinking/effort support.
+    chat_model: str = "claude-haiku-4-5"
 
     dev_mode: bool = False
     # GCIP/Firebase ID-token audience. Defaults to gcp_project (the token's `aud`);
