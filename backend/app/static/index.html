@@ -94,7 +94,7 @@ function PeerChart({ dist, value, direction }) {
       <text x="0" y="44" font-size="10" fill="var(--muted)">${lo}</text>
       <text x=${W} y="44" text-anchor="end" font-size="10" fill="var(--muted)">${hi}</text>
     </svg>
-    <div class="muted" style=${{ fontSize: "12px", marginTop: "4px" }}>peer median ${dist.median}% · middle 50% ${dist.p25}–${dist.p75}% · ${direction === "lower_better" ? "lower is better" : "higher is better"} · red dot = this school · n=${dist.n}</div>`;
+    <div class="muted" style=${{ fontSize: "12px", marginTop: "4px" }}>${dist.n} similar schools incl. this one · median ${dist.median}% · middle 50% ${dist.p25}–${dist.p75}% · ${direction === "lower_better" ? "lower is better" : "higher is better"} · red dot = this school</div>`;
 }
 
 function Diagnostic({ s, peers, level }) {
@@ -120,7 +120,7 @@ function Diagnostic({ s, peers, level }) {
     <div class="card">
       <div class="kpi">
         <div><div class="big">${s.chronic_absenteeism_rate ?? "—"}%</div><div class="lab">chronic absenteeism ${s.chronic_absenteeism_year ? "(" + s.chronic_absenteeism_year + ")" : ""}</div></div>
-        <div><div class="big">${perf == null ? "—" : perf}</div><div class="lab">percentile vs. peers <span class=${"badge n-" + s.need}>${s.need} need</span></div></div>
+        <div><div class="big">${perf == null ? "—" : perf}</div><div class="lab">percentile in its band <span class=${"badge n-" + s.need}>${s.need} need</span></div></div>
         <div><div class="big">${s.attendance_action_count}</div><div class="lab">funded attendance actions</div></div>
         <div><div class="big">${fmtUSD(s.attendance_budget)}</div><div class="lab">attendance budget</div></div>
       </div>

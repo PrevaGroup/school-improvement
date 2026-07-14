@@ -218,29 +218,40 @@ def fetch_peer_benchmark(db: Session, school_id: str, metric_id: str, school_yea
             latest[r["school_id"]] = (float(r["value"]), y)
 
     target = latest.get(school_id)
-    peer_vals = sorted(latest[p][0] for p in peers if p in latest)
+    # COHORT framing (product decision): the school is ranked WITHIN its similar-schools
+    # band, so the distribution AND percentile INCLUDE the school itself (n = peers + 1).
+    # Note: the "schools like this one" LIST stays peers-only — a school isn't its own
+    # neighbor — but the band it is *ranked within* does include it (CA similar-schools
+    # convention). So mart_school_peer holds the neighbors; the cohort is neighbors + self.
+    cohort_vals = sorted(
+        [latest[p][0] for p in peers if p in latest] + ([target[0]] if target else [])
+    )
     direction = db.execute(text("SELECT direction FROM dim_metric WHERE metric_id = :m"), {"m": metric_id}).scalar()
 
     distribution = None
     percentile = None
-    if peer_vals:
+    if cohort_vals:
         distribution = {
-            "n": len(peer_vals), "min": peer_vals[0], "p25": _pctile(peer_vals, 25),
-            "median": _pctile(peer_vals, 50), "p75": _pctile(peer_vals, 75), "max": peer_vals[-1],
+            "n": len(cohort_vals), "min": cohort_vals[0], "p25": _pctile(cohort_vals, 25),
+            "median": _pctile(cohort_vals, 50), "p75": _pctile(cohort_vals, 75), "max": cohort_vals[-1],
         }
         if target:
-            percentile = round(100 * sum(1 for v in peer_vals if v <= target[0]) / len(peer_vals), 1)
-    # Direction-adjusted so higher ALWAYS means "doing better than peers" — the raw
-    # percentile (% of peers at/below the value) reverses meaning for lower_better metrics.
+            # Midrank percentile within the band (strictly-below + half of ties), so a lone
+            # extreme reads as ~99th, not exactly 100th — it isn't "worse than itself".
+            below = sum(1 for v in cohort_vals if v < target[0])
+            equal = sum(1 for v in cohort_vals if v == target[0])
+            percentile = round(100 * (below + 0.5 * equal) / len(cohort_vals), 1)
+    # Direction-adjusted so higher ALWAYS means "doing better than the band" — the raw
+    # percentile (rank in the band) reverses meaning for lower_better metrics.
     performance = None
     if percentile is not None and direction in ("higher_better", "lower_better"):
         performance = round(100 - percentile if direction == "lower_better" else percentile, 1)
     return {
         "school_id": school_id, "metric_id": metric_id, "direction": direction, "school_year": yr,
         "target_value": target[0] if target else None, "target_year": target[1] if target else None,
-        "peer_distribution": distribution,
-        "target_percentile_in_peers": percentile,       # raw: % of peers at/below the value
-        "peer_performance_percentile": performance,      # direction-applied: higher = better than peers
+        "peer_distribution": distribution,               # n = band size (peers + this school)
+        "target_percentile_in_band": percentile,         # midrank of the school within its band
+        "peer_performance_percentile": performance,      # direction-applied: higher = better than band
     }
 
 
