@@ -15,14 +15,15 @@ Pipeline per PDF:
       → gs://…/sip/extracted/<School>.json
 
 --district-id is matched against dim_school.district_id = the 7-digit NCES LEAID
-(Long Beach = 0622500). The GCS raw path is named districts/0622710/ (a different id) —
-that's just where the files live, not the DB key.
+(Long Beach = 0622500). The GCS raw folder is also districts/0622500/ (renamed from the
+earlier 0622710 slip). See README.md for the full pipeline; mind the path — --out-prefix
+is the pdf folder + "/extracted", not "/sip/extracted".
 
 Run in Cloud Shell (DB access via the loaders' engine + ADC), from backend/:
     python -m etl.ca.sip.batch_extract \
       --district-id 0622500 \
-      --pdf-prefix gs://school-improvement-501916-raw/raw/ca/districts/0622710/sip \
-      --out-prefix gs://school-improvement-501916-raw/raw/ca/districts/0622710/sip/extracted \
+      --pdf-prefix gs://school-improvement-501916-raw/raw/ca/districts/0622500/sip \
+      --out-prefix gs://school-improvement-501916-raw/raw/ca/districts/0622500/sip/extracted \
       --plan-year 2025-26 \
       --context-file etl/ca/sip/contexts/lbusd_spsa.txt \
       [--limit N] [--dry-run]
