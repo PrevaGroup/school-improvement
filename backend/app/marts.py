@@ -36,19 +36,39 @@ def _link_is_attendance(ml: dict) -> bool:
 
 
 def attendance_slice(doc: dict) -> list[dict]:
-    """Pull the attendance-relevant goals + actions (with provenance) from a plan doc."""
+    """Pull the attendance-relevant goals + actions (with provenance) from a plan doc.
+
+    Attribution is at the ACTION level: an action joins the attendance response only when the
+    action itself is attendance-relevant (its own text or metric link). A goal sweeps in all of
+    its actions ONLY when the goal is *dedicated* to attendance — i.e. it is attendance-relevant
+    and is NOT a bundled multi-metric goal. Otherwise a bundled Culture/Climate goal (belonging +
+    suspension + a real attendance target sharing one set of strategies) would miscount its shared
+    PD as an attendance response — the Wilson HS case. The goal still appears with its attendance
+    target link surfaced, so a real target (e.g. "raise attendance to 92.2%") is never hidden.
+
+    Stopgap (Phase 0): the keyword regex is doing semantic classification at serving time. The
+    durable fix moves this to structured tags produced at extraction — see
+    docs/design/plan-relevance-tagging.md.
+    """
     goals_out = []
     for g in doc.get("goals", []) or []:
         g_links = g.get("metric_links", []) or []
-        # "Directly attendance" is judged by the goal's OWN statement, not a model-proposed
-        # metric link. Only a directly-attendance goal sweeps in all its actions; otherwise an
-        # action must itself be attendance-relevant (no unrelated PD riding in on the goal flag).
-        g_direct = _hit(g.get("statement"))
+        g_att_links = [m for m in g_links if _link_is_attendance(m)]
+        # The goal is attendance-relevant at all → it appears, and its attendance target shows.
+        g_att = _hit(g.get("statement")) or bool(g_att_links)
+        # Bundled = the goal also carries non-attendance metrics; such a goal must NOT sweep its
+        # shared actions into the attendance response — a single-topic attendance goal still sweeps.
+        # (The earlier `g_direct = _hit(statement)` alternative dropped the whole goal when its
+        # statement lacked an attendance keyword, which HID a real attendance target; keeping g_att
+        # here surfaces the target even with zero counted actions — see the Wilson HS case and
+        # docs/design/plan-relevance-tagging.md.)
+        g_bundled = any(not _link_is_attendance(m) for m in g_links)
+        g_sweep = g_att and not g_bundled
         actions_out = []
         for a in g.get("actions", []) or []:
             a_links = a.get("metric_links", []) or []
             a_att = _hit(a.get("strategy_text")) or any(_link_is_attendance(m) for m in a_links)
-            if g_direct or a_att:
+            if g_sweep or a_att:
                 actions_out.append({
                     "action_number": a.get("action_number"),
                     "strategy_text": a.get("strategy_text"),
@@ -56,13 +76,13 @@ def attendance_slice(doc: dict) -> list[dict]:
                     "funding_source_raw": a.get("funding_source_raw"),
                     "provenance": a.get("provenance"),
                 })
-        if g_direct or actions_out:
+        if g_att or actions_out:
             goals_out.append({
                 "goal_number": g.get("goal_number"),
                 "goal_type": g.get("goal_type"),
                 "statement": g.get("statement"),
                 "provenance": g.get("provenance"),
-                "metric_links": [m for m in g_links if _link_is_attendance(m)],
+                "metric_links": g_att_links,
                 "actions": actions_out,
             })
     return goals_out

@@ -1,5 +1,9 @@
 # Classifying Public Schools for Improvement: A Literature Review of Demographic-Based "Schools Like You" Peer Grouping
 
+> **STATUS — background evidence, stable.** This review establishes *why* demographic input-based
+> peer grouping is sound; it doesn't describe the implementation. For what shipped, see the
+> reconciled **[`README.md`](./README.md)** and `backend/etl/peers/build_peers.py`.
+
 *Prepared for the School Improvement Plans prototype · July 2026*
 
 ---

@@ -24,6 +24,7 @@ import argparse
 import json
 import pathlib
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[3]))  # -> backend/
@@ -38,6 +39,8 @@ from app.plan_loader import load_plan
 
 from .._shared import _engine
 from .schema import ExtractedPlan, ReviewStatus
+
+DEFAULT_WORKERS = 16  # plan reads are network-bound (one GET each); overlap reads, write serially
 
 
 def list_json(prefix: str) -> list[tuple[str, str]]:
@@ -77,6 +80,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--display-name", default=None, help="dim_tenant.display_name if the tenant is new")
     ap.add_argument("--force", action="store_true", help="load review_status='draft' plans as-is (MVP)")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                    help=f"concurrent plan reads (default {DEFAULT_WORKERS}); DB writes stay serial")
     ap.add_argument("--dry-run", action="store_true", help="parse + report only, no writes")
     args = ap.parse_args(argv)
 
@@ -92,14 +97,26 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     loaded = skipped = 0
     errors: list[tuple[str, str]] = []
-    for fname, src in files:
-        try:
-            plan = read_plan(src)
-        except Exception as e:  # invalid / unreadable JSON
-            errors.append((fname, f"parse: {e}"))
-            print(f"[load] ERROR  {fname}: parse {e}", file=sys.stderr)
-            continue
 
+    # Phase 1 — read+validate concurrently. Each read is a serial GCS GET otherwise, so on a
+    # cold batch the reads dominate wall-clock. Overlap them (I/O-bound), capturing per-file
+    # parse errors exactly as before. Writes are deliberately NOT parallelized — they run under
+    # a per-tenant session (SET LOCAL app.tenant) and must stay serial; that's Phase 2.
+    parsed: list[tuple[str, ExtractedPlan]] = []
+    workers = max(1, min(args.workers, len(files) or 1))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(read_plan, src): fname for fname, src in files}
+        for fut in as_completed(futs):
+            fname = futs[fut]
+            try:
+                parsed.append((fname, fut.result()))
+            except Exception as e:  # invalid / unreadable JSON
+                errors.append((fname, f"parse: {e}"))
+                print(f"[load] ERROR  {fname}: parse {e}", file=sys.stderr)
+    parsed.sort(key=lambda t: t[0])  # reads finish out of order — restore deterministic apply/log order
+
+    # Phase 2 — gate + write serially (unchanged semantics).
+    for fname, plan in parsed:
         if plan.review_status != ReviewStatus.approved and not args.force:
             skipped += 1
             print(f"[load] SKIP   {fname}: review_status={plan.review_status.value} (pass --force)", file=sys.stderr)

@@ -1,0 +1,18 @@
+Ventura Unified (VUSD) SPSA structure. The plan uses a small set of thematic, current-year goals numbered 1..N sequentially (numbering does NOT restart per layer). Each goal both states its own annual targets AND carries the budgeted actions. Classify goal_type by theme, not by layer:
+1. Student-achievement / academic goal (CAASPP ELA & Math, closing gaps for EL / SWD) -> goal_type "achievement".
+2. Safety / connectedness / climate goal (attendance, suspensions, program participation, wellness) -> goal_type "climate_safety".
+3. Parent & family involvement / engagement goal -> goal_type "family_engagement".
+
+Action grain (IMPORTANT): each goal has a "Strategies/Activities Table". Each numbered strategy is a GROUP heading (e.g. "Professional Development", "Academic/Behavior/Social Emotional Support") that contains several numbered sub-activities, and EACH sub-activity has its own proposed expenditure and funding source. Extract each funded sub-activity as its own action (strategy_text = the sub-activity), NOT one action per group heading — otherwise the per-item budgets and funding sources are lost.
+
+Funding & budget conventions:
+- "No Site Funding Required" or "N/A District Funded" means the district provides it: set is_district_provided true and budgeted_amount null.
+- When an expenditure shows two figures like "103,000 / 46,407" or "9,600 / 6,608", the first is the budgeted amount and the second the actual/spent — use the first as budgeted_amount.
+- "(Repeated Expenditure)" / "Repeated Exp - Goal 1" means the same dollars are also counted under another goal; record the action but note the repetition in `unresolved` so plan totals are not double-summed.
+- funding_source_raw examples to preserve verbatim: "Title 1", "Supplemental", "Site" / "Site-Based", "Restricted Lottery", "AVID / Site Supplemental", "District Funded".
+
+Metric links come from each goal's "Annual Measurable Outcomes" table (e.g. CAASPP ELA/Math percent meeting standard, attendance rate, suspension rate, ASSETS program participation). Map to a conformed metric_id only on a clear match, else null; direction is "increase" except suspension rate which is "decrease". Fill baseline/target values and school-year labels (e.g. "2023-24" to "2024-25") when the table states them.
+
+Identity: the cover page names the school and the 14-digit County-District-School (CDS) code (e.g. "56 72652 5637822" -> 56726525637822). Put the CDS in state_school_id and its 7-digit prefix in state_district_id.
+
+Adoption: the plan states the Governing Board approved the revision on a date (e.g. "approved this revision ... on June 24, 2025") -> adopted_date 2025-06-24, status "approved". Plan-level ConApp / Title I / Supplemental / Restricted Lottery / Site-Based totals in the Budget Summary are program allocations, not action budgets — note them in `unresolved`.
