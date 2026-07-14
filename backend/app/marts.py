@@ -76,7 +76,10 @@ def fetch_attendance_plans(
             "SELECT pe.plan_id, pe.plan_year, pe.document, "
             "       s.school_id, s.school_name, s.school_level "
             "FROM plan_extraction pe JOIN dim_school s ON pe.school_id = s.school_id "
-            "WHERE s.district_id = :d AND (:lvl IS NULL OR s.school_level = :lvl) "
+            # CAST the optional param: a bare ":lvl IS NULL" is untyped and pg8000
+            # (the Cloud SQL Connector driver) rejects it — 42P18 "could not determine
+            # data type of parameter". psycopg2 tolerates it; the connector does not.
+            "WHERE s.district_id = :d AND (CAST(:lvl AS text) IS NULL OR s.school_level = :lvl) "
             "ORDER BY s.school_name"
         ),
         {"d": district_id, "lvl": level},
