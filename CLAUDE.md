@@ -1,12 +1,13 @@
 # Working in this repo (read first)
 
-This is a **modular** codebase. The point of the module structure is that you can work on
-one module in one AI session without colliding with work happening in another module (or on
-another machine). To keep that true, follow these rules.
+This is a **modular** codebase. The goal: each module is a self-contained slice with its own
+tests, so a change stays *contained* — you can work on one module, test it in isolation, and not
+make the rest of the app brittle. Modularity comes from the **boundaries and the tests**, not
+from process ceremony. Keep the boundaries clean; how you sequence the work is a judgment call.
 
 ## The one rule that matters
 
-> **Stay inside one module per session, and depend only on `core` — never on another module.**
+> **Keep each change inside one module, and depend only on `core` — never import another module.**
 
 A file in a feature module `backend/<X>/` (e.g. `backend/likeschools/`) may import from:
 - `core` (the shared contract — star schema, db, security, config, vocab), and
@@ -26,7 +27,10 @@ human, don't fold it silently into a feature change.
 
 ## How to work
 
-1. **Branch per unit of work:** `git switch -c feat/<module>-<short-desc>`. One module per branch.
+1. **Use branches when they help — not by rule.** A larger, riskier, or worked-in-parallel change
+   earns its own branch + PR; a small, well-contained fix can go straight to `main`. What keeps a
+   change safe is the module boundary and the tests, not the branch. If you do branch, keep it to
+   one module.
 2. **Read the module's own `README.md` and `CLAUDE.md` first** — they say what the module owns
    (which tables), what it reads, and how to change it safely.
 3. **The code is the source of truth**, not the spec docs. Where a `docs/` spec and the code
