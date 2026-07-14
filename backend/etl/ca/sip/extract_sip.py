@@ -413,8 +413,16 @@ def extract_bytes(
     )
     if tool_use is None:
         raise RuntimeError("model did not return the emit_plan tool call")
+    payload = tool_use.input
+    # The model occasionally nests the whole payload under a single junk key (e.g. a
+    # leaked "$PARAMETER_NAME" schema placeholder) instead of emitting fields at the top
+    # level. Unwrap a lone dict-valued key that hides the real plan before validating.
+    if isinstance(payload, dict) and "plan_type" not in payload and len(payload) == 1:
+        inner = next(iter(payload.values()))
+        if isinstance(inner, dict) and "plan_type" in inner:
+            payload = inner
     try:
-        px = PlanExtraction.model_validate(tool_use.input)
+        px = PlanExtraction.model_validate(payload)
     except Exception as e:  # pydantic ValidationError
         raise RuntimeError(f"tool output failed schema validation: {e}")
 
