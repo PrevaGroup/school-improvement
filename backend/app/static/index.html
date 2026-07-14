@@ -26,7 +26,7 @@
   .seg { display: inline-flex; gap: 4px; }
   .seg button { font-size: 13px; padding: 5px 12px; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; color: var(--muted); cursor: pointer; }
   .seg button.on { background: var(--green); color: #fff; border-color: var(--green); }
-  select { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); max-width: 260px; }
+  select { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
   .cols { display: grid; grid-template-columns: 1fr 440px; flex: 1; min-height: 0; }
   .diag { overflow-y: auto; padding: 20px 22px; }
   .chat { border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
@@ -41,7 +41,12 @@
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
   .school-hd { margin-bottom: 14px; }
   .school-name { font-size: 26px; font-weight: 700; line-height: 1.1; }
-  .school-sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .school-sub { color: var(--muted); font-size: 12px; margin-top: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .sub-x { color: var(--muted); }
+  .pill { border-radius: 999px; padding: 3px 12px; cursor: pointer; max-width: 100%; }
+  .pill:hover { border-color: var(--muted); }
+  .pill-lg { font-size: 24px; font-weight: 700; padding: 5px 14px; line-height: 1.15; }
+  .school-sub .pill { color: var(--muted); }
   .feats { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; font-size: 12px; }
   .feats > div { color: var(--muted); }
   .feats b { color: var(--ink); font-weight: 700; }
@@ -122,6 +127,7 @@ const fmtUSD = (n) => n == null ? "—" : "$" + Math.round(n).toLocaleString();
 const fmtPct = (n) => n == null ? "—" : Math.round(n) + "%";
 const fmtNum = (n) => n == null ? "—" : Number(n).toLocaleString();
 const fmt1 = (n) => n == null ? "—" : Number(n).toFixed(1);
+const feat = (v, kind, lab) => html`<div><b>${v == null ? "—" : kind === "pct" ? fmtPct(v) : kind === "num" ? fmtNum(v) : v}</b> <span>${lab}</span></div>`;
 
 function PeerChart({ dist, value, direction }) {
   if (!dist || value == null) return html`<div class="muted">No comparable peer data.</div>`;
@@ -156,19 +162,7 @@ function Diagnostic({ s, peers, level }) {
       : `Worse than ${worseThan}% of similar schools on chronic absenteeism — attendance plan not yet extracted, so the response isn't assessed.`,
     unknown: `Not enough data to assess.`,
   }[s.alignment];
-  const feat = (v, kind, lab) => html`<div><b>${v == null ? "—" : kind === "pct" ? fmtPct(v) : kind === "num" ? fmtNum(v) : v}</b> <span>${lab}</span></div>`;
   return html`
-    <div class="school-hd">
-      <div class="school-name">${s.school_name}</div>
-      <div class="school-sub">${s.district_name || ""}${level ? " · " + level + " school" : ""}</div>
-      <div class="feats">
-        ${feat(s.enroll_total, "num", "enrollment")}
-        ${feat(s.pct_sed, "pct", "econ-disadv")}
-        ${feat(s.pct_el, "pct", "English learners")}
-        ${feat(s.pct_swd, "pct", "students w/ disab.")}
-        ${feat(s.locale, "str", "locale")}
-      </div>
-    </div>
     <div class=${"banner b-" + s.alignment}>${bannerText}</div>
     <div class="card">
       <h3>Indicators</h3>
@@ -290,25 +284,31 @@ function App() {
   }, [current && current.school_id]);
 
   return html`
-    <div class="hdr">
-      <div class="brand"><h1>Attendance diagnostics</h1><div class="sub">Need vs. plan, read against demographically similar schools</div></div>
-      <div class="spacer"></div>
-      <div class="ctrl"><label>District</label>
-        <select value=${districtId} onChange=${(e) => setDistrictId(e.target.value)}>
-          ${districts.length === 0 ? html`<option value=${districtId}>Long Beach Unified</option>` : districts.map(d => html`<option key=${d.district_id} value=${d.district_id}>${d.district_name}</option>`)}
-        </select>
-      </div>
-      <div class="ctrl"><label>Level</label>
-        <div class="seg">${["High", "Middle", "Primary"].map(l => html`<button key=${l} class=${l === level ? "on" : ""} onClick=${() => setLevel(l)}>${l}</button>`)}</div>
-      </div>
-      <div class="ctrl"><label>School</label>
-        <select value=${current ? current.school_id : ""} onChange=${(e) => setSel(schools.find(s => s.school_id === e.target.value))}>
-          ${schools.length === 0 ? html`<option>${loadState === "loading" ? "loading…" : loadState === "error" ? "failed to load — check the API" : "no plans loaded yet — run load_plan_extractions"}</option>` : schools.map(s => html`<option key=${s.school_id} value=${s.school_id}>${s.alignment === "unmet_need" ? "⚠ " : ""}${s.school_name}</option>`)}
-        </select>
-      </div>
-    </div>
     <div class="cols">
-      <div class="diag">${html`<${Diagnostic} s=${current} peers=${peers} level=${level} />`}</div>
+      <div class="diag">
+        <div class="school-hd">
+          <select class="pill pill-lg" title="Select a school" value=${current ? current.school_id : ""} onChange=${(e) => setSel(schools.find(s => s.school_id === e.target.value))}>
+            ${schools.length === 0 ? html`<option>${loadState === "loading" ? "loading…" : loadState === "error" ? "failed to load" : "no schools"}</option>` : schools.map(s => html`<option key=${s.school_id} value=${s.school_id}>${s.alignment === "unmet_need" ? "⚠ " : ""}${s.school_name}</option>`)}
+          </select>
+          <div class="school-sub">
+            <select class="pill" title="Select a district" value=${districtId} onChange=${(e) => setDistrictId(e.target.value)}>
+              ${districts.length === 0 ? html`<option value=${districtId}>Long Beach Unified</option>` : districts.map(d => html`<option key=${d.district_id} value=${d.district_id}>${d.district_name}</option>`)}
+            </select>
+            <select class="pill" title="Select a level" value=${level} onChange=${(e) => setLevel(e.target.value)}>
+              ${["High", "Middle", "Primary"].map(l => html`<option key=${l} value=${l}>${l}</option>`)}
+            </select>
+            <span class="sub-x">schools</span>
+          </div>
+          ${current ? html`<div class="feats">
+            ${feat(current.enroll_total, "num", "enrollment")}
+            ${feat(current.pct_sed, "pct", "econ-disadv")}
+            ${feat(current.pct_el, "pct", "English learners")}
+            ${feat(current.pct_swd, "pct", "students w/ disab.")}
+            ${feat(current.locale, "str", "locale")}
+          </div>` : null}
+        </div>
+        ${html`<${Diagnostic} s=${current} peers=${peers} level=${level} />`}
+      </div>
       <div class="chat">${html`<${Chat} school=${current} level=${level} />`}</div>
     </div>`;
 }
