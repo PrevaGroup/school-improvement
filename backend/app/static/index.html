@@ -28,8 +28,8 @@
   .seg button.on { background: var(--green); color: #fff; border-color: var(--green); }
   select { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
   .cols { display: grid; grid-template-columns: 1fr 440px; flex: 1; min-height: 0; }
-  .diag { overflow-y: auto; padding: 20px 22px; }
-  .chat { border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+  .diag { overflow-y: auto; padding: 20px 22px; min-width: 0; }
+  .chat { border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); min-width: 0; }
   .chat-hd { padding: 11px 14px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; }
   .chat-hd .muted { font-weight: 400; font-size: 11px; }
   @media (max-width: 900px) {
