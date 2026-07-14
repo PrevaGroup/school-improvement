@@ -7,6 +7,7 @@ must be readable so RLS policies can evaluate write scope.
 from __future__ import annotations
 
 from sqlalchemy import Boolean, Integer, Numeric, SmallInteger, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -70,6 +71,23 @@ class DimSchool(Base):
     latitude: Mapped[float | None] = mapped_column(Numeric)
     longitude: Mapped[float | None] = mapped_column(Numeric)
     peer_group_id: Mapped[str | None] = mapped_column(Text)         # -> dim_peer_group
+
+
+class PlanExtraction(Base):
+    """The full extracted plan JSON (schema.ExtractedPlan) as a queryable JSONB blob.
+
+    Public tier (SPSAs are published documents), so served without a tenant binding.
+    This holds everything the extractor produced — provenance quotes, funding text,
+    proposed metric links — that the minimal normalized plan_* tables drop. It is the
+    serving source for the plan-content marts until §5.2 (bridges/provenance) is built.
+    """
+    __tablename__ = "plan_extraction"
+    plan_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    school_id: Mapped[str | None] = mapped_column(Text)      # NCES; joins dim_school
+    plan_year: Mapped[str | None] = mapped_column(Text)
+    plan_type: Mapped[str | None] = mapped_column(Text)
+    extracted_at: Mapped[str | None] = mapped_column(Text)
+    document: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
 
 class DimDate(Base):

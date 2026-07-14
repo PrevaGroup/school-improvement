@@ -152,6 +152,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--context-file", type=Path, default=None, help="district structure/format notes injected into every prompt")
     ap.add_argument("--alias", action="append", default=[], metavar="STEM=SCHOOL_ID",
                     help="pin a filename stem to a school_id when the name won't match (repeatable), e.g. --alias CAMS=062250...")
+    ap.add_argument("--level", default=None, help="only extract schools whose dim_school.school_level matches (e.g. High)")
     ap.add_argument("--max-tokens", type=int, default=32000)
     ap.add_argument("--limit", type=int, default=None, help="process at most N PDFs (for a trial run)")
     ap.add_argument("--dry-run", action="store_true", help="resolve + report matches only; no API calls")
@@ -204,6 +205,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             unmatched.append(fname)
             print(f"[batch] UNMATCHED  {fname}", file=sys.stderr)
             continue
+        if args.level and (school.get("school_level") or "") != args.level:
+            continue  # level filter: skip schools that aren't the requested level
         print(f"[batch] {fname}  ->  {school['school_name']} (NCES {school['school_id']})", file=sys.stderr)
         if args.dry_run:
             matched.append((fname, school["school_id"]))

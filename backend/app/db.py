@@ -70,3 +70,17 @@ def get_db(tenant_id: str = Depends(get_current_tenant)) -> Iterator[Session]:
     """FastAPI dependency: a session already scoped to the caller's tenant."""
     with tenant_session(tenant_id) as session:
         yield session
+
+
+def get_db_public() -> Iterator[Session]:
+    """FastAPI dependency for PUBLIC endpoints — no tenant binding, no auth.
+
+    Reads only public rows: RLS `p_read` admits `visibility='public'` without a tenant
+    GUC, and non-RLS reference tables (dim_school, plan_extraction) are always readable.
+    Never use for private data.
+    """
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
