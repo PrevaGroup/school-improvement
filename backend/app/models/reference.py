@@ -6,7 +6,9 @@ must be readable so RLS policies can evaluate write scope.
 """
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Integer, Numeric, SmallInteger, Text
+from datetime import datetime
+
+from sqlalchemy import ARRAY, Boolean, Float, Integer, Numeric, SmallInteger, Text, TIMESTAMP
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -88,6 +90,60 @@ class PlanExtraction(Base):
     plan_type: Mapped[str | None] = mapped_column(Text)
     extracted_at: Mapped[str | None] = mapped_column(Text)
     document: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
+# --------------------------------------------------------------------------- #
+# "Schools Like You" — input-matched demographic peer groups (public marts).
+# See backend/likeschools/school-classification-spec.md. All public/no-RLS:
+# computed from the public federal/state universe, identical for every tenant.
+# NB (deviation from the spec's DDL): keyed on `school_id` (the platform's NCES
+# identity), not `nces_id`, to match the deployed dim_school.
+# --------------------------------------------------------------------------- #
+class FeatMatchVector(Base):
+    """The standardized demographic match vector per school (spec §5.2)."""
+    __tablename__ = "feat_match_vector"
+    school_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    school_year: Mapped[str] = mapped_column(Text, primary_key=True)
+    level_bucket: Mapped[str | None] = mapped_column(Text)  # Primary|Middle|High|Combined-Other
+    f_econ_disadv: Mapped[float | None] = mapped_column(Float)
+    f_el: Mapped[float | None] = mapped_column(Float)
+    f_swd: Mapped[float | None] = mapped_column(Float)
+    f_enroll_log: Mapped[float | None] = mapped_column(Float)
+    f_locale_city: Mapped[float | None] = mapped_column(Float)
+    f_locale_suburb: Mapped[float | None] = mapped_column(Float)
+    f_locale_town: Mapped[float | None] = mapped_column(Float)
+    f_locale_rural: Mapped[float | None] = mapped_column(Float)
+    n_imputed: Mapped[int] = mapped_column(SmallInteger, server_default="0")
+
+
+class MartSchoolPeer(Base):
+    """Precomputed k-nearest peer lists — the 'schools like you' artifact (spec §5.2)."""
+    __tablename__ = "mart_school_peer"
+    school_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    peer_school_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    school_year: Mapped[str] = mapped_column(Text, primary_key=True)
+    rank: Mapped[int] = mapped_column(SmallInteger)          # 1..k, nearest first
+    distance: Mapped[float] = mapped_column(Float)           # Mahalanobis distance
+    level_bucket: Mapped[str | None] = mapped_column(Text)
+    low_confidence: Mapped[bool] = mapped_column(Boolean, server_default="false")
+
+
+class ModelPartitionStats(Base):
+    """Per-partition model provenance for reproducibility/audit (spec §5.2).
+
+    `precision_mat` is the inverse covariance S^-1, stored row-major flattened;
+    reshape to (len(feature_names), len(feature_names)).
+    """
+    __tablename__ = "model_partition_stats"
+    school_year: Mapped[str] = mapped_column(Text, primary_key=True)
+    level_bucket: Mapped[str] = mapped_column(Text, primary_key=True)
+    feature_names: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    means: Mapped[list[float]] = mapped_column(ARRAY(Float))
+    sds: Mapped[list[float]] = mapped_column(ARRAY(Float))
+    shrinkage: Mapped[float | None] = mapped_column(Float)
+    precision_mat: Mapped[list[float]] = mapped_column(ARRAY(Float))
+    k: Mapped[int | None] = mapped_column(SmallInteger)
+    built_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
 
 class DimDate(Base):

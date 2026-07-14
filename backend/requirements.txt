@@ -15,6 +15,8 @@ gcsfs>=2024.5
 # SIP plan extractor: Claude reads the PDF natively; pypdf counts pages (etl/ca/sip/)
 anthropic>=0.40
 pypdf>=4.0
+# "Schools Like You" peer matching: Ledoit-Wolf covariance + Mahalanobis kNN (etl/peers/)
+scikit-learn>=1.3
 # Cloud Run -> Cloud SQL without the Auth Proxy (app/db.py, when INSTANCE_CONNECTION_NAME set)
 cloud-sql-python-connector[pg8000]>=1.9
 pg8000>=1.31

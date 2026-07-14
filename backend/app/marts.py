@@ -120,3 +120,121 @@ def attendance_plans(
 ) -> dict:
     """Attendance plans across a district's schools (default: Long Beach high schools)."""
     return fetch_attendance_plans(db, district_id, level)
+
+
+# --------------------------------------------------------------------------- #
+# "Schools Like You" serving (spec §6). Reads the public peer marts + public
+# fact_metric; the matching engine (etl/peers) has no read access to outcomes,
+# which enforces D1 (outcomes can't leak into the distance) architecturally.
+# --------------------------------------------------------------------------- #
+def _latest_peer_year(db: Session, school_id: str) -> str | None:
+    return db.execute(
+        text("SELECT max(school_year) FROM mart_school_peer WHERE school_id = :s"),
+        {"s": school_id},
+    ).scalar()
+
+
+def fetch_like_schools(db: Session, school_id: str, k: int = 50, school_year: str | None = None) -> dict:
+    """The ordered peer list for a school (pure lookup)."""
+    yr = school_year or _latest_peer_year(db, school_id)
+    if not yr:
+        return {"school_id": school_id, "peers": [], "note": "no peer set (has the peer batch run?)"}
+    self_row = db.execute(
+        text("SELECT school_name, district_name, school_level FROM dim_school WHERE school_id = :s"),
+        {"s": school_id},
+    ).mappings().first()
+    peers = db.execute(
+        text(
+            "SELECT p.rank, p.distance, p.low_confidence, p.level_bucket, p.peer_school_id, "
+            "       s.school_name, s.district_name, s.school_level, s.enroll_total, "
+            "       s.pct_sed, s.pct_el, s.pct_swd "
+            "FROM mart_school_peer p JOIN dim_school s ON s.school_id = p.peer_school_id "
+            "WHERE p.school_id = :sid AND p.school_year = :yr AND p.rank <= :k ORDER BY p.rank"
+        ),
+        {"sid": school_id, "yr": yr, "k": k},
+    ).mappings().all()
+    return {
+        "school_id": school_id,
+        "school_name": self_row["school_name"] if self_row else None,
+        "school_level": self_row["school_level"] if self_row else None,
+        "school_year": yr,
+        "peer_count": len(peers),
+        "peers": [dict(p) for p in peers],
+    }
+
+
+def _pctile(sorted_vals: list[float], q: float) -> float | None:
+    if not sorted_vals:
+        return None
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    idx = (q / 100) * (len(sorted_vals) - 1)
+    lo = int(idx)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    return sorted_vals[lo] * (1 - (idx - lo)) + sorted_vals[hi] * (idx - lo)
+
+
+def fetch_peer_benchmark(db: Session, school_id: str, metric_id: str, school_year: str | None = None) -> dict:
+    """Target school's metric value + its peer-group distribution and percentile.
+
+    Guardrail (spec §6): `target_value` is the absolute number and `direction` says which
+    way is good, so peer-relative percentile is never shown as the ceiling. (A fixed
+    proficiency bar would enrich this once `ref_benchmark` is populated.)
+    """
+    yr = school_year or _latest_peer_year(db, school_id)
+    if not yr:
+        return {"error": "no peer set for this school (run etl.peers.build_peers)"}
+    peers = db.execute(
+        text("SELECT peer_school_id FROM mart_school_peer WHERE school_id = :s AND school_year = :y"),
+        {"s": school_id, "y": yr},
+    ).scalars().all()
+    if not peers:
+        return {"error": "no peer set for this school"}
+
+    stmt = text(
+        "SELECT f.school_id, f.value, p.school_year "
+        "FROM fact_metric f JOIN dim_period p ON f.period_id = p.period_id "
+        "WHERE f.metric_id = :m AND f.student_group_id = 'all' AND f.value IS NOT NULL "
+        "AND f.school_id IN :ids"
+    ).bindparams(bindparam("ids", expanding=True))
+    latest: dict[str, tuple[float, str]] = {}
+    for r in db.execute(stmt, {"m": metric_id, "ids": list(peers) + [school_id]}).mappings():
+        cur = latest.get(r["school_id"])
+        y = r["school_year"] or ""
+        if cur is None or y > cur[1]:
+            latest[r["school_id"]] = (float(r["value"]), y)
+
+    target = latest.get(school_id)
+    peer_vals = sorted(latest[p][0] for p in peers if p in latest)
+    direction = db.execute(text("SELECT direction FROM dim_metric WHERE metric_id = :m"), {"m": metric_id}).scalar()
+
+    distribution = None
+    percentile = None
+    if peer_vals:
+        distribution = {
+            "n": len(peer_vals), "min": peer_vals[0], "p25": _pctile(peer_vals, 25),
+            "median": _pctile(peer_vals, 50), "p75": _pctile(peer_vals, 75), "max": peer_vals[-1],
+        }
+        if target:
+            percentile = round(100 * sum(1 for v in peer_vals if v <= target[0]) / len(peer_vals), 1)
+    return {
+        "school_id": school_id, "metric_id": metric_id, "direction": direction, "school_year": yr,
+        "target_value": target[0] if target else None, "target_year": target[1] if target else None,
+        "peer_distribution": distribution, "target_percentile_in_peers": percentile,
+    }
+
+
+@router.get("/like-schools")
+def like_schools_ep(school_id: str, k: int = 50, db: Session = Depends(get_db_public)) -> dict:
+    """Schools most demographically similar to `school_id` (default k=50)."""
+    return fetch_like_schools(db, school_id, k)
+
+
+@router.get("/peer-benchmark")
+def peer_benchmark_ep(
+    school_id: str,
+    metric_id: str = "chronic_absenteeism_rate",
+    db: Session = Depends(get_db_public),
+) -> dict:
+    """A school's metric value vs. its peer group (default: chronic absenteeism)."""
+    return fetch_peer_benchmark(db, school_id, metric_id)
