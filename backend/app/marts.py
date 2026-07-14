@@ -29,7 +29,10 @@ def _hit(*texts: str | None) -> bool:
 
 
 def _link_is_attendance(ml: dict) -> bool:
-    return ml.get("proposed_metric_id") == ATT_METRIC or _hit(ml.get("raw_metric_text"))
+    # Require the plan's own metric TEXT to corroborate attendance. A bare proposed_metric_id
+    # can be a model mislabel (e.g. a Sense-of-Belonging goal tagged chronic_absenteeism), and
+    # trusting it alone was sweeping non-attendance goals into the filter — so we don't anymore.
+    return _hit(ml.get("raw_metric_text"))
 
 
 def attendance_slice(doc: dict) -> list[dict]:
@@ -37,12 +40,15 @@ def attendance_slice(doc: dict) -> list[dict]:
     goals_out = []
     for g in doc.get("goals", []) or []:
         g_links = g.get("metric_links", []) or []
-        g_att = _hit(g.get("statement")) or any(_link_is_attendance(m) for m in g_links)
+        # "Directly attendance" is judged by the goal's OWN statement, not a model-proposed
+        # metric link. Only a directly-attendance goal sweeps in all its actions; otherwise an
+        # action must itself be attendance-relevant (no unrelated PD riding in on the goal flag).
+        g_direct = _hit(g.get("statement"))
         actions_out = []
         for a in g.get("actions", []) or []:
             a_links = a.get("metric_links", []) or []
             a_att = _hit(a.get("strategy_text")) or any(_link_is_attendance(m) for m in a_links)
-            if g_att or a_att:
+            if g_direct or a_att:
                 actions_out.append({
                     "action_number": a.get("action_number"),
                     "strategy_text": a.get("strategy_text"),
@@ -50,7 +56,7 @@ def attendance_slice(doc: dict) -> list[dict]:
                     "funding_source_raw": a.get("funding_source_raw"),
                     "provenance": a.get("provenance"),
                 })
-        if g_att or actions_out:
+        if g_direct or actions_out:
             goals_out.append({
                 "goal_number": g.get("goal_number"),
                 "goal_type": g.get("goal_type"),
