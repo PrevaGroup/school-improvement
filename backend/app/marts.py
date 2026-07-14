@@ -195,11 +195,20 @@ def fetch_like_schools(db: Session, school_id: str, k: int = 50, school_year: st
             y = r["school_year"] or ""
             if cur is None or y > cur[1]:
                 chronic[r["school_id"]] = (float(r["value"]), y)
+    # Which peers have an extracted SIP on file (so the user can spot ones to pull a plan for).
+    with_plan: set[str] = set()
+    if peer_ids:
+        with_plan = set(db.execute(
+            text("SELECT school_id FROM plan_extraction WHERE school_id IN :ids").bindparams(
+                bindparam("ids", expanding=True)),
+            {"ids": peer_ids},
+        ).scalars().all())
     peers_out = []
     for p in peers:
         d = dict(p)
         ch = chronic.get(p["peer_school_id"])
         d["chronic_absenteeism_rate"] = ch[0] if ch else None
+        d["has_plan"] = p["peer_school_id"] in with_plan
         peers_out.append(d)
     return {
         "school_id": school_id,

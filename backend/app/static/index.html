@@ -35,9 +35,10 @@
   .feats > div { color: var(--muted); }
   .feats b { color: var(--ink); font-weight: 700; }
   .plan-sum { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
-  .tbl-wrap { overflow-x: auto; }
+  .tbl-wrap { overflow: auto; max-height: 340px; }
   .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .tbl th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .tbl th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .sip-dot { color: var(--green); font-size: 9px; margin-left: 6px; vertical-align: middle; }
   .tbl td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
   .tbl td.r, .tbl th.r { text-align: right; white-space: nowrap; }
   .tbl .d { color: var(--muted); font-size: 11px; }
@@ -176,7 +177,7 @@ function Diagnostic({ s, peers, level }) {
           <tbody>
             ${peers.map((p, i) => html`<tr key=${i}>
               <td>${p.rank}</td>
-              <td>${p.school_name}<div class="d">${p.district_name}</div></td>
+              <td>${p.school_name}${p.has_plan ? html`<span class="sip-dot" title="SPSA on file">●</span>` : null}<div class="d">${p.district_name}</div></td>
               <td class="r">${fmtNum(p.enroll_total)}</td>
               <td class="r">${fmtPct(p.pct_sed)}</td>
               <td class="r">${fmtPct(p.pct_el)}</td>
@@ -186,7 +187,7 @@ function Diagnostic({ s, peers, level }) {
             </tr>`)}
           </tbody>
         </table></div>
-        <div class="muted" style=${{ fontSize: "11px", marginTop: "6px" }}>Ranked by demographic similarity (enrollment · econ-disadv · EL · SWD · locale). Chronic abs = each peer's latest chronic-absenteeism rate.</div>`
+        <div class="muted" style=${{ fontSize: "11px", marginTop: "6px" }}>Ranked by demographic similarity (enrollment · econ-disadv · EL · SWD · locale). Chronic abs = each peer's latest chronic-absenteeism rate. <span class="sip-dot">●</span> = SPSA on file.</div>`
         : html`<div class="muted">No peer set for this school.</div>`)}
     </div>`;
 }
@@ -245,7 +246,7 @@ function App() {
   useEffect(() => {
     if (!current) { setPeers(null); return; }
     setPeers(null);
-    fetch(`/marts/like-schools?school_id=${current.school_id}&k=6`).then(r => r.json()).then(d => setPeers(d.peers || []));
+    fetch(`/marts/like-schools?school_id=${current.school_id}&k=50`).then(r => r.json()).then(d => setPeers(d.peers || []));
   }, [current && current.school_id]);
 
   return html`
