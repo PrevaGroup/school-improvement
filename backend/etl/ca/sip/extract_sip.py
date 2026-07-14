@@ -171,6 +171,32 @@ def _scope_school_id(px: PlanExtraction, school_id_nces: Optional[str]) -> Optio
     return school_id_nces or px.school_id or px.state_school_id
 
 
+def _resolve_school_id_from_cds(cds: Optional[str]) -> Optional[str]:
+    """Resolve a CA CDS code to its NCES school_id via dim_school (the conformed crosswalk).
+
+    The model reads the CDS off the cover page (`state_school_id`); this turns it into the
+    federal `ncessch` the star schema keys on, so a single-file extraction wires up `school_id`
+    without a human typing an id. Best-effort: returns None if there's no CDS, no DB, or no
+    match — extraction (and --dry-run) still work offline, and the plan_id then falls back to
+    CDS scope exactly as before.
+    """
+    if not cds:
+        return None
+    try:
+        from sqlalchemy import text as _text
+
+        from .._shared import _engine
+
+        with _engine().connect() as conn:
+            return conn.execute(
+                _text("SELECT school_id FROM dim_school WHERE state_school_id = :cds"),
+                {"cds": cds},
+            ).scalar()
+    except Exception as e:  # DB unreachable / driver missing — never fail the extraction over this
+        print(f"[extract] CDS->NCES resolve skipped for {cds}: {e}", file=sys.stderr)
+        return None
+
+
 def assemble_plan(
     px: PlanExtraction,
     *,
@@ -432,6 +458,14 @@ def extract_bytes(
         f"tokens in={usage.input_tokens} out={usage.output_tokens}",
         file=sys.stderr,
     )
+
+    # No CLI-supplied NCES id? Resolve it from the CDS the model read, so school_id (and the
+    # NCES-scoped plan_id) wire up automatically — no per-school hardcoded ids.
+    if school_id_nces is None:
+        resolved = _resolve_school_id_from_cds(px.state_school_id)
+        if resolved:
+            print(f"[extract] resolved school_id {resolved} <- CDS {px.state_school_id}", file=sys.stderr)
+            school_id_nces = resolved
 
     return assemble_plan(
         px,
