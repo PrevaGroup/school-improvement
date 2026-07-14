@@ -55,6 +55,17 @@ NearestNeighbors(metric='mahalanobis', VI=precision_) → keep k nearest, drop s
 - Keyed on `dim_school.school_id` (NCES) + `school_year` (text), **not** `nces_id`/smallint.
 - Match features come from `dim_school`: `pct_sed`, `pct_el`, `pct_swd`, `enroll_total` (log1p),
   `locale` (one-hot: city/suburb/town/rural).
+- The economic-disadvantage feature (`f_econ_disadv`) is **CA SED**, not the federal **FRPL** the
+  spec's "% economically disadvantaged (or FRPL)" wording (§3.1) implies. They are *not* the same
+  population: CA SED (CDE/CALPADS) = FRPM-eligible **OR** neither parent holds a HS diploma (plus
+  foster/homeless/migrant/direct-certified), a union that flags more students than FRPL's pure
+  income proxy (EDFacts FS033/CCD, NSLP ≤130%/≤185% of poverty). Harmless while the universe is
+  CA-only (values are z-scored within partition, so it's internally conformed). **But the moment a
+  non-CA state is ingested via EDFacts/CCD FRPL, `pct_sed` and `pct_frpl` would land in the same
+  `f_econ_disadv` slot while measuring different populations — cross-state peers would then match on
+  an apples-to-oranges economic axis.** The honest fix for multi-state is a conformed
+  economic-disadvantage definition in `core` vocab (pick one basis, or carry both and choose
+  per-source), not silent pooling.
 - **Race is excluded** from the match vector (spec D8 default; `dim_school` carries no per-school
   race anyway).
 - A single run-year label (`--year`, default = `max(dim_school.school_year)`) covers all current
