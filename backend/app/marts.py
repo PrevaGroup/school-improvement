@@ -217,10 +217,17 @@ def fetch_peer_benchmark(db: Session, school_id: str, metric_id: str, school_yea
         }
         if target:
             percentile = round(100 * sum(1 for v in peer_vals if v <= target[0]) / len(peer_vals), 1)
+    # Direction-adjusted so higher ALWAYS means "doing better than peers" — the raw
+    # percentile (% of peers at/below the value) reverses meaning for lower_better metrics.
+    performance = None
+    if percentile is not None and direction in ("higher_better", "lower_better"):
+        performance = round(100 - percentile if direction == "lower_better" else percentile, 1)
     return {
         "school_id": school_id, "metric_id": metric_id, "direction": direction, "school_year": yr,
         "target_value": target[0] if target else None, "target_year": target[1] if target else None,
-        "peer_distribution": distribution, "target_percentile_in_peers": percentile,
+        "peer_distribution": distribution,
+        "target_percentile_in_peers": percentile,       # raw: % of peers at/below the value
+        "peer_performance_percentile": performance,      # direction-applied: higher = better than peers
     }
 
 
