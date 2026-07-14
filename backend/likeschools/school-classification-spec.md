@@ -27,7 +27,7 @@ Each locked decision traces to the direction established in the literature revie
 | D6 | **Coarse instructional level as a hard partition** | Primary / Middle / High / Combined-Other; match only within level | California ranked similar schools within type; England groups by phase; NCES CCD ships a derived `school_level` ([CCD](https://nces.ed.gov/ccd/pub_overview.asp)) |
 | D7 | **Peer count k = 50 (locked; configurable)** | `k=50`, exposed as a parameter but fixed for MVP | Operating precedents bracket the range: Texas 40, Australia up to 60, California 100. 50 sits at the center; confirmed as the MVP default |
 | D8 | **Non-outcome-derived weights** | Equal feature treatment (Mahalanobis' implicit inverse-covariance weighting only); no weights fit against results | Endogeneity caution: ICSEA/California SCI derived weights from test outcomes, leaking results into the "inputs-only" metric ([lit review §7](./school-classification-lit-review.md)) |
-| D9 | **Similarity is computed on public data → it is a public artifact** | Peer groups carry no `tenant_id`; live in reference/mart tables, not private tenant tables | Matches the runbook's public-vs-private seam; only the *indicator values* shown across a group are tenant-private ([mvp-setup-runbook](./mvp-setup-runbook.md)) |
+| D9 | **Similarity is computed on public data → it is a public artifact** | Peer groups carry no `tenant_id`; live in reference/mart tables, not private tenant tables | Matches the platform's public-vs-private seam; only the *indicator values* shown across a group are tenant-private ([ARCHITECTURE](../../ARCHITECTURE.md)) |
 
 ---
 
@@ -172,11 +172,11 @@ CREATE TABLE model_partition_stats (
 );
 ```
 
-Note on **D9 / RLS**: `feat_match_vector`, `mart_school_peer`, and `model_partition_stats` are **public reference tables** — no `tenant_id`, no row-level security. They are computed from the public federal universe and are identical for every tenant. Only `fact_indicator` (the values shown *across* a peer group) is tenant-private and behind `FORCE ROW LEVEL SECURITY`. This keeps the similarity artifact cleanly on the public side of the isolation seam described in the runbook.
+Note on **D9 / RLS**: `feat_match_vector`, `mart_school_peer`, and `model_partition_stats` are **public reference tables** — no `tenant_id`, no row-level security. They are computed from the public federal universe and are identical for every tenant. Only `fact_indicator` (the values shown *across* a peer group) is tenant-private and behind `FORCE ROW LEVEL SECURITY`. This keeps the similarity artifact cleanly on the public side of the isolation seam described in `ARCHITECTURE.md`.
 
 ### 5.3 The batch job
 
-A scheduled Python job (part of the ETL family in the runbook's Phase 5), run **once per CCD release / school year**:
+A scheduled Python job (part of the ETL family; see `ARCHITECTURE.md`), run **once per CCD release / school year**:
 
 1. Assemble `feat_match_vector` from the reference tables, per school, tagged with `level_bucket`.
 2. For each of the four partitions: impute → standardize → Ledoit-Wolf covariance → `NearestNeighbors(metric='mahalanobis', VI=precision_)`.
@@ -247,4 +247,4 @@ Design-direction citations (verified in the companion review):
 
 Companion documents in this project:
 - `school-classification-lit-review.md` — the evidence base
-- `mvp-setup-runbook.md` — the platform/architecture context (public-vs-private seam, ETL phase, RLS)
+- [`ARCHITECTURE.md`](../../ARCHITECTURE.md) — the platform/architecture context (public-vs-private seam, ETL, RLS)
