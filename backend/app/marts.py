@@ -104,7 +104,7 @@ def fetch_attendance_plans(
     # (below) lets the diagnostic + UI treat a missing plan as a data gap, not a finding.
     rows = db.execute(
         text(
-            "SELECT s.school_id, s.school_name, s.school_level, "
+            "SELECT s.school_id, s.school_name, s.school_level, s.district_name, "
             "       s.enroll_total, s.pct_sed, s.pct_el, s.pct_swd, s.locale, "
             "       pe.plan_id, pe.plan_year, pe.document "
             "FROM dim_school s "
@@ -143,6 +143,7 @@ def fetch_attendance_plans(
             "school_id": r["school_id"],
             "school_name": r["school_name"],
             "school_level": r["school_level"],
+            "district_name": r["district_name"],
             # Peer-match features (what "schools like you" is computed from) — shown under the title.
             "enroll_total": r["enroll_total"],
             "pct_sed": float(r["pct_sed"]) if r["pct_sed"] is not None else None,
@@ -383,6 +384,7 @@ def fetch_attendance_diagnostic(
 
         out.append({
             "school_id": s["school_id"], "school_name": s["school_name"],
+            "district_name": s.get("district_name"),
             "has_plan": has_plan,
             "enroll_total": s.get("enroll_total"), "pct_sed": s.get("pct_sed"),
             "pct_el": s.get("pct_el"), "pct_swd": s.get("pct_swd"), "locale": s.get("locale"),
@@ -412,3 +414,18 @@ def attendance_diagnostic_ep(
 ) -> dict:
     """Per-school attendance need vs. plan response, sorted with 'unmet_need' first."""
     return fetch_attendance_diagnostic(db, district_id, level)
+
+
+@router.get("/districts")
+def districts_ep(db: Session = Depends(get_db_public)) -> dict:
+    """Districts with at least one extracted SIP — the demo's selectable districts (so the
+    picker surfaces every onboarded district, e.g. Long Beach + Ventura, not just one)."""
+    rows = db.execute(
+        text(
+            "SELECT s.district_id, max(s.district_name) AS district_name, count(*) AS plan_count "
+            "FROM plan_extraction pe JOIN dim_school s ON pe.school_id = s.school_id "
+            "WHERE s.district_id IS NOT NULL "
+            "GROUP BY s.district_id ORDER BY max(s.district_name)"
+        )
+    ).mappings().all()
+    return {"districts": [dict(r) for r in rows]}

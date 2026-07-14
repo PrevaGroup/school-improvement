@@ -30,6 +30,14 @@
   .cols { display: grid; grid-template-columns: 1fr 440px; flex: 1; min-height: 0; }
   .diag { overflow-y: auto; padding: 20px 22px; }
   .chat { border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+  .chat-hd { padding: 11px 14px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; }
+  .chat-hd .muted { font-weight: 400; font-size: 11px; }
+  @media (max-width: 900px) {
+    #root { height: auto; min-height: 100%; }
+    .cols { grid-template-columns: 1fr; flex: none; }
+    .diag { overflow: visible; }
+    .chat { border-left: 0; border-top: 1px solid var(--line); height: 72vh; }
+  }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
   .school-hd { margin-bottom: 14px; }
   .school-name { font-size: 26px; font-weight: 700; line-height: 1.1; }
@@ -122,7 +130,7 @@ function PeerChart({ dist, value, direction }) {
   const lo = 0, hi = 100, W = 320, x = (v) => ((v - lo) / (hi - lo)) * W;
   const vx = x(value), vAnchor = vx > W - 22 ? "end" : (vx < 22 ? "start" : "middle");
   return html`
-    <svg width="100%" viewBox="0 0 ${W} 44" style=${{ overflow: "visible", maxWidth: "440px" }}>
+    <svg width="100%" viewBox="0 0 ${W} 44" style=${{ overflow: "visible", maxWidth: "440px", display: "block", margin: "0 auto" }}>
       <line x1="0" y1="22" x2=${W} y2="22" stroke="var(--line)" stroke-width="2" />
       <rect x=${x(dist.p25)} y="14" width=${Math.max(1, x(dist.p75) - x(dist.p25))} height="16" fill="var(--line)" rx="3"><title>Middle 50% of the ${dist.n} peers (25th–75th percentile): ${fmt1(dist.p25)}%–${fmt1(dist.p75)}%. Median ${fmt1(dist.median)}%.</title></rect>
       <line x1=${x(dist.median)} y1="12" x2=${x(dist.median)} y2="32" stroke="var(--muted)" stroke-width="2" />
@@ -152,7 +160,7 @@ function Diagnostic({ s, peers, level }) {
   return html`
     <div class="school-hd">
       <div class="school-name">${s.school_name}</div>
-      <div class="school-sub">Long Beach Unified${level ? " · " + level + " school" : ""}</div>
+      <div class="school-sub">${s.district_name || ""}${level ? " · " + level + " school" : ""}</div>
       <div class="feats">
         ${feat(s.enroll_total, "num", "enrollment")}
         ${feat(s.pct_sed, "pct", "econ-disadv")}
@@ -238,6 +246,7 @@ function Chat({ school, level }) {
     finally { setBusy(false); }
   }
   return html`
+    <div class="chat-hd">Ask Claude<span class="muted"> · grounded in the data</span></div>
     <div class="msgs" ref=${msgsRef}>
       ${msgs.length === 0 ? html`<div class="muted" style=${{ fontSize: "13px" }}>Ask about ${scoped} — grounded in the plans, metrics, and peer data.</div>` : null}
       ${msgs.map((m, i) => m.role === "user"
@@ -254,19 +263,23 @@ function Chat({ school, level }) {
 
 function App() {
   const [level, setLevel] = useState("High");
+  const [districtId, setDistrictId] = useState("0622500");
+  const [districts, setDistricts] = useState([]);
   const [schools, setSchools] = useState([]);
   const [sel, setSel] = useState(null);
   const [peers, setPeers] = useState(null);
   const [loadState, setLoadState] = useState("loading"); // loading | ready | error
 
+  useEffect(() => { fetch("/marts/districts").then(r => r.json()).then(d => setDistricts(d.districts || [])).catch(() => {}); }, []);
+
   useEffect(() => {
     setSchools([]); setSel(null); setLoadState("loading");
-    fetch(`/marts/attendance-diagnostic?level=${level}`).then(r => r.json()).then(d => {
+    fetch(`/marts/attendance-diagnostic?district_id=${districtId}&level=${level}`).then(r => r.json()).then(d => {
       setSchools(d.schools || []);
       setSel((d.schools || [])[0] || null);
       setLoadState("ready");
     }).catch(() => setLoadState("error"));
-  }, [level]);
+  }, [level, districtId]);
 
   const current = useMemo(() => schools.find(s => sel && s.school_id === sel.school_id) || sel, [schools, sel]);
 
@@ -278,8 +291,13 @@ function App() {
 
   return html`
     <div class="hdr">
-      <div class="brand"><h1>Attendance diagnostics</h1><div class="sub">Long Beach Unified · need vs. plan, read against similar schools</div></div>
+      <div class="brand"><h1>Attendance diagnostics</h1><div class="sub">Need vs. plan, read against demographically similar schools</div></div>
       <div class="spacer"></div>
+      <div class="ctrl"><label>District</label>
+        <select value=${districtId} onChange=${(e) => setDistrictId(e.target.value)}>
+          ${districts.length === 0 ? html`<option value=${districtId}>Long Beach Unified</option>` : districts.map(d => html`<option key=${d.district_id} value=${d.district_id}>${d.district_name}</option>`)}
+        </select>
+      </div>
       <div class="ctrl"><label>Level</label>
         <div class="seg">${["High", "Middle", "Primary"].map(l => html`<button key=${l} class=${l === level ? "on" : ""} onClick=${() => setLevel(l)}>${l}</button>`)}</div>
       </div>
