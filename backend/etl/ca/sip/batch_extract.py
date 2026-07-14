@@ -143,6 +143,11 @@ def list_pdfs(prefix: str) -> list[tuple[str, str]]:
     return sorted(out)
 
 
+def _exists(uri: str) -> bool:
+    fs, path = fsspec.core.url_to_fs(uri)
+    return fs.exists(path)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Batch-extract a district's SPSA PDFs, resolving identity from dim_school.")
     ap.add_argument("--district-id", required=True, help="dim_school.district_id = 7-digit NCES LEAID (Long Beach = 0622500)")
@@ -155,6 +160,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--level", default=None, help="only extract schools whose dim_school.school_level matches (e.g. High)")
     ap.add_argument("--max-tokens", type=int, default=32000)
     ap.add_argument("--limit", type=int, default=None, help="process at most N PDFs (for a trial run)")
+    ap.add_argument("--skip-existing", action="store_true", help="skip schools whose <school>.json already exists in --out-prefix (cheap resume)")
     ap.add_argument("--dry-run", action="store_true", help="resolve + report matches only; no API calls")
     args = ap.parse_args(argv)
 
@@ -189,6 +195,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     matched: list[tuple[str, str]] = []
     unmatched: list[str] = []
     errors: list[tuple[str, str]] = []
+    skipped: list[str] = []
 
     for fname, src in pdfs:
         name = fname[:-4] if fname.lower().endswith(".pdf") else fname
@@ -211,6 +218,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.dry_run:
             matched.append((fname, school["school_id"]))
             continue
+        out = args.out_prefix.rstrip("/") + "/" + name + ".json"
+        if args.skip_existing and _exists(out):
+            skipped.append(fname)
+            print(f"[batch] SKIP exists {fname}", file=sys.stderr)
+            continue
         ctx = build_context(school, baselines.get(school["school_id"], {}), district_context)
         try:
             plan = extract(
@@ -226,13 +238,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             errors.append((fname, str(e)))
             print(f"[batch] ERROR      {fname}: {e}", file=sys.stderr)
             continue
-        out = args.out_prefix.rstrip("/") + "/" + name + ".json"
         with fsspec.open(out, "w", encoding="utf-8") as fh:
             fh.write(plan.model_dump_json(indent=2))
         matched.append((fname, school["school_id"]))
         print(f"[batch] wrote {out}  ({len(plan.goals)} goals)", file=sys.stderr)
 
-    print(f"\n[batch] done: {len(matched)} matched, {len(unmatched)} unmatched, {len(errors)} errors")
+    print(f"\n[batch] done: {len(matched)} extracted, {len(skipped)} skipped (existing), "
+          f"{len(unmatched)} unmatched, {len(errors)} errors")
     if unmatched:
         print("  unmatched (need a name fix or manual --school-id): " + ", ".join(unmatched))
     for f, e in errors:
