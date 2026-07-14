@@ -34,6 +34,8 @@
   .b-responsive { background: var(--green); }
   .b-ok { background: #6b675e; }
   .b-unknown { background: #9a958a; }
+  /* plan_missing is a data gap, not a verdict: informational treatment, not a color alarm */
+  .b-plan_missing { background: var(--panel); color: var(--muted); border: 1px dashed var(--line); }
   .kpi { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; }
   .kpi .big { font-size: 34px; font-weight: 700; line-height: 1; }
   .kpi .lab { color: var(--muted); font-size: 12px; margin-top: 4px; }
@@ -101,6 +103,9 @@ function Diagnostic({ s, peers }) {
     no_response: `Thin response — the plan funds little or no attendance action.`,
     responsive: `Responsive — a real need met with funded attendance strategies.`,
     ok: `On track relative to peers.`,
+    plan_missing: worseThan == null
+      ? `No attendance plan extracted for this school yet — showing metrics and peers.`
+      : `Worse than ${worseThan}% of similar schools on chronic absenteeism — attendance plan not yet extracted, so the response isn't assessed.`,
     unknown: `Not enough data to assess.`,
   }[s.alignment];
   return html`
@@ -126,7 +131,7 @@ function Diagnostic({ s, peers }) {
               <div class="meta">${fmtUSD(a.budgeted_amount)}${a.funding_source_raw ? " · " + a.funding_source_raw : ""}${a.provenance ? " · p" + a.provenance.page : ""}</div>
               ${a.provenance && a.provenance.quote ? html`<div class="quote">"${a.provenance.quote}"</div>` : null}
             </div>`)}
-        </div>`) : html`<div class="muted">No attendance-specific goals or actions found in this plan.</div>`}
+        </div>`) : html`<div class="muted">${s.has_plan ? "No attendance-specific goals or actions found in this plan." : "No attendance plan has been extracted for this school yet — its metrics and peers are shown above."}</div>`}
     </div>
 
     <div class="card">

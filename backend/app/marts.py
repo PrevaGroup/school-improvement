@@ -71,11 +71,20 @@ def fetch_attendance_plans(
 
     Reusable by both the HTTP route and the chat tool. Public reads only.
     """
+    # Roster is driven by dim_school (the dense, complete spine — every school exists here),
+    # with the SIP as OPTIONAL enrichment via LEFT JOIN LATERAL (latest plan per school, or
+    # nulls). NEVER gate the roster on plan presence: at CA scale most schools have no
+    # extracted SIP, and a school must still appear with its metrics + peers. `has_plan`
+    # (below) lets the diagnostic + UI treat a missing plan as a data gap, not a finding.
     rows = db.execute(
         text(
-            "SELECT pe.plan_id, pe.plan_year, pe.document, "
-            "       s.school_id, s.school_name, s.school_level "
-            "FROM plan_extraction pe JOIN dim_school s ON pe.school_id = s.school_id "
+            "SELECT s.school_id, s.school_name, s.school_level, "
+            "       pe.plan_id, pe.plan_year, pe.document "
+            "FROM dim_school s "
+            "LEFT JOIN LATERAL ("
+            "    SELECT plan_id, plan_year, document FROM plan_extraction "
+            "    WHERE school_id = s.school_id ORDER BY plan_year DESC NULLS LAST LIMIT 1"
+            ") pe ON true "
             # CAST the optional param: a bare ":lvl IS NULL" is untyped and pg8000
             # (the Cloud SQL Connector driver) rejects it — 42P18 "could not determine
             # data type of parameter". psycopg2 tolerates it; the connector does not.
@@ -107,6 +116,7 @@ def fetch_attendance_plans(
             "school_id": r["school_id"],
             "school_name": r["school_name"],
             "school_level": r["school_level"],
+            "has_plan": r["plan_id"] is not None,
             "plan_year": r["plan_year"],
             "chronic_absenteeism_rate": ch[0] if ch else None,
             "chronic_absenteeism_year": ch[1] if ch else None,
@@ -279,8 +289,15 @@ def fetch_attendance_diagnostic(
         else:
             need = "low"
         thin = len(actions) == 0 or budget < 1
+        has_plan = bool(s.get("has_plan"))
 
-        if need == "high" and thin:
+        if not has_plan:
+            # No SIP extracted for this school — a DATA GAP, not a finding. Never let
+            # absence-of-plan masquerade as "unmet_need": that would falsely accuse the
+            # district of ignoring a need we simply haven't read a plan for. `need` (from
+            # metrics + peers) is still shown; only the plan-RESPONSE judgment is withheld.
+            alignment = "plan_missing"
+        elif need == "high" and thin:
             alignment = "unmet_need"     # the flag that matters: big need, no funded response
         elif need in ("high", "moderate") and not thin:
             alignment = "responsive"
@@ -291,6 +308,7 @@ def fetch_attendance_diagnostic(
 
         out.append({
             "school_id": s["school_id"], "school_name": s["school_name"],
+            "has_plan": has_plan,
             "chronic_absenteeism_rate": s.get("chronic_absenteeism_rate"),
             "chronic_absenteeism_year": s.get("chronic_absenteeism_year"),
             "peer_performance_percentile": perf,
@@ -302,7 +320,9 @@ def fetch_attendance_diagnostic(
             "attendance_goals": goals,
         })
 
-    order = {"unmet_need": 0, "no_response": 1, "responsive": 2, "ok": 3, "unknown": 4}
+    # plan_missing sorts after the plan-based findings (it's a data gap, not a verdict) but
+    # its secondary sort by absenteeism still floats the highest-need unplanned schools up.
+    order = {"unmet_need": 0, "no_response": 1, "responsive": 2, "ok": 3, "plan_missing": 4, "unknown": 5}
     out.sort(key=lambda r: (order.get(r["alignment"], 9), -(r["chronic_absenteeism_rate"] or 0)))
     return {"district_id": district_id, "level": level, "school_count": len(out), "schools": out}
 
