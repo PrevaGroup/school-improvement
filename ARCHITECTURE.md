@@ -6,8 +6,10 @@ data (its improvement plans, and later its private metrics) is isolated by Postg
 row-level security. This document is the map: how the pieces fit, where they live in the
 repo, and what's left to build.
 
-**Stack:** Cloud SQL (Postgres) · Cloud Run (FastAPI) · React + Vite on Cloudflare Pages ·
-Google Cloud Identity Platform (GCIP) · Cloud Storage + Claude for raw-data / plan ingest.
+**Stack:** Cloud SQL (Postgres) · Cloud Run (FastAPI) · Cloud Storage + Claude for raw-data /
+plan ingest — *live*. **Planned:** React + Vite on Cloudflare Pages *(the demo serves a
+no-build React UI from the app itself)* · Google Cloud Identity Platform (GCIP) *(the demo is
+gated by Cloud Run IAM)*.
 
 **Guiding principle:** this is a *prototype*. Build the isolation seam (`tenant_id` + RLS)
 correctly now because it's expensive to retrofit; keep everything else simple and upgrade
@@ -19,6 +21,10 @@ later.
 
 The whole security model hinges on one seam: **the tenant is derived from a verified
 identity server-side, never sent by the client.** Postgres then enforces it.
+
+> **Planned (production auth).** This GCIP → verified-token → per-request `SET LOCAL app.tenant`
+> flow is the *target*. The **deployed demo uses Cloud Run IAM** for access and reads only
+> public marts, so this trust-boundary path isn't exercised yet.
 
 ```mermaid
 flowchart LR
@@ -74,6 +80,11 @@ Cloud Shell against Cloud SQL via the Auth Proxy.
 
 **B. School improvement plans (PDF → review → DB).** The one that turns a district's SPSA/
 LCAP PDF into structured, private, tenant-scoped data:
+
+> **Planned (private-tenant path).** The `/plans/extract → review → /plans/load` flow below
+> writes private, RLS-scoped `plan_*` tables and is the *target*. The **demo instead runs a
+> batch public path** — `batch_extract → GCS JSON → load_plan_extractions → public
+> plan_extraction` — which is what the marts and the diagnostic UI actually read today.
 
 ```
 PDF ──▶ POST /plans/extract ──▶ ExtractedPlan JSON ──▶ human review ──▶ POST /plans/load ──▶ plan_* tables
