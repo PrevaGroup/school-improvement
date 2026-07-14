@@ -15,6 +15,7 @@ import argparse
 import json
 import pathlib
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[3]))  # -> backend/
@@ -25,6 +26,21 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.models.reference import PlanExtraction
 
 from .._shared import _engine
+
+DEFAULT_WORKERS = 16  # fetches are network-bound (one GCS GET each) — overlap them
+
+
+def _fetch_row(fs, src: str) -> dict:
+    """One GCS GET + parse. Returns the plan_extraction row dict (raises on bad JSON/missing key)."""
+    doc = json.loads(fs.cat_file(src))
+    return dict(
+        plan_id=doc["plan_id"],
+        school_id=doc.get("school_id"),
+        plan_year=doc.get("plan_year"),
+        plan_type=doc.get("plan_type"),
+        extracted_at=(doc.get("source") or {}).get("extracted_at"),
+        document=doc,
+    )
 
 
 def list_json(prefix: str):
@@ -41,6 +57,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Load extracted plan JSONs into public plan_extraction (JSONB).")
     ap.add_argument("--in-prefix", required=True, help="gs:// prefix (or local dir) of the extracted *.json")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                    help=f"concurrent GCS fetches (default {DEFAULT_WORKERS}); the loop is network-bound")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
@@ -50,23 +68,23 @@ def main(argv: Optional[list[str]] = None) -> int:
     n = len(files)
     print(f"[extractions] {n} JSONs under {args.in_prefix}", file=sys.stderr, flush=True)
 
+    # Fetch+parse concurrently: each file is a serial GCS round-trip otherwise, so N files
+    # cost N latencies back-to-back. A thread pool overlaps them (I/O-bound → the GIL is
+    # released during the GET). Per-file try/except keeps the batch resilient to one bad file.
     rows, errors = [], []
-    for i, (fname, src) in enumerate(files, 1):
-        print(f"[extractions] ({i}/{n}) reading {fname}", file=sys.stderr, flush=True)
-        try:
-            # one GET per file (via the already-authed fs) instead of block-streaming
-            doc = json.loads(fs.cat_file(src))
-            rows.append(dict(
-                plan_id=doc["plan_id"],
-                school_id=doc.get("school_id"),
-                plan_year=doc.get("plan_year"),
-                plan_type=doc.get("plan_type"),
-                extracted_at=(doc.get("source") or {}).get("extracted_at"),
-                document=doc,
-            ))
-        except Exception as e:
-            errors.append((fname, str(e)))
-            print(f"[extractions] ERROR {fname}: {e}", file=sys.stderr)
+    done = 0
+    workers = max(1, min(args.workers, n or 1))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(_fetch_row, fs, src): fname for fname, src in files}
+        for fut in as_completed(futs):
+            fname = futs[fut]
+            done += 1
+            try:
+                rows.append(fut.result())
+                print(f"[extractions] ({done}/{n}) ok {fname}", file=sys.stderr, flush=True)
+            except Exception as e:
+                errors.append((fname, str(e)))
+                print(f"[extractions] ({done}/{n}) ERROR {fname}: {e}", file=sys.stderr, flush=True)
 
     print(f"[extractions] parsed {len(rows)} ok, {len(errors)} errors", file=sys.stderr, flush=True)
     if args.dry_run or not rows:
