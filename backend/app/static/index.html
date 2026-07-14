@@ -70,10 +70,17 @@
   .peer { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-top: 1px solid var(--line); }
   .peer:first-child { border-top: 0; }
   .peer .d { color: var(--muted); }
-  .msgs { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .msgs { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
   .m { max-width: 90%; padding: 9px 12px; border-radius: 12px; white-space: pre-wrap; font-size: 14px; }
   .m.u { align-self: flex-end; background: var(--green); color: #fff; }
   .m.a { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); }
+  .m.md { white-space: normal; }
+  .m.md > :first-child { margin-top: 0; } .m.md > :last-child { margin-bottom: 0; }
+  .m.md p { margin: 6px 0; }
+  .m.md h1, .m.md h2, .m.md h3, .m.md h4 { font-size: 13px; font-weight: 700; margin: 8px 0 3px; }
+  .m.md ul, .m.md ol { margin: 4px 0; padding-left: 18px; } .m.md li { margin: 2px 0; }
+  .m.md code { background: var(--line); padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+  .m.md hr { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
   .tools { align-self: flex-start; font-size: 11px; color: var(--muted); margin-top: -6px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 8px; }
   .chip { font-size: 12px; border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 5px 10px; cursor: pointer; }
@@ -94,6 +101,8 @@
 import React, { useState, useEffect, useMemo } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
+import { marked } from "https://esm.sh/marked@12";
+marked.setOptions({ breaks: true, gfm: true });
 const html = htm.bind(React.createElement);
 const fmtUSD = (n) => n == null ? "—" : "$" + Math.round(n).toLocaleString();
 const fmtPct = (n) => n == null ? "—" : Math.round(n) + "%";
@@ -203,6 +212,8 @@ function Chat({ school, level }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const msgsRef = React.useRef(null);
+  useEffect(() => { const el = msgsRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs, busy]);
   const scoped = school ? school.school_name : "these schools";
   const chips = school ? [
     `Why is ${school.school_name} a concern on attendance?`,
@@ -220,9 +231,11 @@ function Chat({ school, level }) {
     finally { setBusy(false); }
   }
   return html`
-    <div class="msgs">
+    <div class="msgs" ref=${msgsRef}>
       ${msgs.length === 0 ? html`<div class="muted" style=${{ fontSize: "13px" }}>Ask about ${scoped} — grounded in the plans, metrics, and peer data.</div>` : null}
-      ${msgs.map((m, i) => html`<div class=${"m " + (m.role === "user" ? "u" : "a")} key=${i}>${m.content}</div>`)}
+      ${msgs.map((m, i) => m.role === "user"
+        ? html`<div class="m u" key=${i}>${m.content}</div>`
+        : html`<div class="m a md" key=${i} dangerouslySetInnerHTML=${{ __html: marked.parse(m.content || "") }}></div>`)}
       ${busy ? html`<div class="m a dots">thinking</div>` : null}
     </div>
     <div class="chips">${chips.map((c, i) => html`<div class="chip" key=${i} onClick=${() => ask(c)}>${c}</div>`)}</div>
