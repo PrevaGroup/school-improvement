@@ -59,7 +59,7 @@ star schema) organised as five conceptual layers:
 | **staging** | The reviewable shape between "what a loader read" and "what the DB believes" | e.g. the SIP `ExtractedPlan` JSON ([schema.py](backend/etl/ca/sip/schema.py)) |
 | **star** | Conformed facts + dimensions — the keystone `fact_metric` (grain: school × period × metric × student-group) plus `dim_*` | [`app/models/`](backend/app/models/), 17 tables |
 | **augment** | Plans and other tenant entities that *reference* the star (`plan` / `plan_goal` / `plan_action`) | [`app/models/tenant.py`](backend/app/models/tenant.py) |
-| **marts** | Semantic read models for the dashboard / agents | not built yet |
+| **marts** | Semantic read models for the dashboard: attendance need-vs-plan diagnostic + "schools like you" peer comparison | [`app/marts.py`](backend/app/marts.py) — endpoint-composed (MVP), reads public `plan_extraction` + `fact_metric` + peer tables |
 
 **Identity** keys on the federal **NCES** id; the California **CDS** code rides alongside as
 `state_school_id` / `state_district_id`. A CDS→NCES crosswalk runs in every loader, with a
@@ -96,6 +96,17 @@ SQL Python Connector when `INSTANCE_CONNECTION_NAME` is set (no Auth-Proxy sidec
 Run), else the proxy URL locally. Secrets (`sip-app-password`, `sip-migrator-password`,
 `anthropic-api-key`) come from Secret Manager via ADC — never the repo.
 
+**Build path (byproduct to know about):** `gcloud run deploy --source backend` zips `backend/`
+into the auto-created **`run-sources-<project>-<region>` GCS bucket** → **Cloud Build** builds
+the `Dockerfile` → pushes to **Artifact Registry** (`cloud-run-source-deploy`) → **Cloud Run**
+runs the image. Those source zips are build inputs only (one per deploy); safe to prune.
+
+> **Temporary demo, not prod.** What is currently deployed is the MVP demo described in
+> [Status](#status): **IAM-gated** (not GCIP), a **self-served no-build React UI**, reading the
+> **public `plan_extraction`** marts — deliberately *not* the GCIP + private-tenant `/plans`
+> architecture this document specifies. It's for showing the diagnostic, and is expected to be
+> replaced at the real prod cutover.
+
 ---
 
 ## Repository index
@@ -131,10 +142,17 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 
 - **Live:** Cloud SQL Postgres, full aggregate **star schema (17 tables)** + **RLS** (tenant
   isolation proven), credentials in Secret Manager. **8 public metrics loaded** (~960k
-  `fact_metric` rows).
-- **Built, not yet deployed:** the FastAPI app, the SIP extract/load pipeline, GCIP token
-  verification, the Cloud Run Dockerfile + Connector wiring.
-- **Not done:** user provisioning, the marts layer, the frontend, a real Cloud Run deploy.
+  `fact_metric` rows). The **marts layer** ([`app/marts.py`](backend/app/marts.py)) and a
+  **single-school attendance-diagnostic UI** — need-vs-plan, a "schools like you" peer engine,
+  and a grounded chat — are **built and deployed to Cloud Run** (see the demo caveat below).
+- **⚠️ The deployed Cloud Run service is a temporary demo, not the production architecture
+  above.** It is gated by **Cloud Run IAM** (`run.invoker`) instead of GCIP sign-in; serves a
+  **no-build React UI from the app itself** (no Vite / Cloudflare Pages); reads the **public
+  `plan_extraction`** table via the batch `extract → GCS JSON → load_plan_extractions` path,
+  **not** the private `/plans` tenant path; and runs at `--min-instances 0`. It exists to show
+  the diagnostic, not to be the production cutover.
+- **Not done:** GCIP user provisioning, the private-tenant `/plans` serving path, and the real
+  production frontend (React + Vite).
 
 ## Remaining architecture tasks
 
