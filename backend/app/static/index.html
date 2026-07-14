@@ -79,7 +79,7 @@
   .n-high { background: var(--red); } .n-moderate { background: var(--amber); } .n-low { background: var(--green); } .n-unknown { background: #9a958a; }
   h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
   .info { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 5px; border: 1px solid var(--muted); border-radius: 50%; color: var(--muted); font-size: 10px; font-weight: 700; font-style: normal; text-transform: none; cursor: help; vertical-align: middle; }
-  .info .tip { display: none; position: absolute; top: 20px; left: -4px; z-index: 20; width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font-size: 11px; font-weight: 400; line-height: 1.45; letter-spacing: 0; text-transform: none; color: var(--ink); box-shadow: 0 6px 18px rgba(0,0,0,.16); }
+  .info .tip { display: none; position: absolute; top: 27px; left: 10px; z-index: 20; width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px; font-size: 11px; font-weight: 400; line-height: 1.45; letter-spacing: 0; text-transform: none; color: var(--ink); box-shadow: 0 6px 18px rgba(0,0,0,.16); }
   .info:hover .tip, .info:focus .tip { display: block; }
   .goal { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
   .goal:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
@@ -140,12 +140,12 @@ function PeerChart({ dist, value, direction }) {
       <line x1="0" y1="22" x2=${W} y2="22" stroke="var(--line)" stroke-width="2" />
       <rect x=${x(dist.p25)} y="14" width=${Math.max(1, x(dist.p75) - x(dist.p25))} height="16" fill="var(--line)" rx="3"><title>Middle 50% of the ${dist.n} peers (25th–75th percentile): ${fmt1(dist.p25)}%–${fmt1(dist.p75)}%. Median ${fmt1(dist.median)}%.</title></rect>
       <line x1=${x(dist.median)} y1="12" x2=${x(dist.median)} y2="32" stroke="var(--muted)" stroke-width="2" />
-      <circle cx=${x(value)} cy="22" r="7" fill="var(--red)" />
+      <circle cx=${x(value)} cy="22" r="5" fill="var(--red)" />
       <text x=${vx} y="10" text-anchor=${vAnchor} font-size="9" fill="var(--ink)">${fmt1(value)}</text>
       <text x="0" y="44" font-size="8" fill="var(--muted)">0%</text>
       <text x=${W} y="44" text-anchor="end" font-size="8" fill="var(--muted)">100%</text>
     </svg>
-    <div class="muted" style=${{ fontSize: "12px", marginTop: "4px" }}>${dist.n} similar schools incl. this one · median ${fmt1(dist.median)}% · shaded box = middle 50% (hover for range) · ${direction === "lower_better" ? "lower is better" : "higher is better"} · red dot = this school</div>`;
+    <div class="muted" style=${{ fontSize: "12px", marginTop: "4px" }}>${dist.n} similar schools including this one · median=${fmt1(dist.median)}% 25%=${fmt1(dist.p25)}% 75%=${fmt1(dist.p75)}% · red dot = this school · ${direction === "lower_better" ? "lower is better" : "higher is better"}</div>`;
 }
 
 function Diagnostic({ s, peers, level }) {
