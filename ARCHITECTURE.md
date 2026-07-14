@@ -139,7 +139,7 @@ runs the image. Those source zips are build inputs only (one per deploy); safe t
 | [`backend/app/plans.py`](backend/app/plans.py) | `POST /plans/extract` + `POST /plans/load` |
 | [`backend/app/plan_loader.py`](backend/app/plan_loader.py) | Approved plan JSON → `plan`/`plan_goal`/`plan_action` |
 | [`backend/app/models/`](backend/app/models/) | SQLAlchemy models — `base` (RLS table lists), `reference` (public), `tenant` (private) |
-| [`backend/migrations/`](backend/migrations/) | Alembic — `0001` (schema + RLS), `0002` (NCES re-key) |
+| [`backend/migrations/`](backend/migrations/) | Alembic — `0001` (schema + RLS), `0002` (NCES re-key), `0003` (plan_extraction), `0004` (peer tables) |
 | [`backend/sql/`](backend/sql/) | `00_bootstrap` (roles/DB), `10_rls_smoketest`, `20_reset_database` |
 | **ETL** | |
 | [`backend/etl/ca/`](backend/etl/ca/) | Public-data loaders `load_ca_<fact>.py` + [README](backend/etl/ca/README.md) + `_shared.py` (conformed vocab) |
