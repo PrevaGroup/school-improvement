@@ -1,6 +1,6 @@
 # Design note: make SIP → Mart robust with extraction-time relevance tagging
 
-**Status:** proposed · **Scope:** `plan_marts`, `sip`, `core` (phased) · **Supersedes:** ad-hoc `attendance_slice` regex tuning
+**Status:** proposed · **Scope:** `serving`, `sip`, `core` (phased) · **Supersedes:** ad-hoc `attendance_slice` regex tuning
 
 ## The problem (verified against the current tree)
 
@@ -111,15 +111,15 @@ is measured **locally** and is structurally absent from CDE data (every current 
 **Recommendation:** keep `dim_metric` as the curated global/shared catalog; add a `tenant_metric`
 extension for bespoke defs (mirrors RLS, avoids re-keying the global catalog and its FKs). This is
 a **breaking `core` migration** — its own reviewed branch per `CLAUDE.md`, not folded into `sip`
-or `plan_marts` work.
+or `serving` work.
 
 ## Phasing (one module per branch)
 
 | Phase | Module | Change | Cost |
 |---|---|---|---|
-| **0** (optional stopgap) | `plan_marts` | Tighten `attendance_slice` to **action-level** (`a_att` only; require text to corroborate a bare `metric_id`). Honest-for-the-demo; **no `core` change**. Explicitly a stopgap. | small |
+| **0** (optional stopgap) | `serving` | Tighten `attendance_slice` to **action-level** (`a_att` only; require text to corroborate a bare `metric_id`). Honest-for-the-demo; **no `core` change**. Explicitly a stopgap. | small |
 | **1** | `sip` | Add `domain`/`metric_id?`/`relation`/`confidence` to the extraction schema ([`schema.py`](../../backend/etl/ca/sip/schema.py)) + `emit_plan` prompt (inject `dim_metric` vocab). Add a **re-tag pass** over existing `plan_extraction` docs — feeds goals/actions + vocab to the model, emits tags, **no PDF re-extraction** (raw stays immutable). | medium |
-| **2** | `plan_marts` | Rewrite `attendance_slice` to filter on structured tags; regex kept only as legacy fallback. Materialize at load-time later (the code already flags "endpoint-composed MVP; can be materialized"). | medium |
+| **2** | `serving` | Rewrite `attendance_slice` to filter on structured tags; regex kept only as legacy fallback. Materialize at load-time later (the code already flags "endpoint-composed MVP; can be materialized"). | medium |
 | **3** | `core` (reviewed) | Tenant-scoped vocabulary (`tenant_metric`) + benchmarking that honors `data_origin`/`instrument_dependent`. Gated on the decision above. | large |
 
 ## What this fixes

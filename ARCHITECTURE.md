@@ -100,7 +100,50 @@ PDF ──▶ POST /plans/extract ──▶ ExtractedPlan JSON ──▶ human r
 - Loader: [`backend/app/plan_loader.py`](backend/app/plan_loader.py) — only *confirmed*
   metric links are written; idempotent via deterministic ids.
 
-## 4. Deployment
+## 4. Modules (how the code is cut)
+
+The other seam. §1 isolates **tenants** so one district's data can't reach another's. This
+isolates **features**, so one part can be rewritten without breaking the rest — the same move
+on a different axis, and the same reason: cheap to build in, expensive to retrofit.
+
+**The seam is a database table.** A module that produces a table owns it; everyone else reads
+that table with SQL. No module imports another module. That is what makes a module swappable:
+rewrite the matching engine however you like, keep `mart_school_peer`'s column shape, and
+nothing downstream notices. A Python import would couple the two forever; a table doesn't.
+
+**The cut is producer/consumer, not feature:**
+
+| | Owns (writes) | Serves |
+|---|---|---|
+| **core** | the star schema, tenancy, `db`/`security`/`config` | — |
+| **public_metrics** | `fact_metric` | (bulk ETL) |
+| **sip** | `plan_extraction`, `plan_*` | `POST /plans/*` (ingest) |
+| **likeschools** | `mart_school_peer`, `feat_match_vector`, `model_partition_stats` | — *engine only* |
+| **serving** | nothing | `/marts/*`, `/chat` |
+
+Modules depend on `core`; `core` never depends on a module. That direction is the whole point —
+`core` is the frozen contract, so a module's own table living inside it made every feature change
+a breaking change to the thing everything depends on.
+
+**Why not cut by feature?** It was tried, and the code refuses. Giving `likeschools` its own
+peer endpoints means `serving`'s attendance diagnostic and school-detail panel — both of which
+need `fetch_peer_benchmark` — have to import it. That's a cross-module import, i.e. the rule
+gone on day one, and the alternative (a second copy of the percentile logic) is worse. Cutting
+producer/consumer keeps the table as the only seam. The cost: `likeschools` is not a vertical
+slice, and the peer endpoints live in `serving`. Accepted deliberately (2026-07-15).
+
+**Enforced, not aspirational.** [`backend/tests/test_module_boundaries.py`](backend/tests/test_module_boundaries.py)
+walks the AST of every import and fails CI on the first one that crosses a module line, so this
+section can't quietly become fiction. `app/main.py` is the composition root — wiring, not a
+module, and the one exempt file. It must stay thin: logic that lands there has escaped the rule.
+
+> **The idea lives here; the inventory lives in [`docs/MODULES.md`](docs/MODULES.md)** — who owns
+> what, where each component currently sits, and reorg status. This section changes rarely; that
+> registry changes on every relocation. Rules for working inside a module: [`CLAUDE.md`](CLAUDE.md).
+
+---
+
+## 5. Deployment
 
 Container + Cloud Run steps: [`backend/DEPLOY.md`](backend/DEPLOY.md). The API uses the Cloud
 SQL Python Connector when `INSTANCE_CONNECTION_NAME` is set (no Auth-Proxy sidecar on Cloud
@@ -120,30 +163,28 @@ runs the image. Those source zips are build inputs only (one per deploy); safe t
 
 ---
 
-## Repository index
+## Document index
 
-| Path | What it is |
+**Looking for where a feature's code lives? → [`docs/MODULES.md`](docs/MODULES.md).**
+
+This section used to also carry a path-by-path map of the codebase, grouped by technical layer
+(Backend / ETL). It was deleted rather than updated: it duplicated the module registry, and two
+maps of one codebase drift — this one silently stopped mentioning `etl/peers/` (the entire
+likeschools engine), `app/marts.py`, `app/chat.py`, and `backend/tests/`, while still describing
+`main.py` as serving only `/health`, `/schools`, and the plans router. The registry is generated
+from and reconciled against the code; a second copy here earns nothing and rots.
+
+| Doc | What it is |
 |---|---|
 | [`README.md`](README.md) | One-paragraph overview + status |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | **This document** |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | **This document** — how the pieces fit, and why |
+| [`CLAUDE.md`](CLAUDE.md) | How to work in this repo — the module rule, `core` policy |
+| [`docs/MODULES.md`](docs/MODULES.md) | **The module registry** — who owns what, where it lives, reorg status |
 | [`docs/TARGET_SCHEMA.md`](docs/TARGET_SCHEMA.md) | The data-model spec — five layers, tenancy + RLS, missingness, instruments |
 | [`docs/DATA_CATALOG.md`](docs/DATA_CATALOG.md) | Raw CA data sources and how they were obtained |
-| **Backend** | |
 | [`backend/README.md`](backend/README.md) | Roles/bootstrap, migrations, RLS smoke test, running loaders |
 | [`backend/DEPLOY.md`](backend/DEPLOY.md) | Cloud Run deploy: Dockerfile, Cloud SQL Connector, secrets |
 | [`backend/SCHEMA_REFERENCE.md`](backend/SCHEMA_REFERENCE.md) | Generated table reference (from the models) |
-| [`backend/app/config.py`](backend/app/config.py) | Settings; secrets from Secret Manager (DB + Anthropic) |
-| [`backend/app/db.py`](backend/app/db.py) | Engine + tenant-bound session (`SET LOCAL app.tenant`) |
-| [`backend/app/security.py`](backend/app/security.py) | **The trust boundary** — verify GCIP token → tenant |
-| [`backend/app/main.py`](backend/app/main.py) | FastAPI app + routes (`/health`, `/schools`, plans router) |
-| [`backend/app/plans.py`](backend/app/plans.py) | `POST /plans/extract` + `POST /plans/load` |
-| [`backend/app/plan_loader.py`](backend/app/plan_loader.py) | Approved plan JSON → `plan`/`plan_goal`/`plan_action` |
-| [`backend/app/models/`](backend/app/models/) | SQLAlchemy models — `base` (RLS table lists), `reference` (public), `tenant` (private) |
-| [`backend/migrations/`](backend/migrations/) | Alembic — `0001` (schema + RLS), `0002` (NCES re-key), `0003` (plan_extraction), `0004` (peer tables) |
-| [`backend/sql/`](backend/sql/) | `00_bootstrap` (roles/DB), `10_rls_smoketest`, `20_reset_database` |
-| **ETL** | |
-| [`backend/etl/ca/`](backend/etl/ca/) | Public-data loaders `load_ca_<fact>.py` + [README](backend/etl/ca/README.md) + `_shared.py` (conformed vocab) |
-| [`backend/etl/ca/sip/`](backend/etl/ca/sip/) | SIP extractor: `schema.py` (contract), `extract_sip.py` (runner), `example_extract.json` |
 
 Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 
