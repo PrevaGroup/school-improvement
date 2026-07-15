@@ -1,5 +1,9 @@
 # School Improvement Platform
 
+The objective of this project was to develop a working prototype that implements current
+state of the art agentic data analytics. This project will likely be out of date tomorrow.
+All code was developed using Claude.
+
 A multi-tenant data platform for California school-improvement analysis. Public state
 data (attendance, behavior, academics, …) is shared; a district's own data is isolated
 by PostgreSQL row-level security. Built on a dimensional (star) model with per-fact ETL
