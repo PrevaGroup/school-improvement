@@ -45,7 +45,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[3]))  # -> backend/
 import fsspec
 from sqlalchemy import bindparam, text
 
-from .._shared import _engine
+from ._db import _engine
 from .extract_sip import extract
 
 PUBLIC = "public"

@@ -25,7 +25,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from .models import PlanExtraction
 
-from .._shared import _engine
+from ._db import _engine
 
 DEFAULT_WORKERS = 16  # fetches are network-bound (one GCS GET each) — overlap them
 

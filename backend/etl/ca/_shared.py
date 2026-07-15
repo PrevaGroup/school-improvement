@@ -38,29 +38,16 @@ DIRECTORY_FILE = "directory/public-schools_2024-25.csv"
 NON_SCHOOL_CODES = {"0000000", "0000001"}
 
 # --------------------------------------------------------------------------- #
-# Conformed vocabulary (shared across all CA loaders)
+# Conformed vocabulary
+#
+# STUDENT_GROUPS / METRICS moved to core (`app/vocab.py`) 2026-07-15 — sip needs them too, and
+# a vocabulary two modules must agree on can't live inside one of them. Re-exported below so the
+# CA loaders read unchanged; import them from `app.vocab` in new code.
+#
+# What stays here is CA's mapping INTO that vocabulary (CDE_CATEGORY) plus CA's periods. That's
+# the conformed/adapter line: another state brings its own crosswalk and reuses the same ids.
 # --------------------------------------------------------------------------- #
-STUDENT_GROUPS = [
-    ("all", "All Students", "total"),
-    ("race_black", "Black/African American", "race"),
-    ("race_amerind", "American Indian/Alaska Native", "race"),
-    ("race_asian", "Asian", "race"),
-    ("race_filipino", "Filipino", "race"),
-    ("race_hispanic", "Hispanic/Latino", "race"),
-    ("race_pacific", "Pacific Islander", "race"),
-    ("race_two", "Two or More Races", "race"),
-    ("race_white", "White", "race"),
-    ("race_nr", "Not Reported", "race"),
-    ("gender_f", "Female", "gender"),
-    ("gender_m", "Male", "gender"),
-    ("gender_x", "Non-Binary", "gender"),
-    ("el", "English Learners", "eng_prof"),
-    ("swd", "Students with Disabilities", "program"),
-    ("sed", "Socioeconomically Disadvantaged", "ses"),
-    ("migrant", "Migrant", "program"),
-    ("foster", "Foster Youth", "program"),
-    ("homeless", "Homeless", "program"),
-]
+from app.vocab import METRICS, STUDENT_GROUPS  # noqa: F401  (re-exported for the CA loaders)
 
 # CDE ReportingCategory -> conformed student_group_id. Grade-span codes (GR*) and
 # anything not here are skipped (a different axis, not a student group).
@@ -81,33 +68,6 @@ CDE_CATEGORY = {
     "SG_SD": "swd", "SG_DS": "sed", "SG_EL": "el",   # SD=disabilities, DS=disadvantaged (inferred)
     "SG_HM": "homeless", "SG_FS": "foster", "SG_MG": "migrant",
 }
-
-METRICS = [
-    dict(metric_id="chronic_absenteeism_rate", domain="attendance", display_name="Chronic Absenteeism Rate",
-         unit="pct", direction="lower_better", grains="annual", applies_to_levels="ES,MS,HS",
-         is_leading_indicator=True, data_origin="state"),
-    dict(metric_id="suspension_rate", domain="behavior", display_name="Suspension Rate (Total)",
-         unit="pct", direction="lower_better", grains="annual", applies_to_levels="ES,MS,HS",
-         is_leading_indicator=True, data_origin="state"),
-    dict(metric_id="expulsion_rate", domain="behavior", display_name="Expulsion Rate (Total)",
-         unit="pct", direction="lower_better", grains="annual", applies_to_levels="ES,MS,HS",
-         is_leading_indicator=True, data_origin="state"),
-    dict(metric_id="grad_rate_acgr", domain="academics", display_name="Graduation Rate (ACGR)",
-         unit="pct", direction="higher_better", grains="annual", applies_to_levels="HS",
-         is_leading_indicator=False, data_origin="state"),
-    dict(metric_id="stability_rate", domain="engagement", display_name="Stability Rate",
-         unit="pct", direction="higher_better", grains="annual", applies_to_levels="ES,MS,HS",
-         is_leading_indicator=True, data_origin="state"),
-    dict(metric_id="college_going_rate", domain="academics", display_name="College-Going Rate (16 mo)",
-         unit="pct", direction="higher_better", grains="annual", applies_to_levels="HS",
-         is_leading_indicator=False, data_origin="state"),
-    dict(metric_id="homeless_enrollment", domain="demographics", display_name="Homeless Student Enrollment",
-         unit="count", direction="context", grains="annual", applies_to_levels="ES,MS,HS",
-         is_leading_indicator=False, data_origin="state"),
-    dict(metric_id="enrollment", domain="demographics", display_name="Enrollment (Census Day)",
-         unit="count", direction="context", grains="annual", applies_to_levels="ES,MS,HS",
-         is_leading_indicator=False, data_origin="state"),
-]
 
 PERIODS = [
     ("p2021-22", "annual", "2021-22", "2021-22"),

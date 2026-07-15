@@ -20,6 +20,13 @@ sys.path.append(str(ROOT))
 
 from app.models import Base, PRIVATE_TABLES  # noqa: E402
 
+# Same rule as migrations/env.py: module-owned tables live with their module, and a model only
+# reaches Base.metadata if something imports it. Without these, this generator silently emits a
+# reference that's missing every module table — documenting a schema the database doesn't have.
+# Add a line when a module starts owning tables. (This is tooling, not core, so it may know them.)
+import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
+import etl.peers.models   # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
+
 OUT = ROOT / "SCHEMA_REFERENCE.md"
 
 

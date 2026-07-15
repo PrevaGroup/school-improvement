@@ -16,18 +16,26 @@ and reviewed on their own, never folded into a feature change.
 | Star schema — shared dims + facts | `backend/app/models/reference.py`, `backend/app/models/tenant.py` | `dim_school`, `dim_metric`, `fact_metric`, `dim_period`, etc. |
 | Tenancy + RLS | `backend/app/models/reference.py` (`dim_tenant`, `tenant_scope`, `tenant_membership`), `backend/app/security.py`, `backend/app/db.py` | the trust boundary |
 | Config / secrets | `backend/app/config.py` | Settings + Secret Manager |
-| Conformed vocabulary | `backend/etl/ca/_shared.py` (student groups, metric ids) | the shared "yardsticks" |
+| Conformed vocabulary | `backend/app/vocab.py` (`STUDENT_GROUPS`, `METRICS`, + `*_IDS`) | the shared "yardsticks" — moved out of `etl/ca/_shared.py` 2026-07-15 |
 | Migrations spine | `backend/migrations/versions/0001_initial_schema.py`, `0002_nces_rekey.py` | single linear Alembic history; ordering matters |
 | Bootstrap / RLS tests | `backend/sql/00_bootstrap.sql`, `10_rls_smoketest.sql`, `20_reset_database.sql` | roles, RLS smoketest, reset |
 
 ## What is NOT core
 
-Module-owned tables that currently sit in `reference.py`/`tenant.py` but belong to a feature:
+**Module-owned tables — moved out 2026-07-15, and they must stay out:**
 - `feat_match_vector`, `mart_school_peer`, `model_partition_stats` → **likeschools**
-- `plan_extraction`, `plan_*` → **sip**
+  (`backend/etl/peers/models.py`)
+- `plan_extraction`, `plan`, `plan_goal`, `plan_action` → **sip** (`backend/etl/ca/sip/models.py`)
 
-Pulling those out of `reference.py` into their owning modules is an early reorg step — it's what
-lets a module be swapped without editing the shared contract.
+`core` declaring a module's table made every feature change a breaking change to the contract.
+`app/models/__init__.py` must **never** re-export them: that would make `core` import a module and
+invert the dependency this whole structure rests on. Registration lives in `migrations/env.py`,
+`0001_initial_schema.py`, and `scripts/gen_schema_reference.py` — all tooling, which may know
+every module. Guarded by `backend/tests/test_schema_inventory.py`.
+
+**Also not core:** California's mapping *into* the vocabulary (`CDE_CATEGORY`, `PERIODS` in
+`etl/ca/_shared.py`) belongs to **public_metrics**. The yardstick is shared; the per-state adapter
+isn't. And `_engine` factories are module-local — one call on `core`'s `settings`, not shared logic.
 
 ## Rule for modules
 

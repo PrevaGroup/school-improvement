@@ -1,4 +1,4 @@
-﻿"""Enforce the one rule: a module imports `core` or itself, never another module.
+"""Enforce the one rule: a module imports `core` or itself, never another module.
 
 CLAUDE.md states the rule; nothing enforced it, so it could only ever be as true as the
 last person's care. This walks the AST of every backend source file and fails on the
@@ -20,7 +20,7 @@ that reads those tables via SQL and imports none of them:
                                               model_partition_stats
     serving         marts.py, chat.py      -> owns no tables; reads them via raw SQL
 
-`likeschools` is the matching ENGINE only â€” it has no serving surface. That is a
+`likeschools` is the matching ENGINE only — it has no serving surface. That is a
 deliberate call (2026-07-15): `fetch_peer_benchmark` is needed by both the attendance
 diagnostic and the school-detail panel, so leaving peer serving inside `likeschools`
 would have forced either a cross-module import (breaking the rule) or a duplicate copy
@@ -28,7 +28,7 @@ of the percentile/cohort logic (worse). Consolidating all read-serving into one 
 keeps the rule intact with the table as the only seam. The cost is that `likeschools`
 is not a vertical slice; docs/MODULES.md records this.
 
-`app/main.py` is the composition root â€” wiring, not a module. It is *expected* to import
+`app/main.py` is the composition root — wiring, not a module. It is *expected* to import
 every module's router, so it is exempt. It must stay thin: if logic lands in main.py, it
 has escaped the rule via this exemption.
 """
@@ -50,6 +50,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "app.db": CORE,
     "app.security": CORE,
     "app.models": CORE,
+    "app.vocab": CORE,
     "app.main": "_composition_root",
     "app.plans": "sip",
     "app.plan_loader": "sip",
@@ -65,25 +66,18 @@ MODULE_OF_PREFIX: dict[str, str] = {
 SOURCE_TREES = ("app", "etl")
 
 # --------------------------------------------------------------------------- #
-# Known debt: violations that exist TODAY, enumerated so the rule can be enforced
-# for everything else. This list may only shrink.
+# Known debt: cross-module imports that exist TODAY, enumerated so the rule can be
+# enforced everywhere else. This list may only shrink — and it is now EMPTY.
 #
-# All four are `sip` reaching into `public_metrics` for things that are not really
-# public_metrics': `_engine` (a DB engine factory) and `METRICS` / `STUDENT_GROUPS`
-# (the conformed vocabulary). Both belong in `core` â€” docs/MODULES.md already says so
-# ("core/vocab/ <- conformed vocab (was etl/ca/_shared.py constants)"). They stay listed
-# here because moving them is a `core` change, which CLAUDE.md requires be raised and
-# reviewed on its own rather than folded into another change.
+# It held four: `sip` reaching into `public_metrics` for `_engine` and the conformed
+# vocab (`METRICS` / `STUDENT_GROUPS`). Cleared 2026-07-15 — the vocab moved to `core`
+# (`app/vocab.py`), where a contract two modules must agree on belongs, and sip got its
+# own engine factory (`etl/ca/sip/_db.py`). There are no cross-module imports left.
 #
-# Fix = the core carve-out. Delete entries here as it lands; the staleness test below
-# fails if an entry is fixed but left in the list, so this can't quietly become fiction.
+# Adding an entry here is NOT how you land a violation. An entry means the module split
+# is wrong, which is a design question to raise (CLAUDE.md) — not a line to append.
 # --------------------------------------------------------------------------- #
-KNOWN_VIOLATIONS: dict[str, set[str]] = {
-    "etl/ca/sip/batch_extract.py": {"etl.ca._shared"},
-    "etl/ca/sip/batch_load.py": {"etl.ca._shared"},
-    "etl/ca/sip/extract_sip.py": {"etl.ca._shared"},
-    "etl/ca/sip/load_plan_extractions.py": {"etl.ca._shared"},
-}
+KNOWN_VIOLATIONS: dict[str, set[str]] = {}
 
 
 def _module_of(dotted: str) -> str | None:
@@ -136,7 +130,7 @@ def _source_files() -> list[pathlib.Path]:
 
 
 def test_the_module_map_covers_every_source_file():
-    """A file no prefix claims would be silently exempt â€” the map must stay exhaustive."""
+    """A file no prefix claims would be silently exempt — the map must stay exhaustive."""
     unclaimed = [
         str(p.relative_to(BACKEND)) for p in _source_files()
         if _module_of(_dotted_name_of(p)) is None and p.name != "__init__.py"
@@ -169,7 +163,7 @@ def test_module_imports_only_core_or_itself(path: pathlib.Path):
     assert not violations, (
         f"`{rel}` belongs to the `{owner}` module and may import only `core` or `{owner}`:\n  "
         + "\n  ".join(violations)
-        + "\n\nModules integrate through TABLES, not imports â€” read the other module's "
+        + "\n\nModules integrate through TABLES, not imports — read the other module's "
           "produced table with SQL instead. If that seems impossible, the module split is "
           "wrong; raise it rather than wiring around it (CLAUDE.md)."
     )
@@ -178,7 +172,7 @@ def test_module_imports_only_core_or_itself(path: pathlib.Path):
 def test_no_stale_entries_in_the_known_violations_list():
     """An allow-list that outlives its violations quietly re-legalises them.
 
-    If a listed import is gone, the entry must go too â€” otherwise the exemption sits there
+    If a listed import is gone, the entry must go too — otherwise the exemption sits there
     ready to permit a future re-introduction of the same cross-module import.
     """
     stale: list[str] = []
@@ -191,6 +185,6 @@ def test_no_stale_entries_in_the_known_violations_list():
         for gone in allowed - actual:
             stale.append(f"{rel} no longer imports `{gone}`")
     assert not stale, (
-        "KNOWN_VIOLATIONS is out of date â€” these are fixed and must be removed from the "
+        "KNOWN_VIOLATIONS is out of date — these are fixed and must be removed from the "
         f"list: {stale}"
     )

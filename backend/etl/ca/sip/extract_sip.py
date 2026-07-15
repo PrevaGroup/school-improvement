@@ -45,7 +45,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[3]))  # -> backend/
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from .._shared import METRICS as _METRICS, STUDENT_GROUPS as _STUDENT_GROUPS
+from app.vocab import METRIC_IDS as _METRIC_IDS, STUDENT_GROUP_IDS as _STUDENT_GROUP_IDS
 from .schema import (
     Direction,  # noqa: F401  (re-exported for prompt authors / typing parity)
     ExtractedAction,
@@ -62,13 +62,13 @@ from .schema import (
 
 MODEL_ID = "claude-opus-4-8"
 
-# Conformed vocabulary is the single source of truth in `_shared.py` (what the CA
-# loaders actually write to star.fact_metric / dim_student_group). Deriving the id
-# lists here keeps the extractor's prompt in lockstep with the DB — a plan measure
-# maps onto a real `dim_metric.metric_id` / `dim_student_group.student_group_id`, or
-# the model proposes null when we don't yet conform it.
-CONFORMED_METRIC_IDS = [m["metric_id"] for m in _METRICS]
-CONFORMED_GROUP_IDS = [g[0] for g in _STUDENT_GROUPS]
+# The conformed vocabulary is core's (`app/vocab.py`) — the same ids public_metrics seeds
+# into dim_metric / dim_student_group. Pinning the extractor's prompt to it keeps a plan
+# measure mapping onto a real `dim_metric.metric_id` / `dim_student_group.student_group_id`,
+# or the model proposes null when we don't yet conform it. An id invented here would write
+# rows that join to nothing.
+CONFORMED_METRIC_IDS = _METRIC_IDS
+CONFORMED_GROUP_IDS = _STUDENT_GROUP_IDS
 
 
 # --------------------------------------------------------------------------- #
@@ -185,7 +185,7 @@ def _resolve_school_id_from_cds(cds: Optional[str]) -> Optional[str]:
     try:
         from sqlalchemy import text as _text
 
-        from .._shared import _engine
+        from ._db import _engine
 
         with _engine().connect() as conn:
             return conn.execute(
