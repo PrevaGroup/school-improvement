@@ -9,16 +9,17 @@ one-GCS-GET-per-file loop in `load_plan_extractions` and `batch_load`:
     of the batch still parses (this is the property the ThreadPoolExecutor loop
     must preserve).
 
-Everything runs against fsspec's LocalFileSystem — no network, no DB. The loader
-modules import sqlalchemy at module top (ORM + engine), so where sqlalchemy is
-absent (a bare box) the whole module skips cleanly rather than erroring.
+Everything runs against fsspec's LocalFileSystem — no network, no DB.
+
+Deliberately no `importorskip` guard: the loaders' deps are declared in
+requirements-dev.txt, and a missing one is a broken environment, not a reason to
+report green. Skipping on a bare box is how this file spent its life silently
+contributing zero coverage.
 """
 import json
 import pathlib
 
 import pytest
-
-pytest.importorskip("sqlalchemy")  # loaders import sqlalchemy at import time; skip if unavailable
 
 import fsspec
 
