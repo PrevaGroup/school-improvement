@@ -31,11 +31,12 @@ migration) — which is why it lives in `core`, not in a module.
 |---|---|---|---|---|
 | **public_metrics** | `fact_metric` @ public | CDE/CA raw files → core dims | (bulk ETL, no API) | scattered |
 | **sip** (plan extraction) | `plan_extraction`, `plan_*` | PDFs, `dim_school` | `/plans/*` (ingest) | scattered |
-| **likeschools** (engine) | `feat_match_vector`, `mart_school_peer`, `model_partition_stats` | `dim_school` (inputs only, never outcomes) | **none — engine only** | scattered |
+| **likeschools** (engine) | `feat_match_vector`, `mart_school_peer`, `model_partition_stats` | `dim_school` (inputs only, never outcomes) | **none — engine only** | **relocated** |
 | **serving** | — (owns no tables) | `plan_extraction`, `fact_metric`, `mart_school_peer`, `dim_*` — all via SQL | `/marts/*`, `/chat` | scattered |
 
 "Scattered" = the feature's code is still spread across the old `app/` + `etl/` + `migrations/`
-layout. See each module's README for its component map, and the reorg checklist below.
+layout. **"Relocated"** = it lives under `backend/<X>/`, migration included. See each module's
+README for its component map, and the reorg checklist below.
 
 `app/main.py` is the **composition root**, not a module: it mounts every module's router and
 is the one file allowed to import across modules. It must stay thin — logic that lands there
@@ -53,8 +54,8 @@ logic (worse than the import). `chat` had the same problem — it imports four `
 So the split is **by producer/consumer, not by feature**:
 
 - **Producer modules** (`public_metrics`, `sip`, `likeschools`) own tables and their own
-  *ingest* endpoints. `likeschools` is the matching **engine** — `etl/peers` and the three
-  tables it writes, nothing more.
+  *ingest* endpoints. `likeschools` is the matching **engine** — `backend/likeschools/` and the
+  three tables it writes, nothing more.
 - **`serving`** owns no tables. It reads every producer's tables with SQL and imports none of
   them, so the table stays the only seam.
 
@@ -88,7 +89,7 @@ backend/
     CONTRACT.md               the tables + vocab modules are allowed to depend on
   app/
     main.py                 ← thin composition root: mount each module's router
-  likeschools/              ← + etl/peers/*, the 3 mart models, migration 0004 (docs already here)
+  likeschools/              ← DONE 2026-07-15: build_peers.py, models.py, migrations/0004_*
                               ENGINE ONLY — no serving surface
   sip/                      ← was etl/ca/sip/*, app/plans.py, app/plan_loader.py, migration 0003
   public_metrics/           ← was etl/ca/*.py, _shared.py, seed_ca_dims.py
@@ -144,7 +145,7 @@ left in the repo,** and the rule is enforced with no exemptions.
 
 **Core carve-out — module tables (done 2026-07-15):**
 - [x] `core` no longer declares a single module-owned table. Models moved to the module that
-      writes them: `etl/peers/models.py` (likeschools' 3 mart tables) and `etl/ca/sip/models.py`
+      writes them: `likeschools/models.py` (its 3 mart tables) and `etl/ca/sip/models.py`
       (sip's `plan_extraction` + `plan` / `plan_goal` / `plan_action`). `from app.models import
       Base` now sees **14** tables — all genuinely shared. Changing a module's table is no
       longer a change to the frozen contract.
@@ -153,9 +154,10 @@ left in the repo,** and the rule is enforced with no exemptions.
       a table it can't see becomes DROP TABLE) and `0001_initial_schema.py` (`create_all` on a
       fresh DB). Both now import the module models explicitly. `app/models/__init__.py` does
       **not** re-export them — that would make `core` import a module and invert the dependency.
-- [x] Models sit beside their module's existing code (`etl/peers/`, `etl/ca/sip/`) rather than in
-      `backend/likeschools/` — those folders are still docs-only, and splitting one module across
-      two directories is worse than the problem. They move together when the code relocates.
+- [x] Models sat beside their module's existing code at the time (`etl/peers/`, `etl/ca/sip/`)
+      rather than in the docs-only module folders — splitting one module across two directories
+      is worse than the problem. `likeschools` has since relocated wholesale (below); `sip` still
+      waits, so its models remain at `etl/ca/sip/models.py` alongside the rest of it.
 
 **Fixed on the way (latent, would only bite a from-scratch build):** `0001` created its tables
 with an unbounded `Base.metadata.create_all()`, i.e. every table the live models declared —
@@ -198,8 +200,28 @@ engine to keep it that way.
 - [x] `sip/README.md` — claimed "depends only on `core`", which is false; now names the four
       `_shared` imports and points at `KNOWN_VIOLATIONS`.
 
-**Code relocation (NOT started):**
-- [ ] move each module's code under `backend/<X>/` (models included) + `version_locations`
+**Code relocation — `likeschools` done 2026-07-15 (the worked example):**
+- [x] `etl/peers/*` → `backend/likeschools/`; `etl/peers/` is gone. Runbook changed:
+      **`python -m likeschools.build_peers`** (was `python -m etl.peers.build_peers`).
+- [x] **`version_locations` proven.** `0004_peer_tables.py` → `likeschools/migrations/`, wired in
+      `alembic.ini`. Still ONE linear history — `alembic history` reports `0003 -> 0004 (head)`,
+      unchanged, and it runs offline so it's cheap to re-check. Alembic stitches by
+      `down_revision`; the folder has no bearing on order. A revision outside a listed path is
+      invisible to Alembic — a migration that silently never runs.
+- [x] Caught in the move: `build_peers.py` did `sys.path.append(parents[2])` to reach `backend/`.
+      From `etl/peers/` that was right; from `likeschools/` it lands on the **repo root**. Only
+      breaks when run as a script in Cloud Shell — tests never see it, because `conftest.py`
+      already puts `backend/` on `sys.path`. **Check `parents[N]` on every file that moves depth.**
+- [x] `SOURCE_TREES` in `tests/test_module_boundaries.py` now lists `likeschools`. An unlisted
+      tree is never walked, so the module would go dark to the boundary check — the same silent
+      failure as `pytest.ini`'s `testpaths` omitting `tests/`.
+
+**Code relocation — remaining (NOT started):**
+- [ ] `public_metrics` (`etl/ca/*.py`) — doesn't touch `main.py`. Changes every loader runbook
+      command (`python -m etl.ca.load_ca_*` → `python -m public_metrics.load_ca_*`).
+- [ ] `sip`, `serving`, `core` — **each changes `app/main.py`'s imports**, which collides with
+      go-live task 3.1c (`/api/*` prefix), also on `main.py` + the route contract. Sequence
+      deliberately; don't run both at once.
 - [ ] **While `db.py` moves to `core/`: make the engine lazy.** A function or cached factory —
       **no module-level `create_engine`**. Today `app/db.py` runs `engine = _build_engine()` at
       **import time**, so importing *any* `app` module requires DB credentials **and** an

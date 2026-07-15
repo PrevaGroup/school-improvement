@@ -18,7 +18,7 @@ Deviations from the spec, to fit the deployed CA data:
     schools, avoiding fragmentation from mixed fact-stub years.
 
 Run in Cloud Shell (DB via Auth Proxy + ADC), from backend/ (needs scikit-learn):
-    python -m etl.peers.build_peers [--k 50] [--year 2025-26] [--conf-pctile 90] [--dry-run]
+    python -m likeschools.build_peers [--k 50] [--year 2025-26] [--conf-pctile 90] [--dry-run]
 """
 from __future__ import annotations
 
@@ -29,7 +29,10 @@ import sys
 from datetime import datetime, timezone
 from typing import Optional
 
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))  # -> backend/
+# -> backend/, so `app.config` resolves when this runs as a script. parents[1], not [2]:
+# this file moved up a level (etl/peers/ -> likeschools/) in the reorg, and [2] now lands on
+# the repo root. Tests never catch this — conftest.py already puts backend/ on sys.path.
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 import numpy as np
 from sklearn.covariance import LedoitWolf

@@ -2,7 +2,7 @@
 
 > **⚠ STATUS — drifted from the shipped code.** This document reflects the original design and
 > *dev alternatives*, not exactly what was built. The **source of truth is the code**
-> (`backend/etl/peers/build_peers.py`) and the reconciled **[`README.md`](./README.md)** in this
+> (`backend/likeschools/build_peers.py`) and the reconciled **[`README.md`](./README.md)** in this
 > folder (see its "Deviations from the spec docs" section). Read this for *why/how we got here*,
 > not for *what the system currently does*.
 

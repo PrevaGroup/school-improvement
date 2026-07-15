@@ -2,7 +2,7 @@
 
 > **⚠ STATUS — design doc, not current-state.** This captures the original *why* and dev
 > alternatives, which have drifted from what shipped. For what the system actually does, the
-> **source of truth is the code** (`backend/etl/peers/build_peers.py`) and the reconciled
+> **source of truth is the code** (`backend/likeschools/build_peers.py`) and the reconciled
 > **[`README.md`](./README.md)** in this folder.
 
 *School Improvement Plans prototype · MVP · July 2026*

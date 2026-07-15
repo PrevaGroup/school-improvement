@@ -86,7 +86,7 @@ asserts is a contract that survives the move.
 | **#6** the seam | Settled as **producer/consumer**, enforced in CI by `tests/test_module_boundaries.py`. |
 | **#7** schema inventory | Guards the `core/` carve-out against a silent `DROP TABLE`. |
 | **#8** auth split + DEV_MODE | §3.0, §3.2, §3.3 — **done and merged.** |
-| **#9** module tables out of `core` | The carve-out has **started**: module-owned tables moved to `etl/peers/models.py` + `etl/ca/sip/models.py`. Nothing in go-live imports models, so no overlap — but "land before the reorg" is now **expired** as a strategy. |
+| **#9** module tables out of `core` | The carve-out has **started**: module-owned tables moved to `likeschools/models.py` + `etl/ca/sip/models.py`. Nothing in go-live imports models, so no overlap — but "land before the reorg" is now **expired** as a strategy. |
 
 ### ✅ The `chat.py` crossover — dissolved by #6, not solved
 

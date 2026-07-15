@@ -22,9 +22,9 @@ here forced a cross-module import. See `docs/MODULES.md` and §4 of `ARCHITECTUR
 | Concern | File(s) today | Notes |
 |---|---|---|
 | **Design docs** | `backend/likeschools/*.md` (concept, lit-review, spec) | drifted — reference only |
-| **Matching engine** | `backend/etl/peers/build_peers.py` | the Mahalanobis matcher (the thing you'd edit to change the algorithm) |
-| **Schema / DDL** | `backend/migrations/versions/0004_peer_tables.py` | creates the 3 owned tables |
-| **ORM models** | `backend/etl/peers/models.py` → `FeatMatchVector`, `MartSchoolPeer`, `ModelPartitionStats` | moved out of core 2026-07-15; registered via `migrations/env.py` + `0001` |
+| **Matching engine** | `backend/likeschools/build_peers.py` | the Mahalanobis matcher (the thing you'd edit to change the algorithm) |
+| **Schema / DDL** | `backend/likeschools/migrations/0004_peer_tables.py` | creates the 3 owned tables |
+| **ORM models** | `backend/likeschools/models.py` → `FeatMatchVector`, `MartSchoolPeer`, `ModelPartitionStats` | moved out of core 2026-07-15; registered via `migrations/env.py` + `0001` |
 | **Dependency** | `backend/requirements.txt` → `scikit-learn` | used only by the matcher |
 | *(not this module)* | `backend/app/marts.py`, `backend/app/chat.py` | peer serving + chat tools — owned by **`serving`**, which reads `mart_school_peer` with SQL |
 
@@ -77,27 +77,39 @@ NearestNeighbors(metric='mahalanobis', VI=precision_) → keep k nearest, drop s
 
 ## How to update the algorithm (runbook)
 
-1. Edit **`backend/etl/peers/build_peers.py`** (`FEATURES`/`CORE`, `level_bucket()`, the distance
+1. Edit **`backend/likeschools/build_peers.py`** (`FEATURES`/`CORE`, `level_bucket()`, the distance
    step, `k`, confidence percentile). This is the only file that defines the method.
 2. If you add/rename an **output column**, that's a contract change — `mart_school_peer`'s shape
    is the only thing the rest of the system depends on. Update the DDL
-   (`migrations/versions/0004_peer_tables.py` or a new migration), the models in
-   `etl/peers/models.py`, **and** every reader (`serving` queries the table with SQL — grep
+   (`likeschools/migrations/0004_peer_tables.py` or a new migration), the models in
+   `likeschools/models.py`, **and** every reader (`serving` queries the table with SQL — grep
    `mart_school_peer`). Otherwise downstream is unaffected: that's the point of the seam.
 3. Rebuild (from `backend/`, needs scikit-learn + DB via Auth Proxy + ADC):
-   `python -m etl.peers.build_peers [--k 50] [--year 2025-26] [--conf-pctile 90] [--dry-run]`
+   `python -m likeschools.build_peers [--k 50] [--year 2025-26] [--conf-pctile 90] [--dry-run]`
 4. Serving is then a cheap indexed lookup — no serving change needed for a pure method change.
 
-## Reorg target
+## Reorg status — **this module is fully relocated** (the worked example)
 
-- [x] **Models out of core** (2026-07-15) — the 3 mart models moved from `app/models/reference.py`
-      to `etl/peers/models.py`. This module's tables are no longer part of the frozen contract, so
-      changing one is no longer a breaking change to everything.
-- [ ] Pull the remaining pieces under this folder: `build/build_peers.py`, `models.py`,
-      `migrations/0004_*`, `tests/` (golden peer-set fixtures); the design `.md` docs to `docs/`
-      here. **No `api/`** — this module has no serving surface. Tracked in `docs/MODULES.md`.
+- [x] **Models out of core** (2026-07-15) — the 3 mart models left `app/models/reference.py`, so
+      this module's tables are no longer part of the frozen contract.
+- [x] **Code under this folder** (2026-07-15) — `etl/peers/*` → `likeschools/`. `etl/peers/` is
+      gone. The runbook command changed: **`python -m likeschools.build_peers`**.
+- [x] **Migration under this folder** — `0004_peer_tables.py` lives in `likeschools/migrations/`,
+      registered through Alembic `version_locations` in `alembic.ini`. Still ONE linear history:
+      `alembic history` shows `0003 -> 0004 (head)` exactly as before. A revision file outside a
+      listed `version_locations` path is invisible to Alembic — i.e. a migration that silently
+      never runs — so if this folder ever moves, update `alembic.ini` in the same commit.
+- [ ] `tests/` — golden peer-set fixtures. **This module has no tests**; the matcher is the one
+      piece of real algorithmic logic in the repo and nothing covers it. If you touch
+      `build_peers.py`, adding a characterization test is part of the work (CLAUDE.md).
+      Add `backend/likeschools/tests/` to `pytest.ini`'s `testpaths` when you do, or it will
+      silently never run — that has already happened once in this repo.
+- [ ] Design `.md` docs → a `docs/` subfolder here (cosmetic; not urgent).
 
-When the models move again, update `migrations/env.py` **and**
-`migrations/versions/0001_initial_schema.py` — both import `etl.peers.models` to register these
+**No `api/` — ever.** This module has no serving surface (see the top of this file).
+
+**If `models.py` moves again**, update `migrations/env.py`, `migrations/versions/0001_initial_schema.py`,
+**and** `scripts/gen_schema_reference.py` — all three import `likeschools.models` to register these
 tables on `Base.metadata`, and autogenerate reads a table it can't see as **DROP TABLE**.
-`backend/tests/test_schema_inventory.py` will fail if you forget.
+`backend/tests/test_schema_inventory.py` fails if you forget. Also update `SOURCE_TREES` in
+`backend/tests/test_module_boundaries.py`, or this module stops being boundary-checked.

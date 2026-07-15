@@ -24,7 +24,7 @@ and reviewed on their own, never folded into a feature change.
 
 **Module-owned tables — moved out 2026-07-15, and they must stay out:**
 - `feat_match_vector`, `mart_school_peer`, `model_partition_stats` → **likeschools**
-  (`backend/etl/peers/models.py`)
+  (`backend/likeschools/models.py`)
 - `plan_extraction`, `plan`, `plan_goal`, `plan_action` → **sip** (`backend/etl/ca/sip/models.py`)
 
 `core` declaring a module's table made every feature change a breaking change to the contract.

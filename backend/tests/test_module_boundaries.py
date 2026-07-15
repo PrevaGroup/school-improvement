@@ -13,11 +13,11 @@ the table shape, and nothing downstream notices.
 Producer modules own tables and their own ingest endpoints. Read-serving is ONE module
 that reads those tables via SQL and imports none of them:
 
-    core            the frozen contract (config, db, security, star schema, tenancy)
+    core            the frozen contract (config, db, security, star schema, tenancy, vocab)
     public_metrics  etl/ca/*.py            -> fact_metric
     sip             etl/ca/sip/, plans.py  -> plan_extraction, plan_* (+ POST /plans/*)
-    likeschools     etl/peers/             -> mart_school_peer, feat_match_vector,
-                                              model_partition_stats
+    likeschools     likeschools/           -> mart_school_peer, feat_match_vector,
+                                              model_partition_stats  (relocated 2026-07-15)
     serving         marts.py, chat.py      -> owns no tables; reads them via raw SQL
 
 `likeschools` is the matching ENGINE only — it has no serving surface. That is a
@@ -57,13 +57,19 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "etl.ca.sip": "sip",
     "app.marts": "serving",
     "app.chat": "serving",
-    "etl.peers": "likeschools",
+    "likeschools": "likeschools",
     "etl.ca": "public_metrics",
 }
 
 # Scanned trees. `tests/`, `scripts/`, and `migrations/` are tooling that legitimately
 # reaches across everything (a test imports what it tests), so they are not modules.
-SOURCE_TREES = ("app", "etl")
+#
+# ADD A MODULE'S FOLDER HERE WHEN ITS CODE RELOCATES under backend/<X>/. A tree that isn't
+# listed is never walked, so its imports are never checked — the module goes dark exactly
+# the way `tests/` did when pytest.ini's `testpaths` omitted it, and just as silently.
+# `test_the_module_map_covers_every_source_file` only guards files inside these trees, so
+# it cannot catch a whole tree being missing. This tuple is the thing to keep honest.
+SOURCE_TREES = ("app", "etl", "likeschools")
 
 # --------------------------------------------------------------------------- #
 # Known debt: cross-module imports that exist TODAY, enumerated so the rule can be

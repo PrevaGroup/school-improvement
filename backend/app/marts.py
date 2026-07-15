@@ -171,7 +171,7 @@ def attendance_plans(
 
 # --------------------------------------------------------------------------- #
 # "Schools Like You" serving (spec §6). Reads the public peer marts + public
-# fact_metric; the matching engine (etl/peers) has no read access to outcomes,
+# fact_metric; the matching engine (likeschools/) has no read access to outcomes,
 # which enforces D1 (outcomes can't leak into the distance) architecturally.
 # --------------------------------------------------------------------------- #
 def _latest_peer_year(db: Session, school_id: str) -> str | None:
@@ -261,7 +261,7 @@ def fetch_peer_benchmark(db: Session, school_id: str, metric_id: str, school_yea
     """
     yr = school_year or _latest_peer_year(db, school_id)
     if not yr:
-        return {"error": "no peer set for this school (run etl.peers.build_peers)"}
+        return {"error": "no peer set for this school (run likeschools.build_peers)"}
     peers = db.execute(
         text("SELECT peer_school_id FROM mart_school_peer WHERE school_id = :s AND school_year = :y"),
         {"s": school_id, "y": yr},
