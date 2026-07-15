@@ -220,9 +220,27 @@ school-improvement/
 > is "outside testers can't read public school reference data", not "someone reads another
 > district's plans". It is an availability bug wearing an auth bug's clothes.
 >
-> **Fix:** switch both to `get_db_public` + `Depends(get_current_principal)`.
-> **Its own test, in the same diff:** a signed-in principal with **no district claim** gets
-> **200** on both routes. That test is the deliverable — without it the fix is unfalsifiable.
+> **⚠️ The two routes are NOT the same fix.** An earlier version of this item said "switch both
+> to `get_db_public` + `get_current_principal`". That is **wrong for the second route**, and
+> would trade a fail-closed bug for a silent-wrong-answer one:
+>
+> | Route | What it is | Fix |
+> |---|---|---|
+> | `/schools` | genuinely public — *"Public reference read (no RLS) — same for every tenant"* | `get_db_public` + `Depends(get_current_principal)`. Trivial. |
+> | `/schools/{id}/metrics` | **deliberately tenant-scoped** — *"RLS auto-scopes: public/state rows PLUS only **this** tenant's private rows"* | **Not** `get_db_public` — that would silently drop a district user's private rows. |
+>
+> The metrics route needs a **third db dependency**: bind the tenant when the principal has one,
+> otherwise run unbound (RLS `p_read` admits `visibility='public'` with no tenant, so a public
+> reader still gets public rows). Call it `get_db_for_principal` — it is the auth/tenancy split
+> from §3.2 carried down to the DB layer, and it is the *only* new design work in this item.
+>
+> **Test, in the same diff — both halves:**
+> 1. a signed-in principal with **no district claim** gets **200** on both routes;
+> 2. a principal **with** a district still sees its private rows on `/schools/{id}/metrics`.
+>
+> (2) is the one that matters: without it, "fixed" means "quietly stopped returning your data".
+> Harmless today — every `fact_metric` row is `tenant_id='public'` — which is exactly why it
+> would land unnoticed and detonate later, when the first private metric arrives.
 
 - **All API routes move under `/api/*`.** Breaking change; the current `static/index.html`
   calls `/marts/...` and `/chat` and is being replaced anyway, so there is no compatibility
