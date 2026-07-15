@@ -26,9 +26,23 @@ from .security import assert_dev_mode_not_in_production
 assert_dev_mode_not_in_production()
 
 app = FastAPI(title="School Improvement Platform API", version="0.1.0")
-app.include_router(plans_router)
-app.include_router(marts_router)
-app.include_router(chat_router)
+
+# Every API route lives under /api — applied HERE, at the composition root, not in each
+# router's own `prefix=`. Two reasons:
+#
+# 1. The modules being relocated (docs/MODULES.md) don't have to be touched to get it, and
+#    main.py is already the one file exempt from the module rule.
+# 2. It carves the URL space in two, which is what makes the SPA fallback safe. Once the
+#    frontend is served from here, the rule is unmissable: /api/* that doesn't match is a
+#    JSON 404; anything else is index.html. Share one namespace and a mistyped /marts/typo
+#    silently returns an HTML page to a fetch() — `Unexpected token '<'`, no clue why.
+#
+# /health is deliberately OUTSIDE /api: it's an unauthenticated liveness probe, not an API
+# route, and it must never sit behind the auth dependency that /api will gain at go-live.
+API = "/api"
+app.include_router(plans_router, prefix=API)
+app.include_router(marts_router, prefix=API)
+app.include_router(chat_router, prefix=API)
 
 _STATIC = pathlib.Path(__file__).parent / "static"
 
@@ -44,7 +58,7 @@ def health() -> dict:
     return {"ok": True}
 
 
-@app.get("/schools")
+@app.get(f"{API}/schools")
 def list_schools(db: Session = Depends(get_db)) -> list[dict]:
     # Public reference read (no RLS) — same for every tenant.
     rows = db.execute(select(DimSchool).limit(200)).scalars().all()
@@ -54,7 +68,7 @@ def list_schools(db: Session = Depends(get_db)) -> list[dict]:
     ]
 
 
-@app.get("/schools/{school_id}/metrics")
+@app.get(f"{API}/schools/{{school_id}}/metrics")
 def school_metrics(school_id: str, period_id: str | None = None,
                    db: Session = Depends(get_db)) -> list[dict]:
     # RLS auto-scopes: public/state rows PLUS only *this* tenant's private rows.

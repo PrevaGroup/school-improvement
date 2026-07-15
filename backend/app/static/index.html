@@ -273,7 +273,7 @@ function Chat({ school, level }) {
     const next = [...msgs, { role: "user", content: text }];
     setMsgs(next); setInput(""); setBusy(true);
     try {
-      const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: next, level }) });
+      const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: next, level }) });
       const d = r.ok ? await r.json() : { reply: "Error: " + ((await r.json()).detail || r.statusText) };
       setMsgs([...next, { role: "assistant", content: d.reply, tools: d.tools_used }]);
     } catch (e) { setMsgs([...next, { role: "assistant", content: "Error: " + e.message }]); }
@@ -305,11 +305,11 @@ function App() {
   const [detail, setDetail] = useState(null);
   const [loadState, setLoadState] = useState("loading"); // loading | ready | error
 
-  useEffect(() => { fetch("/marts/districts").then(r => r.json()).then(d => setDistricts(d.districts || [])).catch(() => {}); }, []);
+  useEffect(() => { fetch("/api/marts/districts").then(r => r.json()).then(d => setDistricts(d.districts || [])).catch(() => {}); }, []);
 
   useEffect(() => {
     setSchools([]); setSel(null); setLoadState("loading");
-    fetch(`/marts/attendance-diagnostic?district_id=${districtId}&level=${level}`).then(r => r.json()).then(d => {
+    fetch(`/api/marts/attendance-diagnostic?district_id=${districtId}&level=${level}`).then(r => r.json()).then(d => {
       setSchools(d.schools || []);
       setSel((d.schools || [])[0] || null);
       setLoadState("ready");
@@ -321,8 +321,8 @@ function App() {
   useEffect(() => {
     if (!current) { setPeers(null); setDetail(null); return; }
     setPeers(null); setDetail(null);
-    fetch(`/marts/like-schools?school_id=${current.school_id}&k=50`).then(r => r.json()).then(d => setPeers(d.peers || []));
-    fetch(`/marts/school-detail?school_id=${current.school_id}`).then(r => r.json()).then(setDetail).catch(() => setDetail(null));
+    fetch(`/api/marts/like-schools?school_id=${current.school_id}&k=50`).then(r => r.json()).then(d => setPeers(d.peers || []));
+    fetch(`/api/marts/school-detail?school_id=${current.school_id}`).then(r => r.json()).then(setDetail).catch(() => setDetail(null));
   }, [current && current.school_id]);
 
   return html`
