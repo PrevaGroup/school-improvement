@@ -180,3 +180,19 @@ second, function-level `_engine` import at line ~188 that a top-of-file grep mis
 
 **Code relocation (NOT started):**
 - [ ] move each module's code under `backend/<X>/` (models included) + `version_locations`
+- [ ] **While `db.py` moves to `core/`: make the engine lazy.** A function or cached factory —
+      **no module-level `create_engine`**. Today `app/db.py` runs `engine = _build_engine()` at
+      **import time**, so importing *any* `app` module requires DB credentials **and** an
+      installed `psycopg` driver (`create_engine` is lazy about *connecting*, not about
+      importing the DBAPI). That is the only reason `backend/conftest.py` has to inject a fake
+      password to collect the suite. Cheapest available win for testability, and the code is
+      moving to `core` regardless — so it costs one extra diff, not a separate project. Trim
+      the conftest workaround in the same change, so it can't outlive its cause.
+- [ ] **AFTER the relocation, never during: unify the two `plan_status` vocabularies.**
+      `fetch_school_plan` emits `on_file`/`not_on_file`; chat's attendance tool computes
+      `has_attendance_plan`/`no_attendance_section`/`not_on_file` — same field name, two
+      vocabularies, both feeding the model. Normalizing it *during* a move would be a behavior
+      change hiding inside a relocation, which is precisely what the characterization net
+      exists to catch. When it happens,
+      `tests/test_chat_tools.py::test_query_school_plan_status_vocabulary_differs_from_attendance_tool`
+      flips from *documenting an inconsistency* to *enforcing a contract*, in that same diff.

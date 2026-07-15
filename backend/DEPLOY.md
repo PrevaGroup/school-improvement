@@ -4,6 +4,15 @@ Container: [`Dockerfile`](Dockerfile) (build context = `backend/`). DB access us
 Cloud SQL Python Connector when `INSTANCE_CONNECTION_NAME` is set (no Auth Proxy
 sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
 
+> **This document describes the current IAM-gated demo deploy.** The cutover to a
+> GCIP-authenticated, internet-reachable service on a custom domain is planned in
+> [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md). Two things here change at that
+> cutover, and both are called out inline below:
+> - the **build context moves to the repo root** (`--source .`), because a multi-stage
+>   build that compiles `frontend/` cannot see it from a `backend/` context;
+> - **`--no-allow-unauthenticated` goes away**, which removes both the access gate *and*
+>   the Claude spend cap. Do not remove it before its replacements exist.
+
 ## Prerequisites (one-time)
 
 1. **Secrets in Secret Manager** (project `school-improvement-501916`):
@@ -48,12 +57,37 @@ gcloud run deploy sip-api \
 
 - **`--max-instances 4`** caps serverless scale-out so it can't exhaust Postgres
   connections (runbook Phase 3). The engine also uses `pool_pre_ping`.
-- **`--min-instances 0`** for MVP — accept occasional cold starts (free).
+- **`--min-instances 0`** for MVP — accept occasional cold starts (free). **At go-live this
+  becomes `--min-instances 1`** (~$6–15/mo): an invited tester's first click shouldn't pay a
+  container start *plus* a Cloud SQL connect. That reads as "broken", not "thrifty".
+- **At go-live the source flag changes** to `--source .`, run from the repo root
+  (`school-improvement/` — where `.git` is, not the parent `SchoolImprovement/`), because the
+  multi-stage Dockerfile builds `frontend/` and cannot see it from a `backend/` context.
+  - **Size is already fine:** the repo is **4.8 MB** (measured 2026-07-15). The 2.8 GB
+    `California/` raw data is a **sibling outside the repo** and was never in scope for upload.
+  - **`.gcloudignore` footgun:** with **no** `.gcloudignore`, gcloud auto-generates one that
+    honors `.gitignore`. **Hand-writing one turns that off** — so a file that forgets
+    `node_modules/` will upload it the first time anyone runs `npm install`. Start it with
+    `#!include:.gitignore` (already covers `node_modules`, `dist`, `__pycache__/`, `.venv/`,
+    `.pytest_cache/`), then add `.git/`.
+  - **`.dockerignore` moves too:** Docker only reads it **at the context root**, so
+    [`backend/.dockerignore`](.dockerignore) becomes **inert** — delete it rather than leave it
+    looking authoritative. The root one must exclude `node_modules/` and `frontend/dist/`
+    (built inside the image) while **keeping `frontend/` source**, which build stage 1 needs.
 - The Anthropic key is read from Secret Manager via ADC at request time; no env var
   needed in prod. (Set `ANTHROPIC_API_KEY` only for a local dev fallback.)
 - **`--no-allow-unauthenticated`** is the access gate: only Google identities you grant
   `roles/run.invoker` can reach the service (this is how "who's asking" and your Claude
   spend are controlled — see below). No app-level login is built.
+
+> ⚠️ **`--no-allow-unauthenticated` is doing two jobs, and it's easy to only notice one.**
+> It gates access *and* it is the only thing capping Anthropic spend — there is no
+> per-user limit in the app, and `/chat` is unauthenticated at the application layer
+> ([`app/chat.py`](app/chat.py) reads `get_db_public`). Flipping this to
+> `--allow-unauthenticated` therefore exposes `POST /chat` and `POST /plans/extract` (an
+> Opus call per PDF) to anyone who finds the `run.app` URL. **The replacements — GCIP
+> enforcement, the `DEV_MODE` lockout, and an in-app per-user chat cap — must land first.**
+> See [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md) §3.4 and §3.6.
 
 ## Chat UI (`GET /` + `POST /chat`)
 
@@ -62,6 +96,12 @@ Run service behind one IAM gate** — no separate frontend host, no CORS. It cal
 `POST /chat`, which runs Claude (`settings.chat_model`, Haiku by default for cost) with an
 inline tool over the public `plan_extraction` + `fact_metric` marts. All reads are public
 (SPSAs are public docs), so there's no tenant/auth in the app — access is the IAM gate.
+
+> **At go-live this page is replaced**, but the *single-origin* property it demonstrates is
+> kept deliberately: the React + Vite SPA is built into the same image and served by the same
+> FastAPI app, so there is still one host and still no CORS. Routes move under `/api/*`, and
+> "no tenant/auth in the app" becomes "**no tenant**, but GCIP-authenticated" — the reads stay
+> public; the sign-in is what replaces the IAM gate.
 
 Grant demo users access:
 ```bash
@@ -85,10 +125,76 @@ Token verification is implemented in `app/security.py` (`verify_firebase_token` 
 For a gated internal test without real sign-in, deploy with `DEV_MODE=true` and call with
 an `X-Dev-Tenant: <tenant_id>` header.
 
+> ⚠️ **`DEV_MODE=true` is safe *only* while `--no-allow-unauthenticated` holds.** The
+> `X-Dev-Tenant` header is unverified by construction — on a publicly reachable service it
+> is tenant impersonation via a request header, i.e. any caller can read any district. At
+> the go-live cutover the app must **structurally refuse** the dev path when a production
+> signal (`K_SERVICE`, `INSTANCE_CONNECTION_NAME`) is present. A `DEV_MODE=false` deploy
+> flag is not sufficient — it's one hurried `--set-env-vars` edit away from true.
+
+## Custom domain (at go-live, not today)
+
+Cloud Run **domain mapping**; Cloudflare is DNS-only. No load balancer, no `cloudflared`,
+no Workers.
+
+```bash
+# NOTE: managed Cloud Run needs the *beta* surface. The GA `gcloud run domain-mappings`
+# command is Cloud Run for Anthos and will not do this.
+gcloud beta run domain-mappings create \
+  --service sip-api --region us-central1 --domain app.<yourdomain>
+```
+
+One-time, per-project, and in this order — each step blocks the next:
+
+1. **Verify domain ownership** in Google Search Console (`gcloud domains verify`). The
+   mapping will not create without it. This is the step everyone forgets.
+2. Create the mapping; it prints the DNS record to add.
+3. In Cloudflare, add the record **DNS-only (grey cloud)** — a subdomain gets a CNAME to
+   `ghs.googlehosted.com`. **Do not enable the orange-cloud proxy**: Google's managed cert
+   requires seeing the DNS directly, and proxying breaks validation. (This is also the
+   exact thing someone "helpfully" turns on when the site feels slow.)
+4. **Wait** — cert provisioning can take a few hours. A 404/525 in the meantime is normal.
+
+Prefer a **subdomain** (`app.example.com`). An apex domain needs A/AAAA records instead,
+and Cloudflare's CNAME flattening interacts badly with grey-cloud + Google-managed certs.
+
+`us-central1` supports domain mappings — verified 2026-07-15 against the regional
+`domains.cloudrun.com/v1` endpoint. If a future region doesn't, **flag it** rather than
+substituting Firebase Hosting rewrites silently.
+
+**Keep the proxy off (grey cloud) — this is not a preference.** Orange cloud **breaks the
+mapping**: Cloudflare hides the CNAME, so Google's managed cert never provisions and the
+mapping sits in "pending certificate provisioning" forever. Full(strict) then fails the origin
+handshake (no cert exists) → 525; Flexible sends HTTP to an HTTPS-only origin → redirect loop.
+There is no working orange-cloud configuration for a Cloud Run domain mapping.
+
+### Accepted limitation: `*.run.app` bypasses Cloudflare — do not "fix" this
+
+The `*.run.app` URL stays reachable after mapping, so anyone who finds it skips Cloudflare
+entirely — which means WAF/caching there protects nothing on its own. **That is accepted and
+intended: GCIP token verification in FastAPI is the security boundary; the domain is
+convenience.** It doesn't care which hostname a request arrived on.
+
+So, deliberately: **no load balancer, no ingress restrictions, no Cloudflare-header-checking
+middleware, and no Cloudflare-dependent logic anywhere in the app.** If we ever harden (custom
+domain via a global LB with internal ingress, or validating a shared header only Cloudflare
+injects), that is a **deliberate infra change — never a scaffold feature.**
+
 ## ⚠️ Remaining before a real prod cutover
 
+See [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md) for the sequenced version. In short:
+
+- **Split auth from tenancy** in `app/security.py` — `get_current_principal` (verify only)
+  for public routes, `get_current_tenant` (verify + map) for private ones. Today's
+  `get_current_tenant` **403s any identity without a mapped district**, so gating the
+  public marts on it would reject every outside tester.
+- **Lock `DEV_MODE` out of prod** (above). Prerequisite for opening the gate.
+- **Cap Claude spend in-app** — per-principal daily limit on `/chat`, keyed on the verified
+  GCIP subject. Prerequisite for opening the gate.
 - **Provisioning**: a way to create GCIP users and attach the `tenant_id` custom claim
   (`firebase-admin` / Identity Platform Admin API) — one-time onboarding, not the request
-  path. Until then, use `DOMAIN_TENANT_MAP` or dev mode.
+  path. Note public-data testers need **no** claim once auth and tenancy are split.
+- Add the custom domain to GCIP **authorized domains**, or sign-in fails there with a
+  confusing error.
 - Create the `anthropic-api-key` secret (above) and confirm the tenant rows exist in
   `dim_tenant`.

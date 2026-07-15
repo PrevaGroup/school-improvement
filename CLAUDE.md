@@ -50,10 +50,42 @@ human, don't fold it silently into a feature change.
 5. **Don't reach across the tree.** Editing files outside your module (especially `core/` or
    another module) is the thing this structure exists to prevent.
 
+## Running the tests
+
+**The unit tests need no database** — every DB call is patched. CI (`.github/workflows/ci.yml`)
+is the source of truth; it installs the real `requirements.txt` and runs the whole suite on
+every PR.
+
+To run them locally, use an **isolated venv outside the repo** (a scratch dir). **Do not
+pip-install project deps into the system Python.** This is *not* an exception to "ETL runs in
+Cloud Shell, never locally" — that rule is about ETL/extractors, which hit Cloud SQL, spend
+Anthropic tokens, and need cloud credentials. Pure-logic tests are a different thing.
+
+```
+python -m venv <scratch>/tv
+<scratch>/tv/Scripts/python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+cd backend && <scratch>/tv/Scripts/python -m pytest
+```
+
+> **Install the full `requirements.txt`, not a hand-picked subset.** A minimal venv silently
+> *under-collects*: tests whose imports are missing never run, and the suite still reports
+> green. That happened — a hand-picked venv reported 81 passing where CI ran 116. If your local
+> count disagrees with CI, believe CI.
+
+`backend/conftest.py` supplies a throwaway DB password so `app/*` imports without credentials —
+`app/db.py` builds the engine at **import time**, which otherwise reaches for Secret Manager.
+That is a workaround for a smell, not a feature; see `docs/MODULES.md`.
+
+**`testpaths` must list every test directory.** It once read `etl app`, so `tests/` was never
+collected and those tests silently never ran. Any module carve-out that adds
+`backend/<X>/tests/` **must add that path to `pytest.ini`**, or it goes dark the same way.
+
 ## Where things are
 
 - `docs/MODULES.md` — the module registry: every module, what it owns, what it reads, current
   file locations, and reorg status. **Start here to find a feature's components.**
+- `docs/GO_LIVE_PLAN.md` — the plan to put this on the internet (GCIP sign-in, the `frontend/`
+  SPA, the domain). **Read its §2.5 before touching `serving/` or `app/main.py`.**
 - `ARCHITECTURE.md` — the logical model (5 data layers, trust boundary, pipelines).
 - `backend/core/` — the shared contract (see above).
 - `backend/<X>/` — modules, one folder each: the producers `likeschools`, `sip`,

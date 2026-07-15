@@ -7,13 +7,23 @@ row-level security. This document is the map: how the pieces fit, where they liv
 repo, and what's left to build.
 
 **Stack:** Cloud SQL (Postgres) · Cloud Run (FastAPI) · Cloud Storage + Claude for raw-data /
-plan ingest — *live*. **Planned:** React + Vite on Cloudflare Pages *(the demo serves a
-no-build React UI from the app itself)* · Google Cloud Identity Platform (GCIP) *(the demo is
-gated by Cloud Run IAM)*.
+plan ingest — *live*. **Planned:** a React + Vite + TypeScript SPA **served by FastAPI from
+the same Cloud Run service** *(the demo serves a no-build React UI from the app itself)* ·
+Google Cloud Identity Platform (GCIP) sign-in *(the demo is gated by Cloud Run IAM)* · the
+domain via **Cloud Run domain mapping**, with Cloudflare as **DNS only**.
+
+**Not used — deliberately:** Cloudflare Pages, Access, Workers, and Tunnel. An earlier plan
+put the frontend on Pages; serving the built SPA from FastAPI keeps **one origin**, which is
+why this codebase has no CORS middleware and needs none. Choosing GCIP for identity left
+Cloudflare with no job but DNS. The cutover plan: [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md).
 
 **Guiding principle:** this is a *prototype*. Build the isolation seam (`tenant_id` + RLS)
 correctly now because it's expensive to retrofit; keep everything else simple and upgrade
 later.
+
+**One origin is an invariant, not a convenience.** The SPA calls relative paths (`/api/...`)
+only; dev uses Vite's `server.proxy`. If `CORSMiddleware` ever appears in this app, the
+invariant has been broken — that's a design smell to raise, not a fix to apply.
 
 ---
 
@@ -22,20 +32,52 @@ later.
 The whole security model hinges on one seam: **the tenant is derived from a verified
 identity server-side, never sent by the client.** Postgres then enforces it.
 
-> **Planned (production auth).** This GCIP → verified-token → per-request `SET LOCAL app.tenant`
-> flow is the *target*. The **deployed demo uses Cloud Run IAM** for access and reads only
-> public marts, so this trust-boundary path isn't exercised yet.
+### Two questions, not one
+
+"Auth" is really two mechanisms with different jobs and different urgency. Keeping them
+distinct is what lets this service go on the internet without the tenancy work being finished:
+
+| Question | Mechanism | Load-bearing today? |
+|---|---|---|
+| **Who are you?** (authentication) | GCIP verifies the ID token | **Yes** — it's the only thing that makes public exposure safe |
+| **What may you see?** (tenancy) | `tenant_id` claim → `SET LOCAL app.tenant` → RLS | **No** — every row served today is public |
+
+Everything the app currently serves (`/marts/*`, `/chat`, `/schools`) reads `get_db_public`.
+So authentication gates the service; **tenancy is built, proven, and dormant** until private
+district data lands. Consequently there are two dependencies, and using the wrong one is a
+bug in both directions:
+
+- `get_current_principal` — verify the token, return claims, **require no tenant**. Public
+  `/api` routes use this. (Gating public data on `get_current_tenant` would 403 every signed-in
+  user who isn't district staff.)
+- `get_current_tenant` — verify, then map claims → `tenant_id`, 403 if unmapped. Guards
+  `/api/plans/*` and every future private route.
+
+> **Planned (production auth).** This GCIP flow is the *target*. The **deployed demo uses
+> Cloud Run IAM** for access and reads only public marts, so the `SET LOCAL app.tenant` leg
+> below isn't exercised yet.
 
 ```mermaid
 flowchart LR
-    U[Browser<br/>React + Vite] -->|1. sign in| G[GCIP<br/>identity]
+    U[Browser<br/>React + Vite SPA] -->|1. sign in| G[GCIP<br/>identity]
     G -->|2. ID token JWT| U
-    U -->|3. Bearer token| API[FastAPI on Cloud Run]
+    U -->|3. Bearer token on /api/*| API[Cloud Run: FastAPI<br/>+ the built SPA<br/>ONE origin]
     API -->|4. verify_firebase_token| G
-    API -->|5. SET LOCAL app.tenant = tenant| DB[(Cloud SQL Postgres<br/>Row-Level Security)]
+    API -->|5a. public route<br/>get_db_public| DB
+    API -->|5b. private route<br/>SET LOCAL app.tenant| DB[(Cloud SQL Postgres<br/>Row-Level Security)]
     DB -->|6. only public + this tenant's rows| API
     API --> U
 ```
+
+The browser is served the SPA by the same Cloud Run service it calls — there is no second
+host and no cross-origin hop, so no CORS and no third-party-cookie exposure.
+
+> ⚠️ **`DEV_MODE` is a production-grade hazard once the IAM gate is removed.**
+> [`security.py`](backend/app/security.py) trusts an `X-Dev-Tenant` header when `dev_mode` is
+> on — that is tenant impersonation by request header. It is harmless behind IAM and
+> unacceptable on the open internet. `DEV_MODE=false` in a deploy flag is *not* sufficient;
+> the app must structurally refuse the dev path when a production signal (`K_SERVICE`,
+> `INSTANCE_CONNECTION_NAME`) is present.
 
 1. The user signs in through **GCIP** — email/password, the district's SSO (SAML/OIDC), or
    a social provider. **No Gmail required**; GCIP is a customer-identity service.
@@ -150,16 +192,45 @@ SQL Python Connector when `INSTANCE_CONNECTION_NAME` is set (no Auth-Proxy sidec
 Run), else the proxy URL locally. Secrets (`sip-app-password`, `sip-migrator-password`,
 `anthropic-api-key`) come from Secret Manager via ADC — never the repo.
 
-**Build path (byproduct to know about):** `gcloud run deploy --source backend` zips `backend/`
+**One service, one image, one deploy target.** A multi-stage Dockerfile builds the SPA
+(node → `vite build` → `frontend/dist`) and copies it into the Python stage, which serves both
+the API and the SPA. There is no second deploy target and no separate frontend host.
+
+**Build path (byproduct to know about):** `gcloud run deploy --source .` zips the **repo root**
 into the auto-created **`run-sources-<project>-<region>` GCS bucket** → **Cloud Build** builds
 the `Dockerfile` → pushes to **Artifact Registry** (`cloud-run-source-deploy`) → **Cloud Run**
 runs the image. Those source zips are build inputs only (one per deploy); safe to prune.
+
+> **The build context is the repo root, not `backend/`.** It moved because a multi-stage build
+> that compiles `frontend/` cannot see it from a `backend/` context — this is why the deploy
+> command is `--source .` and why `.gcloudignore` matters (`node_modules/`, `.git/`,
+> `frontend/dist/`, `__pycache__/`). The `California/` raw data is a sibling *outside* this
+> repo, so it is already out of context.
+
+**Domain:** a **Cloud Run domain mapping** (`gcloud beta run domain-mappings` — the GA
+`gcloud run domain-mappings` command is Anthos-only), with the CNAME to `ghs.googlehosted.com`
+in Cloudflare as **DNS-only (grey cloud, proxy off)**. `us-central1` supports domain mappings
+(verified 2026-07-15). No load balancer, no tunnel, no `cloudflared`, no `wrangler.toml` —
+**Cloudflare requires zero repo artifacts.**
+
+Orange cloud isn't merely discouraged, it **breaks the mapping**: Cloudflare hides the CNAME,
+so Google's managed cert never provisions (mapping stuck pending; Full(strict) → 525;
+Flexible → redirect loop against an HTTPS-only origin).
+
+> **Accepted limitation — `*.run.app` bypasses Cloudflare, and we do not fix it.** With
+> Cloudflare reduced to DNS, it is decorative for security: anyone with the `run.app` URL skips
+> it, so WAF/caching there protects nothing on its own. **GCIP verification in FastAPI is the
+> perimeter** — it doesn't care which hostname a request arrived on, which is the conventional
+> Cloud Run pattern. Therefore: **no ALB, no ingress restrictions, no Cloudflare-header-checking
+> middleware, and no Cloudflare-dependent logic in the app.** Hardening is a deliberate infra
+> change if we ever want it — never a scaffold feature.
 
 > **Temporary demo, not prod.** What is currently deployed is the MVP demo described in
 > [Status](#status): **IAM-gated** (not GCIP), a **self-served no-build React UI**, reading the
 > **public `plan_extraction`** marts — deliberately *not* the GCIP + private-tenant `/plans`
 > architecture this document specifies. It's for showing the diagnostic, and is expected to be
-> replaced at the real prod cutover.
+> replaced at the real prod cutover. [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) is the
+> sequenced plan for that cutover.
 
 ---
 
@@ -180,8 +251,13 @@ from and reconciled against the code; a second copy here earns nothing and rots.
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | **This document** — how the pieces fit, and why |
 | [`CLAUDE.md`](CLAUDE.md) | How to work in this repo — the module rule, `core` policy |
 | [`docs/MODULES.md`](docs/MODULES.md) | **The module registry** — who owns what, where it lives, reorg status |
+| [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) | **The internet-exposure cutover** — sequenced tasks, what's dropped, why the gate opens last |
 | [`docs/TARGET_SCHEMA.md`](docs/TARGET_SCHEMA.md) | The data-model spec — five layers, tenancy + RLS, missingness, instruments |
 | [`docs/DATA_CATALOG.md`](docs/DATA_CATALOG.md) | Raw CA data sources and how they were obtained |
+| **Frontend** *(planned — see the go-live plan)* | |
+| `frontend/` | React + Vite + TypeScript SPA. Built into the container; served by FastAPI at one origin. Calls `/api/*` via relative paths only |
+| `Dockerfile` (repo root) | Multi-stage: node builds `frontend/dist` → python stage serves API + SPA |
+| **Backend** | |
 | [`backend/README.md`](backend/README.md) | Roles/bootstrap, migrations, RLS smoke test, running loaders |
 | [`backend/DEPLOY.md`](backend/DEPLOY.md) | Cloud Run deploy: Dockerfile, Cloud SQL Connector, secrets |
 | [`backend/SCHEMA_REFERENCE.md`](backend/SCHEMA_REFERENCE.md) | Generated table reference (from the models) |
@@ -199,23 +275,52 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
   and a grounded chat — are **built and deployed to Cloud Run** (see the demo caveat below).
 - **⚠️ The deployed Cloud Run service is a temporary demo, not the production architecture
   above.** It is gated by **Cloud Run IAM** (`run.invoker`) instead of GCIP sign-in; serves a
-  **no-build React UI from the app itself** (no Vite / Cloudflare Pages); reads the **public
-  `plan_extraction`** table via the batch `extract → GCS JSON → load_plan_extractions` path,
-  **not** the private `/plans` tenant path; and runs at `--min-instances 0`. It exists to show
-  the diagnostic, not to be the production cutover.
-- **Not done:** GCIP user provisioning, the private-tenant `/plans` serving path, and the real
-  production frontend (React + Vite).
+  **no-build React UI from the app itself** (no Vite); reads the **public `plan_extraction`**
+  table via the batch `extract → GCS JSON → load_plan_extractions` path, **not** the private
+  `/plans` tenant path; and runs at `--min-instances 0`. It exists to show the diagnostic, not
+  to be the production cutover.
+- **Not done:** GCIP sign-in + user provisioning, the private-tenant `/plans` serving path, and
+  the real frontend (React + Vite + TypeScript in `frontend/`).
+- **Next: go public.** [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) sequences the cutover from
+  "IAM-gated, only Tim can open it" to "invited people sign in with GCIP at a real domain."
+  Its load-bearing constraint: **the IAM gate opens last**, after the `DEV_MODE` lockout and
+  the in-app Claude spend cap — because IAM is currently what provides both.
 
 ## Remaining architecture tasks
 
+> **Go-live (making this reachable on the internet) is planned in detail in
+> [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md).** The auth / deploy / frontend items below
+> are summarised from it; that document has the ordering and the reasoning.
+
 **Auth / provisioning**
+- [x] **Split authentication from tenancy** in `security.py` — `get_current_principal` (verify
+      only, no tenant) alongside `get_current_tenant` (verify + map, 403 if unmapped). Public
+      `/api` routes use the former. *(#8, merged 2026-07-15, ahead of the `core/` carve-out.)*
+- [x] **`DEV_MODE` is structurally unreachable in prod** — the `X-Dev-Tenant` path is gated on
+      the environment (`K_SERVICE` / `INSTANCE_CONNECTION_NAME`), not the flag, plus an
+      import-time assert in `main.py`. *(#8.)*
+- [ ] **Enable Identity Platform** — `identitytoolkit.googleapis.com` is **not enabled on the
+      project** (checked 2026-07-15); GCIP does not exist yet. Then the Firebase JS SDK in the
+      SPA (sign-in, token refresh, 401 → redirect) + the custom domain in GCIP **authorized
+      domains**. **This is the critical path to letting anyone in** — it gates testers, not
+      code, so start it first and run it in parallel with everything else.
 - [ ] Stand up GCIP user provisioning — create users and set the `tenant_id` custom claim
       (`firebase-admin` / Identity Platform Admin API). Until then, use `DOMAIN_TENANT_MAP`.
+      *(Public-data testers need **no** claim — that's the point of the split above.)*
 - [ ] Seed `dim_tenant` with the real districts; create a second tenant for isolation testing.
 
 **Deploy**
-- [ ] `gcloud run deploy` the backend (see `backend/DEPLOY.md`); create the `anthropic-api-key`
-      secret; grant the runtime SA `secretAccessor` + `cloudsql.client`.
+- [x] `gcloud run deploy` the backend; `anthropic-api-key` secret; runtime SA `secretAccessor`
+      + `cloudsql.client`. *(Live 2026-07-14, IAM-gated.)*
+- [ ] **Move Claude spend control into the app** — a per-principal daily cap on `/api/chat`
+      keyed on the verified GCIP subject. The IAM gate is what caps spend today; opening the
+      gate removes it, and grey-cloud Cloudflare provides no edge rate limiter to inherit.
+      Prerequisite for opening the gate.
+- [ ] Deploy GCIP-enforced but still `--no-allow-unauthenticated`; verify 401-without-token;
+      **only then** `--allow-unauthenticated` + `--min-instances 1`.
+      *(`gcloud beta` is installed as of 2026-07-15, so the domain mapping below is unblocked.)*
+- [ ] Create the domain mapping; CNAME in Cloudflare **grey-cloud**; verify domain ownership
+      in Search Console first (hard prerequisite); allow hours for the cert.
 - [ ] Re-run the tenant-isolation test end-to-end against the deployed API (log in as two
       districts, confirm neither sees the other's plans).
 
@@ -232,22 +337,34 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 - [ ] Build the **marts** semantic layer the dashboard/agents read.
 
 **Frontend**
-- [ ] Scaffold React + Vite; integrate the GCIP client SDK; wire to the API; deploy on
-      Cloudflare Pages.
+- [ ] Scaffold `frontend/` (React + Vite + TypeScript); port `app/static/index.html` as the
+      first view (port, don't redesign — mixing the two makes regressions unattributable).
+- [ ] Move all API routes under `/api/*`; mount `frontend/dist` + an SPA catch-all registered
+      **last**, which must not swallow `/api` 404s into the HTML shell.
+- [ ] Multi-stage Dockerfile at the repo root; deploy becomes `--source .`; add `.gcloudignore`.
+- [ ] Vega-Lite chart contract + **deterministic validator** (reject remote `url` data,
+      whitelist fields, cap 5k rows, reject-don't-repair) — its own module, not inside
+      `chat.py`.
 
 ---
 
 ## Cost at MVP scale (rough, USD/mo)
 
+Reflects the go-live target (`min-instances 1`, no Cloudflare compute).
+
 | Item | Cost |
 |---|---|
 | Cloud SQL (small, single-zone) | ~$10–25 |
-| Cloud Run (FastAPI, min-instances = 0) | ~$0–5 |
-| Cloudflare Pages | Free |
+| Cloud Run (FastAPI + SPA, **min-instances = 1**, always warm) | ~$6–15 |
+| Cloudflare (DNS only — no Pages/Workers/Access) | $0 |
+| Cloud Run domain mapping | $0 |
 | Identity Platform (under free-tier MAU) | ~$0 |
 | Cloud Storage (raw data, Standard, first 5 GB free) | pennies–$2 |
-| Claude API (SIP extraction, per-plan) | usage-based |
-| **Total (excl. Claude usage)** | **~$15–35/mo** |
+| Claude API (chat + SIP extraction) | usage-based — **app-capped per user once the IAM gate opens** |
+| **Total (excl. Claude usage)** | **~$20–45/mo** |
+
+`min-instances 1` is the deliberate delta (was 0, ~$0–5): invited testers shouldn't meet a
+cold start plus a Cloud SQL connect on first click — it reads as "broken", not "thrifty".
 
 ## FERPA & access-control decisions (carry forward)
 
