@@ -4,7 +4,10 @@ DB passwords come from **Google Secret Manager** (runbook Phase 3 — never in t
 repo). A direct-password env var is honored as a dev fallback. Connection URLs are
 assembled with `sqlalchemy.URL.create`, which escapes any special characters.
 """
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy import URL
 
 # Resolved secrets are cached per-process: without this, each Secret Manager fetch
@@ -56,6 +59,39 @@ class Settings(BaseSettings):
     #   2) fallback: map the email domain, e.g. {"lbschools.net": "lbusd"}.
     tenant_claim: str = "tenant_id"
     domain_tenant_map: dict[str, str] = {}
+
+    # --- who may sign in at all (see app/security.py) ---
+    # Email domains allowed through the door, e.g. "prevagroup.com,gatesfoundation.org".
+    # Authentication is not invitation: with a Google provider enabled, ANY Gmail account can
+    # obtain a valid token, so this is what turns "signed in" into "invited". Expected to stay
+    # a short list.
+    #
+    # FAILS CLOSED: empty means nobody. An unset allowlist must not silently mean "everyone" —
+    # that is precisely the hole this closes, and a deploy that forgets it should lock people
+    # out (loud, fixable) rather than let the internet at the Anthropic balance (silent, not).
+    # `NoDecode` is required, not decorative: without it pydantic-settings tries json.loads()
+    # on the env value BEFORE any validator runs, so a plain "a.com,b.org" raises SettingsError
+    # at import and the app never starts. NoDecode hands the raw string to the validator below.
+    allowed_email_domains: Annotated[set[str], NoDecode] = set()
+
+    @field_validator("allowed_email_domains", mode="before")
+    @classmethod
+    def _split_domains(cls, v):
+        """Accept "a.com, b.org" as well as JSON or a real list.
+
+        Plain comma-separated is the point: a JSON list in `gcloud run deploy --set-env-vars`
+        collides with gcloud's own comma-as-delimiter parsing (see backend/DEPLOY.md). Lowercased
+        here so the comparison in security.py can't be case-tricked.
+        """
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith("["):                      # tolerate JSON if someone writes it
+                import json
+                return {str(d).strip().lower() for d in json.loads(s) if str(d).strip()}
+            return {d.strip().lower() for d in s.split(",") if d.strip()}
+        if isinstance(v, (list, set, tuple)):
+            return {str(d).strip().lower() for d in v if str(d).strip()}
+        return v
 
     @property
     def gcip_audience(self) -> str | None:

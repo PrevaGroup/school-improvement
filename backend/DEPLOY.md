@@ -111,6 +111,42 @@ gcloud run services add-iam-policy-binding sip-api --region us-central1 \
 They then reach it via an identity-aware proxy token (or `gcloud run services proxy sip-api
 --region us-central1` for a local authenticated tunnel).
 
+## Who may sign in — `ALLOWED_EMAIL_DOMAINS` (the invite list)
+
+**Authentication is not invitation.** With GCIP's Google provider enabled, *any* Gmail account
+can obtain a valid token for this project. Verifying the token therefore gates **nothing** on
+its own — it proves the caller exists, not that you invited them. `ALLOWED_EMAIL_DOMAINS` is
+what turns "signed in" into "invited", and it is what stands between the open internet and the
+Anthropic balance behind `/api/chat`.
+
+```bash
+ALLOWED_EMAIL_DOMAINS=prevagroup.com,gatesfoundation.org
+```
+
+- **Comma-separated, exact domains.** `mail.prevagroup.com` does **not** match `prevagroup.com`
+  — suffix matching is how allowlists get bypassed (`notprevagroup.com`,
+  `prevagroup.com.evil.tld`), and the list is short enough to spell out.
+- **It fails closed.** Unset = **nobody gets in**. A deploy that forgets it locks people out
+  (loud, fixable) rather than opening the door (silent, expensive). If everyone is suddenly
+  403ing with *"not on the invite list"*, this is why.
+- **`email_verified` is enforced alongside it** (`app/security.py`). Not optional: a token
+  proves GCIP issued it, **not** that the address inside belongs to the caller. GCIP's
+  email/password provider lets anyone register any address unverified — so a domain check
+  without the verified check is an honour system.
+
+> **⚠️ The comma is why this is not JSON.** `--set-env-vars` splits on commas itself, so a JSON
+> list would be shredded into garbage keys. Use gcloud's alternate delimiter to pass a value
+> that contains commas — the `^@^` prefix makes `@` the separator instead:
+>
+> ```bash
+> gcloud run deploy sip-api --source . --region us-central1 \
+>   --set-env-vars ^@^GCP_PROJECT=school-improvement-501916@ALLOWED_EMAIL_DOMAINS=prevagroup.com,gatesfoundation.org@DEV_MODE=false
+> ```
+>
+> Without it you get `ALLOWED_EMAIL_DOMAINS=prevagroup.com` plus a bogus
+> `gatesfoundation.org=` key — and a silently *shorter* invite list. (Same class of footgun as
+> the "all env vars in ONE flag" note above.)
+
 ## Auth (GCIP)
 
 Token verification is implemented in `app/security.py` (`verify_firebase_token` via

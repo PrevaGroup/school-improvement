@@ -107,13 +107,23 @@ async def get_current_principal(
     authorization: str | None = Header(default=None),
     x_dev_tenant: str | None = Header(default=None),
 ) -> dict:
-    """Verify the caller's identity and return their claims. Does NOT require a tenant.
+    """Verify the caller's identity, check they're invited, and return their claims.
 
-    The gate for public /api routes: it proves *someone signed in*, which is the whole reason
-    the service can be exposed. It deliberately says nothing about tenancy.
+    The gate for public /api routes. Two steps, and both are load-bearing:
+
+    1. **Authentication** — the token is real (signature, issuer, audience, expiry).
+    2. **Invitation** — the identity's email domain is on `allowed_email_domains`.
+
+    Step 2 exists because **authentication is not invitation**. With a Google provider enabled,
+    *any* Gmail account can obtain a perfectly valid token for this project — so verification
+    alone would gate nothing, and every served route (plus the Anthropic balance behind
+    /api/chat) would be open to the internet.
+
+    Says nothing about tenancy — that's get_current_tenant's job.
     """
     # DEV ONLY: trust a header so you can exercise RLS locally without OIDC. Inert in any
-    # production-shaped environment — see the DEV_MODE containment note above.
+    # production-shaped environment — see the DEV_MODE containment note above. Returns before
+    # the allowlist, deliberately: the dev principal has no email to check.
     if dev_mode_active() and x_dev_tenant:
         return {settings.tenant_claim: x_dev_tenant, "email": None, "dev_mode": True}
 
@@ -121,7 +131,39 @@ async def get_current_principal(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "missing bearer token")
 
     token = authorization.split(" ", 1)[1]
-    return _verify_identity_token(token)
+    claims = _verify_identity_token(token)
+    _assert_invited(claims)
+    return claims
+
+
+def _assert_invited(claims: dict) -> None:
+    """403 unless the caller's **verified** email is in an allowed domain.
+
+    `email_verified` is not a formality — it is the whole control. A token proves GCIP issued
+    it; it does NOT prove the address inside is yours. Providers differ: Google verifies the
+    address, but GCIP's email/password provider lets anyone register any address unverified.
+    Check the domain without checking `email_verified` and the allowlist becomes an honour
+    system — sign up as anyone@gatesfoundation.org and walk in. Never split these two.
+
+    Exact domain match only: `mail.prevagroup.com` does NOT match `prevagroup.com`. Suffix
+    matching is how allowlists get bypassed (`notprevagroup.com`, `prevagroup.com.evil.tld`),
+    and this list is short enough to spell out.
+    """
+    email = str(claims.get("email") or "").strip().lower()
+    if "@" not in email:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "this identity has no email address")
+
+    if not claims.get("email_verified"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, f"the email {email} is not verified"
+        )
+
+    # Fails closed: an unset allowlist admits nobody. See config.allowed_email_domains.
+    if email.rsplit("@", 1)[1] not in settings.allowed_email_domains:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"{email} is not on the invite list for this application",
+        )
 
 
 async def get_current_tenant(principal: dict = Depends(get_current_principal)) -> str:
