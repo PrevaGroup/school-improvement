@@ -1,4 +1,4 @@
-"""Tests for the trust boundary — `app.security`. See docs/GO_LIVE_PLAN.md §3.2 + §3.3.
+"""Tests for the trust boundary — `app.security`.
 
 Unlike test_chat_tools.py (which pins *existing* behavior), this file covers behavior the
 §3.2/§3.3 patch *introduces*:

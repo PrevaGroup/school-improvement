@@ -50,7 +50,7 @@ _google_request = g_requests.Request()
 # `X-Dev-Tenant` is an UNVERIFIED header: whatever it claims, you become. Behind the Cloud Run
 # IAM gate that's a harmless convenience. On a publicly reachable service it is tenant
 # impersonation by request header — any caller reads any district. It is the worst outcome
-# available in the go-live cutover (docs/GO_LIVE_PLAN.md §3.3).
+# available when the IAM gate opens and this service becomes publicly reachable.
 #
 # `DEV_MODE=false` in the deploy command is NOT sufficient: it is one hurried `--set-env-vars`
 # edit away from true, and nothing would complain. So the dev path is gated on the *environment*
