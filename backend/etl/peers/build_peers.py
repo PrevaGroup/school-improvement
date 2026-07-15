@@ -37,7 +37,7 @@ from sklearn.neighbors import NearestNeighbors
 from sqlalchemy import create_engine, text
 
 from app.config import settings
-from app.models.reference import FeatMatchVector, MartSchoolPeer, ModelPartitionStats
+from .models import FeatMatchVector, MartSchoolPeer, ModelPartitionStats
 
 FEATURES = [
     "f_econ_disadv", "f_el", "f_swd", "f_enroll_log",

@@ -23,7 +23,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[3]))  # -> backend/
 import fsspec
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.models.reference import PlanExtraction
+from .models import PlanExtraction
 
 from .._shared import _engine
 

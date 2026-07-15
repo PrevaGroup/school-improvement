@@ -19,6 +19,16 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 from app.config import settings  # noqa: E402
 from app.models import Base      # noqa: E402
 
+# Module-owned tables live with their module, not in core (docs/MODULES.md). A model only
+# reaches Base.metadata if something imports it, and autogenerate reads a table it cannot
+# see as DROP TABLE — so every module that owns tables MUST be imported here. env.py is
+# migration tooling, not core, which is why it (like app/main.py) may know every module.
+# Add a line here when a module starts owning tables; never "fix" a missing table by
+# re-exporting it from app.models — that would make core depend on a module.
+# Guarded by backend/tests/test_schema_inventory.py.
+import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
+import etl.peers.models   # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
+
 target_metadata = Base.metadata
 config = context.config
 

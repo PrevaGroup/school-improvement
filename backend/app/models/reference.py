@@ -6,10 +6,7 @@ must be readable so RLS policies can evaluate write scope.
 """
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import ARRAY, Boolean, Float, Integer, Numeric, SmallInteger, Text, TIMESTAMP
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, Integer, Numeric, SmallInteger, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -75,75 +72,12 @@ class DimSchool(Base):
     peer_group_id: Mapped[str | None] = mapped_column(Text)         # -> dim_peer_group
 
 
-class PlanExtraction(Base):
-    """The full extracted plan JSON (schema.ExtractedPlan) as a queryable JSONB blob.
-
-    Public tier (SPSAs are published documents), so served without a tenant binding.
-    This holds everything the extractor produced — provenance quotes, funding text,
-    proposed metric links — that the minimal normalized plan_* tables drop. It is the
-    serving source for the plan-content marts until §5.2 (bridges/provenance) is built.
-    """
-    __tablename__ = "plan_extraction"
-    plan_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    school_id: Mapped[str | None] = mapped_column(Text)      # NCES; joins dim_school
-    plan_year: Mapped[str | None] = mapped_column(Text)
-    plan_type: Mapped[str | None] = mapped_column(Text)
-    extracted_at: Mapped[str | None] = mapped_column(Text)
-    document: Mapped[dict] = mapped_column(JSONB, nullable=False)
-
-
-# --------------------------------------------------------------------------- #
-# "Schools Like You" — input-matched demographic peer groups (public marts).
-# See backend/likeschools/school-classification-spec.md. All public/no-RLS:
-# computed from the public federal/state universe, identical for every tenant.
-# NB (deviation from the spec's DDL): keyed on `school_id` (the platform's NCES
-# identity), not `nces_id`, to match the deployed dim_school.
-# --------------------------------------------------------------------------- #
-class FeatMatchVector(Base):
-    """The standardized demographic match vector per school (spec §5.2)."""
-    __tablename__ = "feat_match_vector"
-    school_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    school_year: Mapped[str] = mapped_column(Text, primary_key=True)
-    level_bucket: Mapped[str | None] = mapped_column(Text)  # Primary|Middle|High|Combined-Other
-    f_econ_disadv: Mapped[float | None] = mapped_column(Float)
-    f_el: Mapped[float | None] = mapped_column(Float)
-    f_swd: Mapped[float | None] = mapped_column(Float)
-    f_enroll_log: Mapped[float | None] = mapped_column(Float)
-    f_locale_city: Mapped[float | None] = mapped_column(Float)
-    f_locale_suburb: Mapped[float | None] = mapped_column(Float)
-    f_locale_town: Mapped[float | None] = mapped_column(Float)
-    f_locale_rural: Mapped[float | None] = mapped_column(Float)
-    n_imputed: Mapped[int] = mapped_column(SmallInteger, server_default="0")
-
-
-class MartSchoolPeer(Base):
-    """Precomputed k-nearest peer lists — the 'schools like you' artifact (spec §5.2)."""
-    __tablename__ = "mart_school_peer"
-    school_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    peer_school_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    school_year: Mapped[str] = mapped_column(Text, primary_key=True)
-    rank: Mapped[int] = mapped_column(SmallInteger)          # 1..k, nearest first
-    distance: Mapped[float] = mapped_column(Float)           # Mahalanobis distance
-    level_bucket: Mapped[str | None] = mapped_column(Text)
-    low_confidence: Mapped[bool] = mapped_column(Boolean, server_default="false")
-
-
-class ModelPartitionStats(Base):
-    """Per-partition model provenance for reproducibility/audit (spec §5.2).
-
-    `precision_mat` is the inverse covariance S^-1, stored row-major flattened;
-    reshape to (len(feature_names), len(feature_names)).
-    """
-    __tablename__ = "model_partition_stats"
-    school_year: Mapped[str] = mapped_column(Text, primary_key=True)
-    level_bucket: Mapped[str] = mapped_column(Text, primary_key=True)
-    feature_names: Mapped[list[str]] = mapped_column(ARRAY(Text))
-    means: Mapped[list[float]] = mapped_column(ARRAY(Float))
-    sds: Mapped[list[float]] = mapped_column(ARRAY(Float))
-    shrinkage: Mapped[float | None] = mapped_column(Float)
-    precision_mat: Mapped[list[float]] = mapped_column(ARRAY(Float))
-    k: Mapped[int | None] = mapped_column(SmallInteger)
-    built_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+# Moved out of core 2026-07-15 — these were never shared schema:
+#   plan_extraction                                    -> etl/ca/sip/models.py      (sip)
+#   feat_match_vector, mart_school_peer,
+#   model_partition_stats                              -> etl/peers/models.py       (likeschools)
+# They live with the module that writes them, so changing one is no longer a change to
+# the frozen contract. Downstream reads them as TABLES (SQL), never as imports.
 
 
 class DimDate(Base):
