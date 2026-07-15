@@ -346,11 +346,13 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 - [ ] Build the **marts** semantic layer the dashboard/agents read.
 
 **Frontend**
-- [ ] Scaffold `frontend/` (React + Vite + TypeScript); port `app/static/index.html` as the
-      first view (port, don't redesign — mixing the two makes regressions unattributable).
-- [ ] Move all API routes under `/api/*`; mount `frontend/dist` + an SPA catch-all registered
-      **last**, which must not swallow `/api` 404s into the HTML shell.
-- [ ] Multi-stage Dockerfile at the repo root; deploy becomes `--source .`; add `.gcloudignore`.
+- [x] Scaffold `frontend/` (React + Vite + TypeScript); ported the no-build UI verbatim — a
+      port, not a redesign, so any regression stays attributable. Bundling also drops the
+      runtime dependency on **esm.sh**, which the old page fetched React from on every load.
+- [x] All API routes under `/api/*`; `frontend/dist` mounted + an SPA catch-all registered
+      **last**, which returns a JSON 404 for unmatched `/api` rather than the HTML shell.
+- [x] Multi-stage Dockerfile at the repo root; deploy is `--source .`; `.gcloudignore` +
+      `.dockerignore` added.
 - [ ] Vega-Lite chart contract + **deterministic validator** (reject remote `url` data,
       whitelist fields, cap 5k rows, reject-don't-repair) — its own module, not inside
       `chat.py`.

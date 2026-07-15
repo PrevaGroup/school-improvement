@@ -4,3 +4,7 @@
 #   python -m pytest
 -r requirements.txt
 pytest
+# fastapi.testclient (tests/test_spa_fallback.py) needs httpx. It arrives transitively via
+# anthropic today, but a test dependency that only works by accident is one `pip` resolution
+# away from a confusing red. Declare it.
+httpx

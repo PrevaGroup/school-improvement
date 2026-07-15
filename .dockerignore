@@ -1,0 +1,27 @@
+# Build context is the REPO ROOT (the multi-stage Dockerfile needs frontend/ + backend/).
+# NOTE: Docker only reads .dockerignore at the context root — a backend/.dockerignore is inert
+# now and was removed rather than left looking authoritative.
+
+.git
+.github
+docs
+*.md
+!backend/README.md
+
+# Built/installed artifacts — both stages produce these inside the image.
+frontend/node_modules
+frontend/dist
+
+# Python local cruft
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+.venv
+venv
+
+# Never ship secrets or local config
+**/.env
+**/.env.*
+!backend/.env.example

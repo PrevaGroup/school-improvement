@@ -1,0 +1,17 @@
+# What `gcloud run deploy --source .` uploads to Cloud Build.
+#
+# CRITICAL: with no .gcloudignore, gcloud auto-generates one that honors .gitignore. Writing
+# this file BY HAND turns that off — so the include below is not decorative. Without it, the
+# first `npm install` puts frontend/node_modules in the upload.
+#!include:.gitignore
+
+.git
+.github
+
+# Built in the image (stage 1), never uploaded.
+frontend/dist
+frontend/node_modules
+
+# Belt-and-braces only: the ~2.8GB California/ raw data is a SIBLING of this repo, outside the
+# build context entirely, so it was never an upload risk. Listed so nobody re-derives that.
+California/

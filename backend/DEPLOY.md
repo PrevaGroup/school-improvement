@@ -1,6 +1,9 @@
 # Deploy the FastAPI backend to Cloud Run
 
-Container: [`Dockerfile`](Dockerfile) (build context = `backend/`). DB access uses the
+Container: [`../Dockerfile`](../Dockerfile) — **at the repo root**, multi-stage: a node stage
+runs `vite build` on `frontend/`, then the python stage serves the API *and* that bundle from
+one origin. The context is the repo root because a stage that compiles `frontend/` cannot see
+it from a `backend/` context. DB access uses the
 Cloud SQL Python Connector when `INSTANCE_CONNECTION_NAME` is set (no Auth Proxy
 sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
 
@@ -46,7 +49,7 @@ Two separate things fail, with different fixes:
 # NOTE: all env vars go in ONE --set-env-vars flag — repeating the flag overwrites
 # (last wins), which would silently drop GCP_PROJECT + INSTANCE_CONNECTION_NAME.
 gcloud run deploy sip-api \
-  --source backend \
+  --source . \
   --region us-central1 \
   --add-cloudsql-instances school-improvement-501916:us-central1:school-improvement-sql \
   --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false \
@@ -91,11 +94,12 @@ gcloud run deploy sip-api \
 
 ## Chat UI (`GET /` + `POST /chat`)
 
-The chat page is served from the app itself (`app/static/index.html`), so it's **one Cloud
-Run service behind one IAM gate** — no separate frontend host, no CORS. It calls
-`POST /chat`, which runs Claude (`settings.chat_model`, Haiku by default for cost) with an
-inline tool over the public `plan_extraction` + `fact_metric` marts. All reads are public
-(SPSAs are public docs), so there's no tenant/auth in the app — access is the IAM gate.
+The UI is the React + Vite SPA in [`frontend/`](../frontend), built into the image and served
+by FastAPI itself — **one Cloud Run service, one origin**, so no separate frontend host and no
+CORS. It calls `POST /api/chat`, which runs Claude (`settings.chat_model`, Haiku by default for
+cost) with an inline tool over the public `plan_extraction` + `fact_metric` marts. All reads are
+public (SPSAs are public docs), so there's no tenant/auth in the app yet — access is still the
+IAM gate until GCIP sign-in lands.
 
 > **At go-live this page is replaced**, but the *single-origin* property it demonstrates is
 > kept deliberately: the React + Vite SPA is built into the same image and served by the same
