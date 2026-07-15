@@ -22,6 +22,11 @@ becomes a cross-module import — the one rule gone. Duplicating the percentile/
 would be worse. So the read surface is **one module** that owns no tables and reads every
 producer's tables with SQL, which keeps the table as the only seam in the system.
 
+> ⚠️ **The planned `chat.py` traces/eval overhaul will push on "owns no tables."** Retaining
+> traces means this module starts *writing*, which would make `serving` a producer and undo the
+> reasoning above. It's parked, not cancelled — decide the storage **before the first trace is
+> written**: [`docs/design/chat-traces-and-evals.md`](../../docs/design/chat-traces-and-evals.md).
+
 ## Component map (where the code is today)
 
 | Concern | File(s) | Notes |
