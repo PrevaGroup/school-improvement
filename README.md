@@ -18,16 +18,34 @@ loaders, on Cloud SQL.
 | [`backend/`](backend/) | FastAPI + SQLAlchemy + Alembic app: RLS schema, Secret-Manager config, and the ETL loaders |
 | [`backend/etl/ca/`](backend/etl/ca/) | California public-data loaders (`load_ca_<fact>.py`) + [their README](backend/etl/ca/README.md) |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Architecture: request/trust flow, data-model layers, ingest pipelines, repo index, remaining tasks |
+| [`CLAUDE.md`](CLAUDE.md) | How to work in this repo — module boundaries, `core` as a frozen contract |
+| [`docs/MODULES.md`](docs/MODULES.md) | Module registry — what each module owns and reads, and reorg status |
+| [`docs/design/`](docs/design/) | Design notes, e.g. extraction-time relevance tagging for SIP → mart |
 
 ## Status
 
+- **Live on Cloud Run** — an IAM-gated **school diagnostic workspace**: three peer-benchmarked
+  indicators (chronic absenteeism, graduation rate, college-going), the school's full SPSA, its
+  demographically-matched peers, and a **grounded chat** with five tools over all of it.
 - Cloud SQL Postgres with the full aggregate **star schema** (17 tables) + **row-level
   security** (tenant isolation proven), credentials in **Google Secret Manager**.
 - **8 public metrics loaded** (chronic absenteeism, suspension, expulsion, graduation,
   stability, college-going, homelessness, enrollment) — ~960k `fact_metric` rows.
-- **SIP plan pipeline built** (PDF → `POST /plans/extract` → review → `POST /plans/load`)
-  and **GCIP token auth** wired; Cloud Run Dockerfile + Connector ready. Not yet deployed —
-  see [`ARCHITECTURE.md`](ARCHITECTURE.md) for remaining tasks.
+- **SIP extraction run**: 74 of 77 Long Beach SPSAs (plus Ventura) extracted PDF → JSON →
+  `plan_extraction`, via the batch path (`batch_extract` → GCS → `load_plan_extractions`).
+- **"Schools like you" peer engine** (Mahalanobis kNN on *inputs* — poverty, EL, disability,
+  size, locale — never outcomes) and the **marts layer** are built and serving.
+
+> **⚠️ The deployed service is a temporary demo, not the production architecture.** It is gated
+> by **Cloud Run IAM** (not GCIP), serves a **no-build React UI from the app itself** (no
+> Vite/Cloudflare), and reads the **public `plan_extraction`** marts rather than the private
+> tenant `/plans` path this repo also specifies.
+
+**Planned:** GCIP sign-in + user provisioning · the private-tenant `/plans` serving path · a
+real React + Vite frontend · extraction-time metric tagging to replace the keyword relevance
+filter ([design note](docs/design/plan-relevance-tagging.md)).
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full picture and remaining tasks.
 
 ## Backend quickstart
 
