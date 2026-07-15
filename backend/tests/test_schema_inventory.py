@@ -18,10 +18,25 @@ That is a data-loss bug reviews miss, because the diff that causes it (a model m
 new file) looks entirely harmless, and the DROP appears later, in a *generated* migration
 nobody hand-wrote.
 
-So this imports the same way env.py does, and fails if the inventory changes. If you moved a
-model and this went red, do NOT edit EXPECTED_TABLES to match — re-export the model so
-`app.models` still reaches it. Only edit the list when you have genuinely added or dropped a
-table on purpose, in the same commit as its migration.
+So this imports the same way env.py does today, and fails if the inventory changes.
+
+If you moved a model and this went red: **do not edit EXPECTED_TABLES to match.** The table
+still exists in the database — only the model's location changed, and that's the bug. Only
+edit the list when you have genuinely added or dropped a table on purpose, in the same commit
+as its migration.
+
+The right fix depends on where the model went, and one of the two options is a trap:
+
+* **Wrong:** re-export it from `app/models/__init__.py` so `app.models` reaches it again. That
+  makes `core` import a module, inverting the dependency the whole reorg exists to establish
+  — `core` is the thing modules depend on, never the reverse.
+* **Right:** have `migrations/env.py` import the module's models directly, alongside `Base`.
+  env.py is migration tooling, not `core`, so it is allowed to know every module — that's the
+  same exemption `app/main.py` gets as the composition root.
+
+Taking the second path means env.py and this test stop agreeing on one import, so update the
+import here to match env.py's list in the same commit. That coupling is deliberate: these two
+must be read together or the guard stops guarding.
 """
 from app.models import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 
@@ -65,9 +80,10 @@ def test_no_table_silently_leaves_the_metadata():
     added = sorted(registered - expected)
     assert not missing, (
         f"{missing} are no longer registered on Base.metadata. `alembic revision "
-        "--autogenerate` would now emit DROP TABLE for them. If a model moved, re-export it "
-        "so `from app.models import Base` still imports it — do NOT just delete it from "
-        "EXPECTED_TABLES."
+        "--autogenerate` would now emit DROP TABLE for them. If a model moved, make sure "
+        "migrations/env.py still imports it (NOT by re-exporting from app.models — that "
+        "inverts core). Do not just delete it from EXPECTED_TABLES; read this module's "
+        "docstring first."
     )
     assert not added, (
         f"New tables on Base.metadata: {added}. Add them to EXPECTED_TABLES with their owning "
