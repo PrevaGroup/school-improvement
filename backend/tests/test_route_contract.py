@@ -20,23 +20,26 @@ from app.main import app
 
 # path -> the HTTP methods it answers.
 EXPECTED: dict[str, set[str]] = {
+    # NOT under /api — an unauthenticated liveness probe, not an API route. It must stay
+    # outside the prefix that gains the auth dependency at go-live.
     "/health": {"GET"},
-    "/schools": {"GET"},
-    "/schools/{school_id}/metrics": {"GET"},
-    # --- plan_marts ---
-    "/marts/attendance-plans": {"GET"},
-    "/marts/attendance-diagnostic": {"GET"},
-    "/marts/subgroup-metrics": {"GET"},
-    "/marts/districts": {"GET"},
-    "/marts/school-detail": {"GET"},
-    # --- likeschools (currently living in app/marts.py; moving to backend/likeschools/) ---
-    "/marts/like-schools": {"GET"},
-    "/marts/peer-benchmark": {"GET"},
+    # --- everything below is under /api (see app/main.py; docs/GO_LIVE_PLAN.md §3.1c) ---
+    "/api/schools": {"GET"},
+    "/api/schools/{school_id}/metrics": {"GET"},
+    # --- serving: plan marts ---
+    "/api/marts/attendance-plans": {"GET"},
+    "/api/marts/attendance-diagnostic": {"GET"},
+    "/api/marts/subgroup-metrics": {"GET"},
+    "/api/marts/districts": {"GET"},
+    "/api/marts/school-detail": {"GET"},
+    # --- serving: peer endpoints (likeschools is engine-only; these serve its tables) ---
+    "/api/marts/like-schools": {"GET"},
+    "/api/marts/peer-benchmark": {"GET"},
     # --- sip ---
-    "/plans/extract": {"POST"},
-    "/plans/load": {"POST"},
-    # --- chat ---
-    "/chat": {"POST"},
+    "/api/plans/extract": {"POST"},
+    "/api/plans/load": {"POST"},
+    # --- serving: chat ---
+    "/api/chat": {"POST"},
 }
 
 
@@ -72,9 +75,14 @@ def test_frontend_endpoints_survive_the_module_split():
     """The URLs backend/app/static/index.html actually fetches.
 
     Called out separately from the full inventory so the split's blast radius on the UI
-    is explicit: these four are what breaks the app if a module move renames them.
+    is explicit: these five are what breaks the live demo if a module move renames them.
+
+    Keep this list in step with the `fetch(` calls in index.html — it is hand-maintained,
+    so a NEW fetch is invisible to it. It still earns its keep for the renames it does
+    catch: when /api landed, this test failed loudly and correctly, because the URLs the
+    UI depended on had moved (index.html moved with them in that same commit).
     """
     published = _published()
-    for path in ("/marts/attendance-diagnostic", "/marts/districts",
-                 "/marts/like-schools", "/marts/school-detail", "/chat"):
+    for path in ("/api/marts/attendance-diagnostic", "/api/marts/districts",
+                 "/api/marts/like-schools", "/api/marts/school-detail", "/api/chat"):
         assert path in published, f"{path} is fetched by the UI but is no longer published"
