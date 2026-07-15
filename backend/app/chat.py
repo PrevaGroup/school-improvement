@@ -24,6 +24,7 @@ from .marts import (
     fetch_like_schools,
     fetch_metric_by_subgroup,
     fetch_peer_benchmark,
+    fetch_school_plan,
 )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -42,7 +43,8 @@ def build_system(ui_level: str) -> str:
 The user selected the {ui_level} level — keep every answer at the {ui_level} level. Long Beach is the default focus, but you can answer about any loaded district's schools when named (e.g. "Ventura High") — the tools resolve a named school in whatever district it belongs to.
 
 Always call a tool for real data; never invent schools, numbers, budgets, plan text, or peers:
-- query_school_attendance_plans — attendance goals + funded strategies (budgets, funding sources, verbatim plan text + page cites) for these schools, optionally one school.
+- query_school_attendance_plans — ATTENDANCE goals + funded strategies (budgets, funding sources, verbatim plan text + page cites) for these schools, optionally one school. Use for attendance-specific need/response questions.
+- query_school_plan — the FULL SPSA for one school: EVERY goal (ELA, math, EL, culture/climate, college & career, accountability measures) with funded actions, budgets, funding sources and page cites. Use for any question about what the plan says/funds/omits beyond attendance, or to summarize the plan. The workspace only shows a collapsed goal list, so this is how you answer plan detail.
 - find_similar_schools — the demographically-matched peer schools (statewide, same level) for a school. Answers "who is X like?".
 - compare_to_peers — a school's actual metric value (default: chronic absenteeism) vs its peer-group distribution, with `peer_performance_percentile` where HIGHER always means doing better than peers.
 - query_subgroup_metrics — a school's metric DISAGGREGATED BY STUDENT SUBGROUP (race/ethnicity, gender, English learners, students with disabilities, socioeconomically disadvantaged, foster, homeless). Use this for any "by subgroup", equity, or "which groups are behind" question; each subgroup carries its `gap_vs_all`.
@@ -109,6 +111,25 @@ TOOLS = [
             "properties": {
                 "school_name": {"type": "string", "description": "the school, by (partial) name."},
                 "metric_id": {"type": "string", "description": "conformed metric id (default chronic_absenteeism_rate)."},
+            },
+            "required": ["school_name"],
+        },
+    },
+    {
+        "name": "query_school_plan",
+        "description": (
+            "The FULL SPSA for ONE school — EVERY goal (any topic: ELA, math, English learners, "
+            "culture/climate, college & career, accountability measures) with its funded actions, "
+            "budgeted amounts, funding sources and page cites. Use this for ANY question about what "
+            "the plan says, funds, or omits beyond attendance — e.g. 'what does the plan fund for "
+            "math?', 'which goals have no budget?', 'what are the college-readiness actions?', "
+            "'summarize the plan'. For attendance-specific questions prefer "
+            "query_school_attendance_plans (it adds the attendance need/response framing)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "school_name": {"type": "string", "description": "the school, by (partial) name, e.g. 'Reid'."},
             },
             "required": ["school_name"],
         },
@@ -214,6 +235,16 @@ def _run_tool(name: str, ti: dict, db: Session, school_level: str) -> dict:
             bench["value_status"] = ("this school's value for this metric is not available (it may be "
                                      "privacy-suppressed for small enrollment) — treat as UNKNOWN, never 0.")
         return bench
+    if name == "query_school_plan":
+        school = _resolve_school(db, ti.get("school_name"), school_level)
+        if not school:
+            return {"error": f"no {school_level} school found matching '{ti.get('school_name')}' in the loaded districts"}
+        p = fetch_school_plan(db, school["school_id"])
+        p["school_name"] = school["school_name"]
+        if not p["has_plan"]:
+            p["meaning"] = ("no SPSA on file for this school YET — its planning is UNKNOWN, not absent. "
+                            "Never report that the school has no plan/goals/actions.")
+        return p
     if name == "query_subgroup_metrics":
         school = _resolve_school(db, ti.get("school_name"), school_level)
         if not school:

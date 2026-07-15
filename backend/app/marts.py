@@ -573,15 +573,23 @@ def full_plan_goals(doc: dict) -> list[dict]:
     return goals_out
 
 
-@router.get("/school-detail")
-def school_detail_ep(school_id: str, db: Session = Depends(get_db_public)) -> dict:
-    """Everything the panel needs for ONE school: indicator charts + the full plan."""
-    indicators = fetch_indicators(db, school_id)
+def fetch_school_plan(db: Session, school_id: str) -> dict:
+    """The FULL plan (every goal + action, any topic) for one school. Shared by the panel and
+    the chat's plan tool, so the chat can answer about ELA/math/climate goals, not just
+    attendance. `plan_status` keeps missingness explicit: not_on_file != "has no plan"."""
     row = db.execute(
         text("SELECT plan_year, document FROM plan_extraction WHERE school_id = :s "
              "ORDER BY plan_year DESC NULLS LAST LIMIT 1"),
         {"s": school_id},
     ).mappings().first()
-    plan = ({"has_plan": True, "plan_year": row["plan_year"], "goals": full_plan_goals(row["document"] or {})}
-            if row else {"has_plan": False, "plan_year": None, "goals": []})
-    return {"school_id": school_id, "indicators": indicators, "plan": plan}
+    if not row:
+        return {"has_plan": False, "plan_status": "not_on_file", "plan_year": None, "goals": []}
+    return {"has_plan": True, "plan_status": "on_file", "plan_year": row["plan_year"],
+            "goals": full_plan_goals(row["document"] or {})}
+
+
+@router.get("/school-detail")
+def school_detail_ep(school_id: str, db: Session = Depends(get_db_public)) -> dict:
+    """Everything the panel needs for ONE school: indicator charts + the full plan."""
+    return {"school_id": school_id, "indicators": fetch_indicators(db, school_id),
+            "plan": fetch_school_plan(db, school_id)}

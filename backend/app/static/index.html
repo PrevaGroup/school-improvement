@@ -93,6 +93,9 @@
   .ind-val { display: block; font-size: 24px; font-weight: 700; line-height: 1.1; }
   .takeaway .banner { margin-bottom: 0; }
   .goal { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  .goal > summary { cursor: pointer; }
+  .goal > summary::marker { color: var(--muted); }
+  .gmeta { color: var(--muted); font-size: 11px; margin-left: 6px; white-space: nowrap; }
   .goal:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   .act { font-size: 14px; padding: 6px 0; }
   .act .meta { color: var(--muted); font-size: 12px; }
@@ -205,16 +208,23 @@ function Diagnostic({ s, peers, detail }) {
         : !plan.has_plan
           ? html`<div class="muted">No SPSA on file for this school yet — its planning is unknown (not zero). The indicators and peers are unaffected.</div>`
           : (plan.goals && plan.goals.length
-            ? plan.goals.map((g, gi) => html`
-              <div class="goal" key=${gi}>
-                <div><strong>${g.goal_type || "goal"} ${g.goal_number || ""}</strong> — ${(g.statement || "").slice(0, 220)}</div>
-                ${(g.actions || []).map((a, ai) => html`
-                  <div class="act" key=${ai}>
-                    • ${a.strategy_text}
-                    <div class="meta">${a.budgeted_amount != null ? fmtUSD(a.budgeted_amount) : "no funding listed"}${a.funding_source_raw ? " · " + a.funding_source_raw : ""}${a.provenance ? " · p" + a.provenance.page : ""}</div>
-                    ${a.provenance && a.provenance.quote && !nearDup(a.strategy_text, a.provenance.quote) ? html`<div class="quote">"${a.provenance.quote}"</div>` : null}
-                  </div>`)}
-              </div>`)
+            ? html`
+              <div class="plan-sum">${plan.goals.length} goals · ${fmtUSD(plan.goals.reduce((t, g) => t + (g.actions || []).reduce((s, a) => s + (a.budgeted_amount || 0), 0), 0))} funded · click a goal for detail, or ask Claude →</div>
+              ${plan.goals.map((g, gi) => {
+                const acts = g.actions || [];
+                const bud = acts.reduce((s, a) => s + (a.budgeted_amount || 0), 0);
+                const st = g.statement || "";
+                return html`
+                  <details class="goal" key=${gi}>
+                    <summary><strong>${g.goal_type || "goal"} ${g.goal_number || ""}</strong> — ${st.slice(0, 100)}${st.length > 100 ? "…" : ""}<span class="gmeta">${acts.length} ${acts.length === 1 ? "action" : "actions"}${bud > 0 ? " · " + fmtUSD(bud) : ""}</span></summary>
+                    ${acts.map((a, ai) => html`
+                      <div class="act" key=${ai}>
+                        • ${a.strategy_text}
+                        <div class="meta">${a.budgeted_amount != null ? fmtUSD(a.budgeted_amount) : "no funding listed"}${a.funding_source_raw ? " · " + a.funding_source_raw : ""}${a.provenance ? " · p" + a.provenance.page : ""}</div>
+                        ${a.provenance && a.provenance.quote && !nearDup(a.strategy_text, a.provenance.quote) ? html`<div class="quote">"${a.provenance.quote}"</div>` : null}
+                      </div>`)}
+                  </details>`;
+              })}`
             : html`<div class="muted">The SPSA is on file but has no extracted goals.</div>`)}
     </div>
 
