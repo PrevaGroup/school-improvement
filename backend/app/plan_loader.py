@@ -33,7 +33,7 @@ from etl.ca.sip.schema import (
     MetricLinkProposal,
 )
 
-from .models import Plan, PlanAction, PlanGoal
+from etl.ca.sip.models import Plan, PlanAction, PlanGoal
 
 
 def _first_confirmed(links: list[MetricLinkProposal]) -> Optional[MetricLinkProposal]:

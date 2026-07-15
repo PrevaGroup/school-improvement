@@ -137,14 +137,35 @@ conformed vocab (`METRICS`, `STUDENT_GROUPS`). Both belong in `core` (this doc a
 They're enumerated in `KNOWN_VIOLATIONS` so the rule can be enforced everywhere else; the list
 may only shrink, and a staleness test stops it becoming fiction.
 
+**Core carve-out — module tables (done 2026-07-15):**
+- [x] `core` no longer declares a single module-owned table. Models moved to the module that
+      writes them: `etl/peers/models.py` (likeschools' 3 mart tables) and `etl/ca/sip/models.py`
+      (sip's `plan_extraction` + `plan` / `plan_goal` / `plan_action`). `from app.models import
+      Base` now sees **14** tables — all genuinely shared. Changing a module's table is no
+      longer a change to the frozen contract.
+- [x] Registration handled where it belongs. A model only reaches `Base.metadata` if something
+      imports it, and **two** places need the full metadata: `migrations/env.py` (autogenerate —
+      a table it can't see becomes DROP TABLE) and `0001_initial_schema.py` (`create_all` on a
+      fresh DB). Both now import the module models explicitly. `app/models/__init__.py` does
+      **not** re-export them — that would make `core` import a module and invert the dependency.
+- [x] Models sit beside their module's existing code (`etl/peers/`, `etl/ca/sip/`) rather than in
+      `backend/likeschools/` — those folders are still docs-only, and splitting one module across
+      two directories is worse than the problem. They move together when the code relocates.
+
+**Fixed on the way (latent, would only bite a from-scratch build):** `0001` created its tables
+with an unbounded `Base.metadata.create_all()`, i.e. every table the live models declared —
+including `plan_extraction` and the three peer tables that `0003` / `0004` then `create_table`
+again. So `alembic upgrade head` on an empty database failed at `0003` with DuplicateTable —
+exactly the path `sql/20_reset_database.sql` exists to exercise. `0001` is now bounded to its own
+baseline (`REFERENCE_TABLES` + `PRIVATE_TABLES`), and a test renders its DDL through a mock
+engine to keep it that way.
+
+**Core carve-out — vocab (NOT started):** the four `KNOWN_VIOLATIONS` remain. `sip` imports
+`_engine` and the conformed vocab (`METRICS`, `STUDENT_GROUPS`) from `etl/ca/_shared.py`
+(public_metrics). Both belong in `core`; the rest of `_shared.py` (`CDE_CATEGORY`, `PERIODS`,
+`NON_SCHOOL_CODES`, `DIRECTORY_FILE`) is CA-specific and stays. Note `extract_sip.py` has a
+second, function-level `_engine` import at line ~188 that a top-of-file grep misses.
+
 **Code relocation (NOT started):**
-- [ ] `core/` carve-out — the real remaining problem. `core` currently *owns module tables*:
-      `app/models/reference.py` holds likeschools' `feat_match_vector` / `mart_school_peer` /
-      `model_partition_stats` and sip's `PlanExtraction`; `tenant.py` holds sip's `Plan` /
-      `PlanGoal` / `PlanAction`. So "core is frozen" isn't true yet — every module change is a
-      core change. This also clears the four `KNOWN_VIOLATIONS` (vocab + `_engine` → core).
-      **Risk to respect:** `migrations/env.py` builds `Base.metadata` from `app.models`; if
-      models move without env.py importing them, autogenerate will emit DROP TABLE.
-- [ ] `likeschools` code relocation (first safe step: decouple the 3 mart models from `core`
-      `reference.py` — grep-confirmed only `build_peers.py` imports them)
-- [ ] remaining modules
+- [ ] move each module's code under `backend/<X>/` (models included) + `version_locations`
+- [ ] fold the `plan_marts/` + `chat/` scaffolds into `serving/`

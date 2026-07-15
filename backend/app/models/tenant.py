@@ -6,9 +6,7 @@ LEVEL SECURITY and the policies in migration 0001. Public/state data lives in
 """
 from __future__ import annotations
 
-from sqlalchemy import (
-    Boolean, Date, ForeignKey, Integer, Numeric, SmallInteger, Text,
-)
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -78,46 +76,9 @@ class FactMetric(TenantMixin, Base):
     band: Mapped[str | None] = mapped_column(Text)             # 5x5 status×change color
 
 
-# --------------------------------------------------------------------------- #
-# Plan stubs (augment layer — kept minimal; expanded later).
-# --------------------------------------------------------------------------- #
-class Plan(TenantMixin, Base):
-    __tablename__ = "plan"
-    plan_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    school_id: Mapped[str | None] = mapped_column(Text)
-    plan_year: Mapped[str | None] = mapped_column(Text)
-    plan_type: Mapped[str | None] = mapped_column(Text)      # SPSA|LCAP|CSI|TSI|ATSI
-    status: Mapped[str | None] = mapped_column(Text)
-    adopted_date: Mapped[Date | None] = mapped_column(Date)
-    total_budget: Mapped[float | None] = mapped_column(Numeric)
-    source_url: Mapped[str | None] = mapped_column(Text)
-
-
-class PlanGoal(TenantMixin, Base):
-    __tablename__ = "plan_goal"
-    goal_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    plan_id: Mapped[str] = mapped_column(ForeignKey("plan.plan_id"))
-    lcff_priority: Mapped[int | None] = mapped_column(SmallInteger)
-    linked_metric_id: Mapped[str | None] = mapped_column(Text)
-    target_group_id: Mapped[str | None] = mapped_column(Text)
-    baseline_value: Mapped[float | None] = mapped_column(Numeric)
-    baseline_year: Mapped[str | None] = mapped_column(Text)
-    target_value: Mapped[float | None] = mapped_column(Numeric)
-    target_year: Mapped[str | None] = mapped_column(Text)
-    prior_status: Mapped[str | None] = mapped_column(Text)
-    narrative: Mapped[str | None] = mapped_column(Text)
-
-
-class PlanAction(TenantMixin, Base):
-    __tablename__ = "plan_action"
-    action_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    goal_id: Mapped[str] = mapped_column(ForeignKey("plan_goal.goal_id"))
-    strategy_text: Mapped[str | None] = mapped_column(Text)
-    category_id: Mapped[str | None] = mapped_column(Text)
-    target_metric_id: Mapped[str | None] = mapped_column(Text)
-    target_group_id: Mapped[str | None] = mapped_column(Text)
-    budgeted_amount: Mapped[float | None] = mapped_column(Numeric)
-    funding_source_id: Mapped[str | None] = mapped_column(Text)
-    fte: Mapped[float | None] = mapped_column(Numeric)
-    role_type: Mapped[str | None] = mapped_column(Text)
-    is_district_provided: Mapped[bool | None] = mapped_column(Boolean)
+# Moved out of core 2026-07-15: plan / plan_goal / plan_action -> etl/ca/sip/models.py.
+# They are sip's tables, not shared schema. `TenantMixin` above stays here and sip imports
+# it: tenant_id + visibility IS the trust boundary, so core defines it and modules apply
+# it — a module must never invent its own. core's PRIVATE_TABLES still names these three
+# by string to drive RLS policy generation, which is the same principle (the boundary is
+# core's job) and is not an import, so the module rule holds.

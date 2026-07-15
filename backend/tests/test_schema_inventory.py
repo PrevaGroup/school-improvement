@@ -38,11 +38,23 @@ Taking the second path means env.py and this test stop agreeing on one import, s
 import here to match env.py's list in the same commit. That coupling is deliberate: these two
 must be read together or the guard stops guarding.
 """
+import importlib.util
+import pathlib
+
+from sqlalchemy import create_mock_engine
+
 from app.models import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 
-# table -> the module that OWNS it (writes it). Ownership is aspirational for the ones marked
-# "in core today": that mismatch IS the remaining reorg work — core currently owns module
-# tables, which is why "core is a frozen contract" isn't true yet.
+# Mirror migrations/env.py exactly: it imports each table-owning module so their models
+# register on Base.metadata. `core` alone no longer knows them (that's the point of the
+# carve-out), so without these two lines this file would see 14 tables, not 21 — and would
+# "prove" that 7 tables had vanished. If env.py's import list changes, change it here too.
+import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
+import etl.peers.models   # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
+
+# table -> the module that OWNS it (writes it). As of the carve-out (2026-07-15) this map is
+# REAL, not aspirational: each table's model lives in its owning module's models.py, and core
+# declares only what's marked core below.
 EXPECTED_TABLES: dict[str, str] = {
     # --- genuinely core: the star schema spine + tenancy ---
     "dim_date": "core",
@@ -60,11 +72,11 @@ EXPECTED_TABLES: dict[str, str] = {
     "tenant_scope": "core",
     # --- public_metrics writes it; core defines it (conformed fact — stays in core) ---
     "fact_metric": "public_metrics",
-    # --- likeschools' tables (in core/reference.py today; move with the carve-out) ---
+    # --- likeschools' tables — declared in etl/peers/models.py ---
     "feat_match_vector": "likeschools",
     "mart_school_peer": "likeschools",
     "model_partition_stats": "likeschools",
-    # --- sip's tables (in core reference.py / tenant.py today; move with the carve-out) ---
+    # --- sip's tables — declared in etl/ca/sip/models.py ---
     "plan_extraction": "sip",
     "plan": "sip",
     "plan_goal": "sip",
@@ -106,3 +118,60 @@ def test_private_tables_are_actually_registered():
     """A name in PRIVATE_TABLES that matches no real table would generate RLS for nothing."""
     unknown = sorted(set(PRIVATE_TABLES) - set(Base.metadata.tables))
     assert not unknown, f"PRIVATE_TABLES names tables that don't exist: {unknown}"
+
+
+# Tables a revision AFTER 0001 creates with its own op.create_table().
+TABLES_OWNED_BY_LATER_REVISIONS = {
+    "plan_extraction": "0003_plan_extraction.py",
+    "feat_match_vector": "0004_peer_tables.py",
+    "mart_school_peer": "0004_peer_tables.py",
+    "model_partition_stats": "0004_peer_tables.py",
+}
+
+
+def _revision_0001():
+    path = pathlib.Path(__file__).resolve().parent.parent / "migrations/versions/0001_initial_schema.py"
+    spec = importlib.util.spec_from_file_location("revision_0001", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_0001_does_not_create_tables_that_later_revisions_own():
+    """Regression: `alembic upgrade head` on an EMPTY database must reach head.
+
+    0001 builds its tables with `Base.metadata.create_all()`, i.e. from the live models.
+    Unbounded, that creates every table the models currently declare — including ones a
+    later revision owns. It created plan_extraction, and then 0003's
+    op.create_table("plan_extraction") hit an existing table and blew up. Nobody noticed
+    because it only breaks a from-scratch build, which is exactly what
+    sql/20_reset_database.sql exists to do ("proving the full chain builds from nothing").
+
+    So: whatever DDL 0001 emits must not touch a later revision's tables. This renders the
+    actual CREATE TABLE statements through a mock engine — no database required.
+    """
+    revision = _revision_0001()
+    baseline = [*revision.REFERENCE_TABLES, *revision.PRIVATE_TABLES]
+
+    created: list[str] = []
+
+    def record(sql, *args, **kwargs):
+        text = str(sql.compile(dialect=engine.dialect))
+        if "CREATE TABLE" in text:
+            created.append(text.split("CREATE TABLE")[1].split("(")[0].strip())
+
+    engine = create_mock_engine("postgresql+psycopg://", record)
+    Base.metadata.create_all(engine, tables=[Base.metadata.tables[t] for t in baseline])
+
+    collisions = {t: rev for t, rev in TABLES_OWNED_BY_LATER_REVISIONS.items() if t in created}
+    assert not collisions, (
+        f"0001 creates tables owned by later revisions: {collisions}. `alembic upgrade head` "
+        "on an empty database will fail there with DuplicateTable. Keep 0001's create_all "
+        "bounded to REFERENCE_TABLES + PRIVATE_TABLES."
+    )
+
+    missing = [t for t in baseline if t not in created]
+    assert not missing, (
+        f"0001 declares {missing} in its baseline but doesn't create them — the GRANT/RLS "
+        "loops that follow will fail on tables that don't exist."
+    )

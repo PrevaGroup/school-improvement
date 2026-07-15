@@ -38,8 +38,21 @@ def upgrade() -> None:
     bind = op.get_bind()
 
     # 1. Tables — created from the SQLAlchemy models so DDL and ORM never drift.
+    #
+    # Bounded to THIS revision's baseline (the two lists above) rather than the whole
+    # metadata. A bare create_all() creates every table the models currently declare,
+    # including ones later revisions own — so it created plan_extraction, and then 0003's
+    # op.create_table("plan_extraction") hit an existing table. That made `alembic upgrade
+    # head` on an empty database fail at 0003, exactly the path sql/20_reset_database.sql
+    # exists to exercise. Latent, because it only bites a from-scratch build.
+    #
+    # sip's models are imported for plan/plan_goal/plan_action, which ARE part of this
+    # baseline (see PRIVATE_TABLES). Importing that module also registers plan_extraction,
+    # which is precisely why the table list is explicit: 0003 owns that one, not 0001.
     from app.models import Base
-    Base.metadata.create_all(bind=bind)
+    import etl.ca.sip.models  # noqa: F401  — registers plan / plan_goal / plan_action
+    baseline = [Base.metadata.tables[t] for t in (*REFERENCE_TABLES, *PRIVATE_TABLES)]
+    Base.metadata.create_all(bind=bind, tables=baseline)
 
     # 2. The 'public' tenant owns all public/state rows.
     op.execute(
