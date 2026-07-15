@@ -535,7 +535,7 @@ def districts_ep(db: Session = Depends(get_db_public)) -> dict:
 INDICATOR_METRICS = [
     ("chronic_absenteeism_rate", "Chronic absenteeism", "lower_better"),
     ("grad_rate_acgr", "Graduation rate", "higher_better"),
-    ("suspension_rate", "Suspension rate", "lower_better"),
+    ("college_going_rate", "College-going rate", "higher_better"),
 ]
 
 
