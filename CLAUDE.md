@@ -17,6 +17,16 @@ It may **not** import from another module `backend/<Y>/`. Modules talk to each o
 **database tables** (a produced table is a contract) or through `core`. If you think you need
 a cross-module import, stop — that's a design smell; raise it instead of wiring it.
 
+**This is enforced, not aspirational**: `backend/tests/test_module_boundaries.py` walks the AST
+of every import and fails CI on the first one that crosses a module line. It carries the module
+map and a `KNOWN_VIOLATIONS` list of today's debt — that list may only shrink.
+
+The rule survives only because of how the modules are cut: **producers** (`public_metrics`,
+`sip`, `likeschools`) own tables; **`serving`** owns none and reads them with SQL. Cutting by
+feature instead — giving `likeschools` its own peer endpoints — forces a cross-module import,
+which is exactly the pressure that would erode the rule. See docs/MODULES.md. `app/main.py` is
+the composition root and is the one exempt file; keep it thin.
+
 ## `core` is a frozen contract
 
 `core/` holds the star schema (`dim_*`, `fact_metric`), tenancy/RLS, `db.py`, `security.py`,
@@ -46,9 +56,9 @@ human, don't fold it silently into a feature change.
   file locations, and reorg status. **Start here to find a feature's components.**
 - `ARCHITECTURE.md` — the logical model (5 data layers, trust boundary, pipelines).
 - `backend/core/` — the shared contract (see above).
-- `backend/<X>/` — feature modules, one folder each (e.g. `likeschools`, `sip`, `public_metrics`,
-  `plan_marts`, `chat`): self-contained vertical slices, sitting alongside `app/` and `etl/`
-  until the code they map is relocated.
+- `backend/<X>/` — modules, one folder each: the producers `likeschools`, `sip`,
+  `public_metrics` (each owns tables) and `serving` (owns none; reads them). They sit
+  alongside `app/` and `etl/` until the code they map is relocated.
 
 ## Reorg in progress
 
