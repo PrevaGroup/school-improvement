@@ -163,6 +163,23 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | `tenant_id` | TEXT | NOT NULL, FK→`dim_tenant.tenant_id`, default `public` |
 | `visibility` | TEXT | NOT NULL, default `public` |
 
+## `feat_match_vector` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `school_id` | TEXT | PK, NOT NULL |
+| `school_year` | TEXT | PK, NOT NULL |
+| `level_bucket` | TEXT |  |
+| `f_econ_disadv` | FLOAT |  |
+| `f_el` | FLOAT |  |
+| `f_swd` | FLOAT |  |
+| `f_enroll_log` | FLOAT |  |
+| `f_locale_city` | FLOAT |  |
+| `f_locale_suburb` | FLOAT |  |
+| `f_locale_town` | FLOAT |  |
+| `f_locale_rural` | FLOAT |  |
+| `n_imputed` | SMALLINT | NOT NULL, default `0` |
+
 ## `group_crosswalk` — public reference
 
 | Column | Type | Constraints |
@@ -170,6 +187,32 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | `source_system` | TEXT | PK, NOT NULL |
 | `source_code` | TEXT | PK, NOT NULL |
 | `student_group_id` | TEXT |  |
+
+## `mart_school_peer` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `school_id` | TEXT | PK, NOT NULL |
+| `peer_school_id` | TEXT | PK, NOT NULL |
+| `school_year` | TEXT | PK, NOT NULL |
+| `rank` | SMALLINT | NOT NULL |
+| `distance` | FLOAT | NOT NULL |
+| `level_bucket` | TEXT |  |
+| `low_confidence` | BOOLEAN | NOT NULL, default `false` |
+
+## `model_partition_stats` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `school_year` | TEXT | PK, NOT NULL |
+| `level_bucket` | TEXT | PK, NOT NULL |
+| `feature_names` | ARRAY | NOT NULL |
+| `means` | ARRAY | NOT NULL |
+| `sds` | ARRAY | NOT NULL |
+| `shrinkage` | FLOAT |  |
+| `precision_mat` | ARRAY | NOT NULL |
+| `k` | SMALLINT |  |
+| `built_at` | TIMESTAMP |  |
 
 ## `plan` — private (RLS)
 
@@ -203,6 +246,17 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | `is_district_provided` | BOOLEAN |  |
 | `tenant_id` | TEXT | NOT NULL, FK→`dim_tenant.tenant_id`, default `public` |
 | `visibility` | TEXT | NOT NULL, default `public` |
+
+## `plan_extraction` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `plan_id` | TEXT | PK, NOT NULL |
+| `school_id` | TEXT |  |
+| `plan_year` | TEXT |  |
+| `plan_type` | TEXT |  |
+| `extracted_at` | TEXT |  |
+| `document` | JSONB | NOT NULL |
 
 ## `plan_goal` — private (RLS)
 

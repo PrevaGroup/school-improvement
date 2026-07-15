@@ -130,11 +130,11 @@ branch label later only if it genuinely needs an independent deploy cadence.
 - [x] Cross-module boundary test (`tests/test_module_boundaries.py`) — AST-walks every import
       and fails on the first that crosses a module line.
 
-**What the boundary test found:** the module map above is otherwise clean *today* — the only
-import violations are four files in `sip` reaching into `public_metrics` for `_engine` and the
-conformed vocab (`METRICS`, `STUDENT_GROUPS`). Both belong in `core` (this doc already said so).
-They're enumerated in `KNOWN_VIOLATIONS` so the rule can be enforced everywhere else; the list
-may only shrink, and a staleness test stops it becoming fiction.
+**What the boundary test found, and what happened to it:** four files in `sip` reaching into
+`public_metrics` for `_engine` and the conformed vocab (`METRICS`, `STUDENT_GROUPS`) — relative
+imports (`from .._shared import ...`) that a line-start grep had missed. All four are now fixed
+(see the vocab carve-out below). **`KNOWN_VIOLATIONS` is empty: there are no cross-module imports
+left in the repo,** and the rule is enforced with no exemptions.
 
 **Core carve-out — module tables (done 2026-07-15):**
 - [x] `core` no longer declares a single module-owned table. Models moved to the module that
@@ -159,11 +159,25 @@ exactly the path `sql/20_reset_database.sql` exists to exercise. `0001` is now b
 baseline (`REFERENCE_TABLES` + `PRIVATE_TABLES`), and a test renders its DDL through a mock
 engine to keep it that way.
 
-**Core carve-out — vocab (NOT started):** the four `KNOWN_VIOLATIONS` remain. `sip` imports
-`_engine` and the conformed vocab (`METRICS`, `STUDENT_GROUPS`) from `etl/ca/_shared.py`
-(public_metrics). Both belong in `core`; the rest of `_shared.py` (`CDE_CATEGORY`, `PERIODS`,
-`NON_SCHOOL_CODES`, `DIRECTORY_FILE`) is CA-specific and stays. Note `extract_sip.py` has a
-second, function-level `_engine` import at line ~188 that a top-of-file grep misses.
+**Core carve-out — vocab (done 2026-07-15):**
+- [x] `STUDENT_GROUPS` + `METRICS` → `core` (`app/vocab.py`). Both public_metrics (which seeds the
+      dims from them) and sip (which pins the extractor's prompt to them, so a plan measure maps
+      onto a real `dim_metric.metric_id` instead of writing rows that join to nothing) need them.
+      A vocabulary two modules must agree on can't live inside one of them. `_shared.py`
+      re-exports them so the CA loaders read unchanged.
+- [x] **`CDE_CATEGORY` and `PERIODS` deliberately stay in public_metrics.** They're California's
+      mapping *into* the vocabulary, not the vocabulary — a second state brings its own crosswalk
+      and reuses these ids unchanged. That line is what "conformed" means: shared yardstick,
+      per-state adapters.
+- [x] `_engine` → sip's own `etl/ca/sip/_db.py`, not `core`. It isn't shared logic, just one call
+      on `core`'s `settings.migration_database_url`. The obvious core home (`app/db.py`) builds the
+      *app's* engine at import time as `sip_app`, so importing it from ETL would demand the app
+      password and drag FastAPI in. A module opening its own connection is also more honest —
+      sharing an engine factory is coupling, not reuse.
+- [x] `scripts/gen_schema_reference.py` had the same metadata bug as `env.py` (it builds from
+      `app.models`, so post-carve it would have silently emitted a 14-table reference). Fixed and
+      regenerated: **SCHEMA_REFERENCE.md now documents all 21 tables** — it had been stale since
+      0003, never listing `plan_extraction` or the peer tables.
 
 **Docs reconciled to the decision (done 2026-07-15):**
 - [x] `plan_marts/` + `chat/` scaffolds folded into `backend/serving/` and deleted

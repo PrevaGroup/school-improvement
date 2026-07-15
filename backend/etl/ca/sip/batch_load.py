@@ -37,7 +37,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.reference import DimTenant
 from app.plan_loader import load_plan
 
-from .._shared import _engine
+from ._db import _engine
 from .schema import ExtractedPlan, ReviewStatus
 
 DEFAULT_WORKERS = 16  # plan reads are network-bound (one GET each); overlap reads, write serially
