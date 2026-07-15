@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import pathlib
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -44,13 +45,15 @@ app.include_router(plans_router, prefix=API)
 app.include_router(marts_router, prefix=API)
 app.include_router(chat_router, prefix=API)
 
-_STATIC = pathlib.Path(__file__).parent / "static"
+# The built SPA (frontend/dist), produced by `vite build` in the Dockerfile's node stage and
+# copied in beside the app. Absent in a bare dev checkout — see _spa_index below.
+_DIST = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "dist"
+_SPA_INDEX = _DIST / "index.html"
 
-
-@app.get("/", include_in_schema=False)
-def index() -> FileResponse:
-    """Serve the chat UI from the same origin (one Cloud Run service, one IAM gate)."""
-    return FileResponse(_STATIC / "index.html")
+if (_DIST / "assets").is_dir():
+    # Hashed bundles. Mounted, not routed through the catch-all, so a missing asset 404s as an
+    # asset instead of silently returning the HTML shell.
+    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
 
 
 @app.get("/health")
@@ -89,3 +92,32 @@ def school_metrics(school_id: str, period_id: str | None = None,
         }
         for r in rows
     ]
+
+
+# --------------------------------------------------------------------------- #
+# The SPA fallback. MUST stay last in this file.
+#
+# FastAPI matches routes in definition order, so everything above wins first and only genuinely
+# unmatched paths reach here. Move this up and it starts eating real routes.
+# --------------------------------------------------------------------------- #
+@app.get("/{full_path:path}", include_in_schema=False)
+def spa(full_path: str) -> FileResponse:
+    """Serve the SPA shell so the browser's router can handle client-side routes.
+
+    The `/api` guard is the point of the prefix. Without it, a mistyped `/api/marts/typo` would
+    fall through to here and hand an HTML page to a `fetch()` — the caller sees
+    `Unexpected token '<'` and no hint that the URL was simply wrong. Unmatched /api paths must
+    fail as JSON, like an API.
+    """
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no such API route: /{full_path}")
+
+    if not _SPA_INDEX.is_file():
+        # A dev checkout without `npm run build`. Say so plainly rather than 404 — this is the
+        # single most likely local-setup confusion, and a bare 404 sends people hunting routes.
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            "frontend not built: run `npm install && npm run build` in frontend/ "
+            "(the Docker image builds it automatically)",
+        )
+    return FileResponse(_SPA_INDEX)

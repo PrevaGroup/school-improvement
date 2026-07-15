@@ -72,15 +72,15 @@ def test_methods_are_unchanged():
 
 
 def test_frontend_endpoints_survive_the_module_split():
-    """The URLs backend/app/static/index.html actually fetches.
+    """The URLs the SPA actually fetches (frontend/src/App.tsx + components/Chat.tsx).
 
-    Called out separately from the full inventory so the split's blast radius on the UI
-    is explicit: these five are what breaks the live demo if a module move renames them.
+    Called out separately from the full inventory so the module split's blast radius on the UI
+    is explicit: these five are what breaks the app if a move renames them.
 
-    Keep this list in step with the `fetch(` calls in index.html — it is hand-maintained,
-    so a NEW fetch is invisible to it. It still earns its keep for the renames it does
-    catch: when /api landed, this test failed loudly and correctly, because the URLs the
-    UI depended on had moved (index.html moved with them in that same commit).
+    Keep this list in step with the `api.get`/`api.post` calls in frontend/src — it is
+    hand-maintained, so a NEW call is invisible to it. It still earns its keep for the renames
+    it does catch: when /api landed, this test failed loudly and correctly, because the URLs the
+    UI depended on had moved (the UI moved with them in that same commit).
     """
     published = _published()
     for path in ("/api/marts/attendance-diagnostic", "/api/marts/districts",

@@ -22,7 +22,7 @@ produces is described in [`ARCHITECTURE.md`](../ARCHITECTURE.md); the mechanical
 |---|---|---|
 | Access gate | Cloud Run IAM (`run.invoker`) | **GCIP sign-in**, verified per `/api` request |
 | Reachable at | `*.run.app`, IAM-gated | your domain (Cloud Run domain mapping) + `*.run.app` |
-| Frontend | 361-line no-build React in `app/static/index.html` | **React + Vite + TypeScript** in `frontend/`, built into the image |
+| Frontend | ~~361-line no-build React from esm.sh~~ | ✅ **React + Vite + TypeScript** in `frontend/`, bundled into the image |
 | Origins | one (app serves its own UI) | **still one** — FastAPI serves the built SPA |
 | API paths | `/marts/*`, `/chat`, `/schools` | **`/api/*`** |
 | Cloudflare | none | **DNS only** (grey cloud, proxy off). No Pages, Access, Workers, Tunnel, or `wrangler.toml`. **Zero repo artifacts** |
@@ -265,7 +265,8 @@ school-improvement/
   `VITE_API_BASE_URL`.
 
 > **Build-context gotcha (this is why the Dockerfile moves).** Today the build context is
-> `backend/` and the deploy is `gcloud run deploy --source backend`. A multi-stage build that
+> ~~`backend/` and the deploy is `gcloud run deploy --source backend`~~ (**done** — the context
+> is now the repo root and the deploy is `--source .`). A multi-stage build that
 > compiles `frontend/` **cannot see it** from that context. The Dockerfile moves to the repo
 > root and the deploy becomes `--source .` **run from `school-improvement/`** (the repo root —
 > `.git` lives there, *not* in the parent `SchoolImprovement/`).
