@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to a PR cancels the first run — no point paying for a stale one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install deps
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # No credentials here on purpose: conftest.py supplies a fake DB password, and
+      # every test must run without touching Postgres, Secret Manager, or GCS. A test
+      # that needs real infrastructure belongs behind a marker, not in this job.
+      - name: Run tests
+        run: python -m pytest
+        # pytest exits 5 when it collects nothing, which fails this step. That is the
+        # point: this suite reported success while running zero tests for its whole
+        # life, and an empty run must never be mistaken for a passing one again.
