@@ -36,6 +36,11 @@ def isolate_env(monkeypatch):
     monkeypatch.setattr(security.settings, "dev_mode", False)
     monkeypatch.setattr(security.settings, "tenant_claim", "tenant_id")
     monkeypatch.setattr(security.settings, "domain_tenant_map", {})
+    monkeypatch.setattr(security.settings, "allowed_email_domains", {"prevagroup.com"})
+
+
+def _claims(email="staff@prevagroup.com", verified=True, **extra) -> dict:
+    return {"email": email, "email_verified": verified, "sub": "uid-1", **extra}
 
 
 @pytest.fixture
@@ -134,18 +139,21 @@ def test_principal_requires_a_bearer_token(header):
 
 
 def test_principal_returns_claims_for_a_valid_token(verified):
-    verified({"email": "tester@example.org", "sub": "uid-1"})
+    verified(_claims(email="tester@prevagroup.com"))
     principal = _run(security.get_current_principal(authorization="Bearer good.jwt",
                                                     x_dev_tenant=None))
-    assert principal["email"] == "tester@example.org"
+    assert principal["email"] == "tester@prevagroup.com"
 
 
 def test_principal_accepts_a_signed_in_user_with_no_tenant(verified):
-    """THE POINT OF §3.2. An outside tester has no district and no tenant claim. They must still
+    """THE POINT OF §3.2. An invited tester has no district and no tenant claim. They must still
     authenticate successfully — everything served today is public data. Before the split, the
     only dependency available 403'd them, which would have locked out exactly the people this
-    cutover is for."""
-    verified({"email": "curious@nowhere.org", "sub": "uid-2"})
+    cutover is for.
+
+    The allowlist decides WHO gets in; it does not hand out districts. Invited-but-tenant-less
+    is the normal case for a tester, not an error."""
+    verified(_claims(email="tester@prevagroup.com", sub="uid-2"))
     principal = _run(security.get_current_principal(authorization="Bearer good.jwt",
                                                     x_dev_tenant=None))
     assert principal["sub"] == "uid-2"          # authenticated
@@ -153,9 +161,102 @@ def test_principal_accepts_a_signed_in_user_with_no_tenant(verified):
 
 
 def test_principal_scheme_match_is_case_insensitive(verified):
-    verified({"sub": "uid-3"})
+    verified(_claims(sub="uid-3"))
     assert _run(security.get_current_principal(authorization="bearer good.jwt",
                                                x_dev_tenant=None))["sub"] == "uid-3"
+
+
+# --------------------------------------------------------------------------- #
+# the invite gate — authentication is not invitation
+#
+# With a Google provider enabled, ANY Gmail account can get a valid token for this project.
+# So token verification gates nothing on its own; this is what makes "signed in" mean
+# "invited". It is also what stands between the open internet and the Anthropic balance
+# behind /api/chat.
+# --------------------------------------------------------------------------- #
+def test_allowed_domain_gets_in(verified, monkeypatch):
+    monkeypatch.setattr(security.settings, "allowed_email_domains",
+                        {"prevagroup.com", "gatesfoundation.org"})
+    verified(_claims(email="someone@gatesfoundation.org"))
+    principal = _run(security.get_current_principal(authorization="Bearer good.jwt",
+                                                    x_dev_tenant=None))
+    assert principal["email"] == "someone@gatesfoundation.org"
+
+
+def test_any_gmail_is_rejected(verified):
+    """The whole point. A real, valid, Google-issued token from an uninvited account: 403."""
+    verified(_claims(email="rando@gmail.com"))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+    assert "invite list" in e.value.detail
+
+
+def test_unverified_email_is_rejected_even_on_an_allowed_domain(verified):
+    """THE BYPASS THIS CLOSES — do not delete.
+
+    A token proves GCIP issued it; it does NOT prove the address inside belongs to the caller.
+    GCIP's email/password provider lets anyone register any address unverified. Check the
+    domain without checking `email_verified` and the allowlist is an honour system: sign up as
+    anyone@prevagroup.com, never click a link, walk straight in.
+    """
+    verified(_claims(email="attacker@prevagroup.com", verified=False))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+    assert "not verified" in e.value.detail
+
+
+def test_empty_allowlist_admits_nobody(verified, monkeypatch):
+    """FAILS CLOSED. An unset allowlist must never mean "everyone" — a deploy that forgets it
+    should lock people out (loud, fixable), not open the door (silent, expensive)."""
+    monkeypatch.setattr(security.settings, "allowed_email_domains", set())
+    verified(_claims(email="staff@prevagroup.com"))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+
+
+@pytest.mark.parametrize("email", [
+    "evil@notprevagroup.com",        # suffix trick
+    "evil@prevagroup.com.attack.io",  # domain-in-a-domain
+    "evil@mail.prevagroup.com",       # subdomain — exact match only, by design
+    "evil@sub.gatesfoundation.org",
+])
+def test_lookalike_domains_are_rejected(verified, monkeypatch, email):
+    """Exact match only. Suffix/`endswith` matching is how allowlists get bypassed; the list is
+    short enough to spell out, so spell it out."""
+    monkeypatch.setattr(security.settings, "allowed_email_domains",
+                        {"prevagroup.com", "gatesfoundation.org"})
+    verified(_claims(email=email))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+
+
+def test_domain_match_is_case_insensitive(verified):
+    """Email domains are case-insensitive; the check must not be trickable by shouting."""
+    verified(_claims(email="Staff@PrevaGroup.COM"))
+    assert _run(security.get_current_principal(authorization="Bearer good.jwt",
+                                               x_dev_tenant=None))["sub"] == "uid-1"
+
+
+def test_identity_without_an_email_is_rejected(verified):
+    """No email → no domain → no decision possible → deny."""
+    verified({"sub": "uid-9", "email_verified": True})
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+    assert "no email" in e.value.detail
+
+
+def test_dev_principal_skips_the_allowlist(monkeypatch):
+    """The dev path has no email to check; it returns before the gate. Still inert in prod —
+    that's test_dev_header_is_ignored_in_production's job, not this one's."""
+    monkeypatch.setattr(security.settings, "dev_mode", True)
+    monkeypatch.setattr(security.settings, "allowed_email_domains", set())  # even empty
+    principal = _run(security.get_current_principal(authorization=None, x_dev_tenant="lbusd"))
+    assert principal["tenant_id"] == "lbusd"
 
 
 def test_dev_header_ignored_when_dev_mode_off(verified):

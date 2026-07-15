@@ -4,7 +4,10 @@ python-multipart>=0.0.9   # multipart/form-data for POST /plans/extract uploads
 SQLAlchemy>=2.0.30
 alembic>=1.13
 psycopg[binary]>=3.1
-pydantic-settings>=2.2
+# >=2.7 is required, not cosmetic: `NoDecode` (app/config.py) landed in 2.7.0 — verified
+# by bisect, 2.6.0 lacks it. Without it, ALLOWED_EMAIL_DOMAINS raises SettingsError at
+# import and the app does not boot.
+pydantic-settings>=2.7
 # Google OIDC verification for the tenant-binding (see app/security.py)
 google-auth>=2.29
 # DB credentials from Secret Manager (runbook Phase 3)
