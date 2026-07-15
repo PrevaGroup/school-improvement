@@ -18,6 +18,12 @@ from .db import get_db
 from .marts import router as marts_router
 from .models import DimSchool, FactMetric
 from .plans import router as plans_router
+from .security import assert_dev_mode_not_in_production
+
+# Fail the deploy, not the security model: DEV_MODE + a production environment means the
+# unverified X-Dev-Tenant header would let any caller impersonate any district. Crash loudly at
+# import (= container fails to start) rather than serve a silent impersonation hole.
+assert_dev_mode_not_in_production()
 
 app = FastAPI(title="School Improvement Platform API", version="0.1.0")
 app.include_router(plans_router)
