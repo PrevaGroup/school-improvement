@@ -105,8 +105,8 @@ star schema) organised as five conceptual layers:
 |---|---|---|
 | **raw** | Source files as pulled from CDE / data.ca.gov | Cloud Storage (`gs://…/raw/ca/…`), not in repo |
 | **staging** | The reviewable shape between "what a loader read" and "what the DB believes" | e.g. the SIP `ExtractedPlan` JSON ([schema.py](backend/etl/ca/sip/schema.py)) |
-| **star** | Conformed facts + dimensions — the keystone `fact_metric` (grain: school × period × metric × student-group) plus `dim_*` | [`app/models/`](backend/app/models/), 17 tables |
-| **augment** | Plans and other tenant entities that *reference* the star (`plan` / `plan_goal` / `plan_action`) | [`app/models/tenant.py`](backend/app/models/tenant.py) |
+| **star** | Conformed facts + dimensions — the keystone `fact_metric` (grain: school × period × metric × student-group) plus `dim_*` | [`app/models/`](backend/app/models/) — **core**, 14 tables (incl. tenancy) |
+| **augment** | Plans and other tenant entities that *reference* the star (`plan` / `plan_goal` / `plan_action`, `plan_extraction`) | [`etl/ca/sip/models.py`](backend/etl/ca/sip/models.py) — **sip**'s, moved out of core 2026-07-15 (§4) |
 | **marts** | Semantic read models for the dashboard: attendance need-vs-plan diagnostic + "schools like you" peer comparison | [`app/marts.py`](backend/app/marts.py) — endpoint-composed (MVP), reads public `plan_extraction` + `fact_metric` + peer tables |
 
 **Identity** keys on the federal **NCES** id; the California **CDS** code rides alongside as
@@ -155,17 +155,26 @@ nothing downstream notices. A Python import would couple the two forever; a tabl
 
 **The cut is producer/consumer, not feature:**
 
-| | Owns (writes) | Serves |
-|---|---|---|
-| **core** | the star schema, tenancy, `db`/`security`/`config` | — |
-| **public_metrics** | `fact_metric` | (bulk ETL) |
-| **sip** | `plan_extraction`, `plan_*` | `POST /plans/*` (ingest) |
-| **likeschools** | `mart_school_peer`, `feat_match_vector`, `model_partition_stats` | — *engine only* |
-| **serving** | nothing | `/marts/*`, `/chat` |
+| | Declares (whose model/migration) | Writes (rows) | Serves |
+|---|---|---|---|
+| **core** | the star schema, tenancy, the conformed vocab, `db`/`security`/`config` | — | — |
+| **public_metrics** | — | `fact_metric`, and the `dim_*` rows | (bulk ETL) |
+| **sip** | `plan_extraction`, `plan_*` | the same | `POST /plans/*` (ingest) |
+| **likeschools** | `mart_school_peer`, `feat_match_vector`, `model_partition_stats` | the same | — *engine only* |
+| **serving** | — | — | `/marts/*`, `/chat` |
+
+Two different ownerships, and they come apart on the shared tables: `core` **declares**
+`dim_school` and `fact_metric` (their shape is the contract) but **writes** nothing — the rows
+come from public_metrics, seeded from core's vocabulary. Everywhere else the two coincide: a
+module declares its own tables and is the only thing that writes them. The seam is the table
+either way; "producer" means whoever puts rows in it.
 
 Modules depend on `core`; `core` never depends on a module. That direction is the whole point —
 `core` is the frozen contract, so a module's own table living inside it made every feature change
 a breaking change to the thing everything depends on.
+
+The frontend is outside this: it's a separate build artifact in the same container (§5), not a
+module, and it reaches the backend over HTTP like any other client.
 
 **Why not cut by feature?** It was tried, and the code refuses. Giving `likeschools` its own
 peer endpoints means `serving`'s attendance diagnostic and school-detail panel — both of which
@@ -268,7 +277,7 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 
 ## Status
 
-- **Live:** Cloud SQL Postgres, full aggregate **star schema (17 tables)** + **RLS** (tenant
+- **Live:** Cloud SQL Postgres, full aggregate **star schema (21 tables)** + **RLS** (tenant
   isolation proven), credentials in Secret Manager. **8 public metrics loaded** (~960k
   `fact_metric` rows). The **marts layer** ([`app/marts.py`](backend/app/marts.py)) and a
   **single-school attendance-diagnostic UI** — need-vs-plan, a "schools like you" peer engine,

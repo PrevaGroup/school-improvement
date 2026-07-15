@@ -52,9 +52,16 @@ from app.models import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
 import etl.peers.models   # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
 
-# table -> the module that OWNS it (writes it). As of the carve-out (2026-07-15) this map is
-# REAL, not aspirational: each table's model lives in its owning module's models.py, and core
-# declares only what's marked core below.
+# table -> the module that DECLARES it (whose models.py the class lives in). That's what this
+# file can actually check: Base.metadata is built from declarations, not from who writes rows.
+#
+# The two come apart on the shared tables, so don't read this as "producer": `core` declares
+# `dim_school` and `fact_metric` but writes neither — public_metrics seeds those rows from
+# core's vocab. Everywhere else they coincide (a module declares its own tables and is the only
+# writer). See §4 of ARCHITECTURE.md.
+#
+# As of the carve-out (2026-07-15) this map is REAL, not aspirational: each module table's model
+# lives in its owning module, and core declares only what's marked core below.
 EXPECTED_TABLES: dict[str, str] = {
     # --- genuinely core: the star schema spine + tenancy ---
     "dim_date": "core",
@@ -70,8 +77,9 @@ EXPECTED_TABLES: dict[str, str] = {
     "ref_benchmark": "core",
     "tenant_membership": "core",
     "tenant_scope": "core",
-    # --- public_metrics writes it; core defines it (conformed fact — stays in core) ---
-    "fact_metric": "public_metrics",
+    # --- the conformed fact: declared in core (app/models/tenant.py), rows written by
+    #     public_metrics. Stays in core — every module reads it, so its shape is contract. ---
+    "fact_metric": "core",
     # --- likeschools' tables — declared in etl/peers/models.py ---
     "feat_match_vector": "likeschools",
     "mart_school_peer": "likeschools",

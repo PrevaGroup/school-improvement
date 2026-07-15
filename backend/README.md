@@ -70,6 +70,9 @@ with header `X-Dev-Tenant: lbusd` vs `fresno` — the private rows change, the p
   rows in one table; the read policy `visibility='public' OR tenant_id = <me>` handles the mix.
 - **The ETL/public loader** runs as `sip_migrator` with `SET app.tenant='public'` (Cloud SQL has
   no true superuser, so don't rely on `BYPASSRLS`).
-- **Scope of this scaffold:** a vertical slice (5 reference + 4 private tables). Add the rest of
-  the schema as new models + `alembic revision --autogenerate` migrations; the RLS pattern in
-  0001 is the template for any new private table.
+- **Scope:** 21 tables — `core` declares 14 (the star dims, `fact_metric`, tenancy); the rest are
+  module-owned (`etl/ca/sip/models.py`, `etl/peers/models.py`). Add new tables as models +
+  `alembic revision --autogenerate` migrations; the RLS pattern in 0001 is the template for any
+  new private table. A module's table goes in **its** `models.py`, never in `core` — and both
+  `migrations/env.py` and `0001` must import it, or autogenerate reads it as `DROP TABLE`
+  (see `docs/MODULES.md`).
