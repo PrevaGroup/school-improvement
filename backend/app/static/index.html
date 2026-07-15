@@ -81,6 +81,17 @@
   .info { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 5px; border: 1px solid var(--muted); border-radius: 50%; color: var(--muted); font-size: 10px; font-weight: 700; font-style: normal; text-transform: none; cursor: help; vertical-align: middle; }
   .info .tip { display: none; position: absolute; top: 27px; left: 10px; z-index: 20; width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px; font-size: 11px; font-weight: 400; line-height: 1.45; letter-spacing: 0; text-transform: none; color: var(--ink); box-shadow: 0 6px 18px rgba(0,0,0,.16); }
   .info:hover .tip, .info:focus .tip { display: block; }
+  .h3-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .tip .steps { margin: 6px 0 0; padding-left: 18px; }
+  .tip .steps li { margin: 2px 0; }
+  .tip .steps li.on { font-weight: 700; color: var(--ink); }
+  .ind { margin-top: 16px; }
+  .ind:first-of-type { margin-top: 8px; }
+  .ind-hd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
+  .ind-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ind-name .d { color: var(--muted); font-weight: 400; font-size: 11px; }
+  .ind-val { font-size: 20px; font-weight: 700; }
+  .takeaway .banner { margin-bottom: 0; }
   .goal { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
   .goal:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   .act { font-size: 14px; padding: 6px 0; }
@@ -148,7 +159,11 @@ function PeerChart({ dist, value, direction }) {
     <div class="muted" style=${{ fontSize: "12px", marginTop: "4px" }}>${dist.n} similar schools including this one · median=${fmt1(dist.median)}% 25%=${fmt1(dist.p25)}% 75%=${fmt1(dist.p75)}% · red dot = this school · ${direction === "lower_better" ? "lower is better" : "higher is better"}</div>`;
 }
 
-function Diagnostic({ s, peers, level }) {
+const STEPS = ["Ready the team", "Scan indicators", "Prioritize", "Analyze root causes", "Develop a theory of action", "Select interventions", "Plan for implementation"];
+function StepsInfo({ active }) {
+  return html`<span class="info" tabindex="0">i<span class="tip"><b>Continuous-improvement cycle</b><ol class="steps">${STEPS.map((st, i) => html`<li key=${i} class=${st === active ? "on" : ""}>${st}</li>`)}</ol></span></span>`;
+}
+function Diagnostic({ s, peers, detail }) {
   if (!s) return html`<div class="muted">Select a school.</div>`;
   const perf = s.peer_performance_percentile;
   const worseThan = perf == null ? null : Math.round(100 - perf);
@@ -162,39 +177,40 @@ function Diagnostic({ s, peers, level }) {
       : `Worse than ${worseThan}% of similar schools on chronic absenteeism — attendance plan not yet extracted, so the response isn't assessed.`,
     unknown: `Not enough data to assess.`,
   }[s.alignment];
+  const inds = detail ? detail.indicators : null;
+  const plan = detail ? detail.plan : null;
   return html`
-    <div class=${"banner b-" + s.alignment}>${bannerText}</div>
     <div class="card">
-      <h3>Indicators</h3>
-      <div class="kpi">
-        <div><div class="big">${s.chronic_absenteeism_rate ?? "—"}%</div><div class="lab">chronic absenteeism ${s.chronic_absenteeism_year ? "(" + s.chronic_absenteeism_year + ")" : ""}</div></div>
-        <div><div class="big">${perf == null ? "—" : perf}</div><div class="lab">percentile in its band <span class=${"badge n-" + s.need}>${s.need} need</span></div></div>
-      </div>
-      <div style=${{ marginTop: "14px" }}>${html`<${PeerChart} dist=${s.peer_distribution} value=${s.chronic_absenteeism_rate} direction="lower_better" />`}</div>
+      <h3 class="h3-row"><span>Indicators</span>${html`<${StepsInfo} active="Scan indicators" />`}</h3>
+      ${inds === null ? html`<div class="muted dots">loading indicators</div>`
+        : inds.map((ind, i) => html`
+          <div class="ind" key=${i}>
+            <div class="ind-hd"><span class="ind-name">${ind.display_name}${ind.target_year ? html` <span class="d">(${ind.target_year})</span>` : null}</span><span class="ind-val">${ind.target_value == null ? "—" : fmt1(ind.target_value) + "%"}</span></div>
+            ${html`<${PeerChart} dist=${ind.peer_distribution} value=${ind.target_value} direction=${ind.direction} />`}
+          </div>`)}
     </div>
 
     <div class="card">
-      <h3>Attendance plan</h3>
-      ${!s.has_plan
-        ? html`<div class="muted">No SPSA on file for this school yet — its attendance planning is unknown (not zero). The indicators and peers above are unaffected.</div>`
-        : ((s.attendance_goals && s.attendance_goals.length)
-          ? html`
-            <div class="plan-sum">${s.attendance_action_count} attendance ${s.attendance_action_count === 1 ? "action" : "actions"}${s.attendance_budget > 0 ? " · " + fmtUSD(s.attendance_budget) + " funded" : ""}</div>
-            ${s.attendance_goals.map((g, gi) => html`
+      <h3 class="h3-row"><span>Plan${plan && plan.plan_year ? " · " + plan.plan_year : ""}</span>${html`<${StepsInfo} active="Plan for implementation" />`}</h3>
+      ${plan === null ? html`<div class="muted dots">loading plan</div>`
+        : !plan.has_plan
+          ? html`<div class="muted">No SPSA on file for this school yet — its planning is unknown (not zero). The indicators and peers are unaffected.</div>`
+          : (plan.goals && plan.goals.length
+            ? plan.goals.map((g, gi) => html`
               <div class="goal" key=${gi}>
-                <div><strong>${g.goal_type || "goal"} ${g.goal_number || ""}</strong> — ${(g.statement || "").slice(0, 140)}</div>
+                <div><strong>${g.goal_type || "goal"} ${g.goal_number || ""}</strong> — ${(g.statement || "").slice(0, 220)}</div>
                 ${(g.actions || []).map((a, ai) => html`
                   <div class="act" key=${ai}>
                     • ${a.strategy_text}
                     <div class="meta">${a.budgeted_amount != null ? fmtUSD(a.budgeted_amount) : "no funding listed"}${a.funding_source_raw ? " · " + a.funding_source_raw : ""}${a.provenance ? " · p" + a.provenance.page : ""}</div>
                     ${a.provenance && a.provenance.quote ? html`<div class="quote">"${a.provenance.quote}"</div>` : null}
                   </div>`)}
-              </div>`)}`
-          : html`<div class="muted">The SPSA is on file, but it funds no attendance-specific action — a real gap.</div>`)}
+              </div>`)
+            : html`<div class="muted">The SPSA is on file but has no extracted goals.</div>`)}
     </div>
 
     <div class="card">
-      <h3>Schools like this one <span class="info" tabindex="0">i<span class="tip">Peers are the statewide schools most similar to this one on <b>inputs</b> — enrollment, econ-disadvantaged %, EL %, students-with-disabilities %, and locale — using Mahalanobis (covariance-adjusted) distance, computed within the same instructional level. Outcomes are never used to match, so "similar" means similar <b>students</b>, not similar results. The nearest ~50 form the comparison band.</span></span></h3>
+      <h3 class="h3-row"><span>Schools like this one</span><span class="info" tabindex="0">i<span class="tip">Peers are the statewide schools most similar to this one on <b>inputs</b> — enrollment, econ-disadvantaged %, EL %, students-with-disabilities %, and locale — using Mahalanobis (covariance-adjusted) distance, computed within the same instructional level. Outcomes are never used to match, so "similar" means similar <b>students</b>, not similar results. The nearest ~50 form the comparison band.</span></span></h3>
       ${peers === null ? html`<div class="muted dots">loading peers</div>`
         : (peers.length ? html`
         <div class="tbl-wrap"><table class="tbl">
@@ -214,6 +230,11 @@ function Diagnostic({ s, peers, level }) {
         </table></div>
         <div class="muted" style=${{ fontSize: "11px", marginTop: "6px" }}>Ranked by demographic similarity (enrollment · econ-disadv · EL · SWD · locale). Chronic abs = each peer's latest chronic-absenteeism rate. <span class="sip-dot">●</span> = SPSA on file.</div>`
         : html`<div class="muted">No peer set for this school.</div>`)}
+    </div>
+
+    <div class="card takeaway">
+      <h3>Takeaway</h3>
+      <div class=${"banner b-" + s.alignment}>${bannerText}</div>
     </div>`;
 }
 
@@ -262,6 +283,7 @@ function App() {
   const [schools, setSchools] = useState([]);
   const [sel, setSel] = useState(null);
   const [peers, setPeers] = useState(null);
+  const [detail, setDetail] = useState(null);
   const [loadState, setLoadState] = useState("loading"); // loading | ready | error
 
   useEffect(() => { fetch("/marts/districts").then(r => r.json()).then(d => setDistricts(d.districts || [])).catch(() => {}); }, []);
@@ -278,9 +300,10 @@ function App() {
   const current = useMemo(() => schools.find(s => sel && s.school_id === sel.school_id) || sel, [schools, sel]);
 
   useEffect(() => {
-    if (!current) { setPeers(null); return; }
-    setPeers(null);
+    if (!current) { setPeers(null); setDetail(null); return; }
+    setPeers(null); setDetail(null);
     fetch(`/marts/like-schools?school_id=${current.school_id}&k=50`).then(r => r.json()).then(d => setPeers(d.peers || []));
+    fetch(`/marts/school-detail?school_id=${current.school_id}`).then(r => r.json()).then(setDetail).catch(() => setDetail(null));
   }, [current && current.school_id]);
 
   return html`
@@ -307,7 +330,7 @@ function App() {
             ${feat(current.locale, "str", "locale")}
           </div>` : null}
         </div>
-        ${html`<${Diagnostic} s=${current} peers=${peers} level=${level} />`}
+        ${html`<${Diagnostic} s=${current} peers=${peers} detail=${detail} />`}
       </div>
       <div class="chat">${html`<${Chat} school=${current} level=${level} />`}</div>
     </div>`;

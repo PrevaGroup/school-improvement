@@ -526,3 +526,62 @@ def districts_ep(db: Session = Depends(get_db_public)) -> dict:
         )
     ).mappings().all()
     return {"districts": [dict(r) for r in rows]}
+
+
+# --------------------------------------------------------------------------- #
+# Selected-school detail — the headline indicator charts (multi-metric) + the
+# FULL plan (every goal/action, not just attendance). Fetched per selected school.
+# --------------------------------------------------------------------------- #
+INDICATOR_METRICS = [
+    ("chronic_absenteeism_rate", "Chronic absenteeism", "lower_better"),
+    ("grad_rate_acgr", "Graduation rate", "higher_better"),
+    ("suspension_rate", "Suspension rate", "lower_better"),
+]
+
+
+def fetch_indicators(db: Session, school_id: str) -> list[dict]:
+    """Per-school value + peer distribution for the headline indicators (for the charts)."""
+    out = []
+    for mid, name, direction in INDICATOR_METRICS:
+        b = fetch_peer_benchmark(db, school_id, mid)
+        out.append({
+            "metric_id": mid, "display_name": name,
+            "direction": b.get("direction") or direction,
+            "target_value": b.get("target_value"), "target_year": b.get("target_year"),
+            "peer_distribution": b.get("peer_distribution"),
+            "peer_performance_percentile": b.get("peer_performance_percentile"),
+        })
+    return out
+
+
+def full_plan_goals(doc: dict) -> list[dict]:
+    """EVERY goal + action in the plan document — the full SPSA, not attendance-filtered."""
+    goals_out = []
+    for g in doc.get("goals", []) or []:
+        actions_out = [{
+            "action_number": a.get("action_number"),
+            "strategy_text": a.get("strategy_text"),
+            "budgeted_amount": a.get("budgeted_amount"),
+            "funding_source_raw": a.get("funding_source_raw"),
+            "provenance": a.get("provenance"),
+        } for a in (g.get("actions", []) or [])]
+        goals_out.append({
+            "goal_number": g.get("goal_number"), "goal_type": g.get("goal_type"),
+            "statement": g.get("statement"), "provenance": g.get("provenance"),
+            "actions": actions_out,
+        })
+    return goals_out
+
+
+@router.get("/school-detail")
+def school_detail_ep(school_id: str, db: Session = Depends(get_db_public)) -> dict:
+    """Everything the panel needs for ONE school: indicator charts + the full plan."""
+    indicators = fetch_indicators(db, school_id)
+    row = db.execute(
+        text("SELECT plan_year, document FROM plan_extraction WHERE school_id = :s "
+             "ORDER BY plan_year DESC NULLS LAST LIMIT 1"),
+        {"s": school_id},
+    ).mappings().first()
+    plan = ({"has_plan": True, "plan_year": row["plan_year"], "goals": full_plan_goals(row["document"] or {})}
+            if row else {"has_plan": False, "plan_year": None, "goals": []})
+    return {"school_id": school_id, "indicators": indicators, "plan": plan}
