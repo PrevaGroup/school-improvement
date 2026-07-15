@@ -11,7 +11,8 @@ defines a SPEC and calls the shared runner.
 
 | Concern | File(s) | Notes |
 |---|---|---|
-| Shared loader machinery | `backend/etl/ca/_shared.py` | `run_metric_loader`, `load_metric_file`, conformed vocab constants |
+| Shared loader machinery | `backend/etl/ca/_shared.py` | `run_metric_loader`, `load_metric_file`, `_engine`; plus CA's `CDE_CATEGORY` / `PERIODS` — the mapping *into* the vocabulary, which is this module's |
+| Conformed vocabulary | `backend/app/vocab.py` (**core**) | `STUDENT_GROUPS`, `METRICS` — moved out of `_shared.py` 2026-07-15 (sip needs them too). Re-exported by `_shared.py` so the loaders read unchanged; import from `app.vocab` in new code |
 | Per-fact loaders (×8) | `backend/etl/ca/load_ca_*.py` | chronic_absenteeism, college_going, enrollment, expulsion, graduation, homeless, stability, suspension |
 | Dimension seed | `backend/etl/ca/seed_ca_dims.py` | seeds `dim_*` |
 | Pipeline docs | `backend/etl/ca/README.md`, `docs/DATA_CATALOG.md`, `docs/download_log.txt`, `docs/caaspp_download_log.txt`, `docs/sacs_staffing_log.txt` | |

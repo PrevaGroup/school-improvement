@@ -19,7 +19,10 @@ a cross-module import, stop — that's a design smell; raise it instead of wirin
 
 **This is enforced, not aspirational**: `backend/tests/test_module_boundaries.py` walks the AST
 of every import and fails CI on the first one that crosses a module line. It carries the module
-map and a `KNOWN_VIOLATIONS` list of today's debt — that list may only shrink.
+map and a `KNOWN_VIOLATIONS` list, which as of 2026-07-15 is **empty** — there are no
+cross-module imports in the repo and the rule has no exemptions. Adding an entry to that list is
+not how you land a violation: an entry means the module split is wrong, which is a design
+question to raise, not a line to append.
 
 The rule survives only because of how the modules are cut: **producers** (`public_metrics`,
 `sip`, `likeschools`) own tables; **`serving`** owns none and reads them with SQL. Cutting by

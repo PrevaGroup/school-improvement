@@ -28,7 +28,7 @@ loaders, on Cloud SQL.
 - **Live on Cloud Run** — an IAM-gated **school diagnostic workspace**: three peer-benchmarked
   indicators (chronic absenteeism, graduation rate, college-going), the school's full SPSA, its
   demographically-matched peers, and a **grounded chat** with five tools over all of it.
-- Cloud SQL Postgres with the full aggregate **star schema** (17 tables) + **row-level
+- Cloud SQL Postgres with the full aggregate **star schema** (21 tables) + **row-level
   security** (tenant isolation proven), credentials in **Google Secret Manager**.
 - **8 public metrics loaded** (chronic absenteeism, suspension, expulsion, graduation,
   stability, college-going, homelessness, enrollment) — ~960k `fact_metric` rows.
