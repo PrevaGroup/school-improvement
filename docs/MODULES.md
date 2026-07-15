@@ -66,6 +66,12 @@ imports.
 
 `backend/tests/test_module_boundaries.py` enforces this map in CI.
 
+> **Known future pressure on "serving owns no tables":** the planned `chat.py` overhaul retains
+> **traces** to fuel an eval system — and a trace table would make `serving` a **producer**,
+> contradicting the invariant above. The overhaul is parked, but the storage call should be made
+> **before the first trace is written**, not after. Options and a recommendation:
+> [`docs/design/chat-traces-and-evals.md`](design/chat-traces-and-evals.md).
+
 ## Target physical layout
 
 Feature modules sit **directly under `backend/`** (honoring the existing `backend/likeschools/`),
