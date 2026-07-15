@@ -85,12 +85,12 @@
   .tip .steps { margin: 6px 0 0; padding-left: 18px; }
   .tip .steps li { margin: 2px 0; }
   .tip .steps li.on { font-weight: 700; color: var(--ink); }
-  .ind { margin-top: 16px; }
-  .ind:first-of-type { margin-top: 8px; }
-  .ind-hd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
-  .ind-name { font-size: 13px; font-weight: 600; color: var(--ink); }
-  .ind-name .d { color: var(--muted); font-weight: 400; font-size: 11px; }
-  .ind-val { font-size: 20px; font-weight: 700; }
+  .inds { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 6px; }
+  .ind { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 12px 10px; }
+  .ind-hd { margin-bottom: 4px; }
+  .ind-name { display: block; font-size: 12px; font-weight: 600; color: var(--ink); }
+  .ind-name .d { color: var(--muted); font-weight: 400; font-size: 10px; }
+  .ind-val { display: block; font-size: 24px; font-weight: 700; line-height: 1.1; }
   .takeaway .banner { margin-bottom: 0; }
   .goal { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
   .goal:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
@@ -152,9 +152,9 @@ function PeerChart({ dist, value, direction }) {
       <rect x=${x(dist.p25)} y="14" width=${Math.max(1, x(dist.p75) - x(dist.p25))} height="16" fill="var(--line)" rx="3"><title>Middle 50% of the ${dist.n} peers (25th–75th percentile): ${fmt1(dist.p25)}%–${fmt1(dist.p75)}%. Median ${fmt1(dist.median)}%.</title></rect>
       <line x1=${x(dist.median)} y1="12" x2=${x(dist.median)} y2="32" stroke="var(--muted)" stroke-width="2" />
       <circle cx=${x(value)} cy="22" r="5" fill="var(--red)" />
-      <text x=${vx} y="10" text-anchor=${vAnchor} font-size="9" fill="var(--ink)">${fmt1(value)}</text>
-      <text x="0" y="44" font-size="8" fill="var(--muted)">0%</text>
-      <text x=${W} y="44" text-anchor="end" font-size="8" fill="var(--muted)">100%</text>
+      <text x=${vx} y="10" text-anchor=${vAnchor} font-size="11" fill="var(--ink)">${fmt1(value)}</text>
+      <text x="0" y="44" font-size="9" fill="var(--muted)">0%</text>
+      <text x=${W} y="44" text-anchor="end" font-size="9" fill="var(--muted)">100%</text>
     </svg>
     <div class="muted" style=${{ fontSize: "12px", marginTop: "4px" }}>${dist.n} similar schools including this one · median=${fmt1(dist.median)}% 25%=${fmt1(dist.p25)}% 75%=${fmt1(dist.p75)}% · red dot = this school · ${direction === "lower_better" ? "lower is better" : "higher is better"}</div>`;
 }
@@ -183,11 +183,11 @@ function Diagnostic({ s, peers, detail }) {
     <div class="card">
       <h3 class="h3-row"><span>Indicators</span>${html`<${StepsInfo} active="Scan indicators" />`}</h3>
       ${inds === null ? html`<div class="muted dots">loading indicators</div>`
-        : inds.map((ind, i) => html`
+        : html`<div class="inds">${inds.map((ind, i) => html`
           <div class="ind" key=${i}>
             <div class="ind-hd"><span class="ind-name">${ind.display_name}${ind.target_year ? html` <span class="d">(${ind.target_year})</span>` : null}</span><span class="ind-val">${ind.target_value == null ? "—" : fmt1(ind.target_value) + "%"}</span></div>
             ${html`<${PeerChart} dist=${ind.peer_distribution} value=${ind.target_value} direction=${ind.direction} />`}
-          </div>`)}
+          </div>`)}</div>`}
     </div>
 
     <div class="card">
