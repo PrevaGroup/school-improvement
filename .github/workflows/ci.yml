@@ -39,3 +39,29 @@ jobs:
         # pytest exits 5 when it collects nothing, which fails this step. That is the
         # point: this suite reported success while running zero tests for its whole
         # life, and an empty run must never be mistaken for a passing one again.
+
+  frontend:
+    name: frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `npm ci` (not `install`): the lockfile is the contract, and it's what the Dockerfile
+      # runs. CI resolving different versions than the image would defeat the point.
+      - name: Install deps
+        run: npm ci
+
+      # `npm run build` = tsc -b && vite build, the same command the Dockerfile's node stage
+      # runs. Without this job a type error would pass CI and only fail at Cloud Build — i.e.
+      # at deploy, after review. The suite is the gate, so the gate has to cover the frontend.
+      - name: Typecheck + build
+        run: npm run build
