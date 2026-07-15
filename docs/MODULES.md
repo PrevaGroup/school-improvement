@@ -13,8 +13,9 @@ core                      the frozen contract — everything depends on it, chan
   ├─ conformed vocab      student groups, metric registry
   └─ migrations spine     the single Alembic history (ordering matters)
 
-backend/<X>               swappable feature slices, one folder each (likeschools, sip,
-                          public_metrics, plan_marts, chat) — depend ONLY on core, never each other
+backend/<X>               swappable modules, one folder each — depend ONLY on core, never each other
+  producers                likeschools · sip · public_metrics — each owns the tables it writes
+  serving                  owns no tables; reads the producers' tables with SQL
   each owns: README.md · CLAUDE.md · its code · the DB tables it writes · tests
   modules integrate through TABLES (a produced table is the contract), not imports
 ```
@@ -115,9 +116,7 @@ branch label later only if it genuinely needs an independent deploy cadence.
 **Docs & scaffolding (done — no runtime code changed):**
 - [x] `CLAUDE.md` (repo rules) + this registry
 - [x] Scaffold folders with component-map READMEs: `backend/core/`, `backend/likeschools/`,
-      `backend/sip/`, `backend/public_metrics/`, `backend/plan_marts/`, `backend/chat/`
-      — NB: `plan_marts/` + `chat/` are pre-decision scaffolds and now name modules that no
-      longer exist; they fold into `serving/` when the code relocates (docs-only, not yet done)
+      `backend/sip/`, `backend/public_metrics/`, `backend/serving/`
 - [x] `likeschools` — full README component map + module `CLAUDE.md`
 - [x] Reconciled the drifted design docs (status banners → code is source of truth)
 
@@ -166,6 +165,18 @@ engine to keep it that way.
 `NON_SCHOOL_CODES`, `DIRECTORY_FILE`) is CA-specific and stays. Note `extract_sip.py` has a
 second, function-level `_engine` import at line ~188 that a top-of-file grep misses.
 
+**Docs reconciled to the decision (done 2026-07-15):**
+- [x] `plan_marts/` + `chat/` scaffolds folded into `backend/serving/` and deleted
+- [x] `ARCHITECTURE.md` §4 "Modules" — states the *idea* (the seam, why producer/consumer, that
+      it's enforced) and defers the inventory here. Its old path-by-path "Repository index" was
+      **deleted, not updated**: it was a second map of the same codebase, grouped by technical
+      layer, and it had silently stopped mentioning `etl/peers/`, `app/marts.py`, `app/chat.py`,
+      and `backend/tests/`. Two maps drift; this file is the one that's reconciled to the code.
+- [x] `likeschools/CLAUDE.md` — was still granting itself scope over `app/marts.py` + `app/chat.py`
+      (the pre-decision design). That's an auto-loaded instruction file, so it was actively
+      steering work into a rule violation. Now engine-only.
+- [x] `sip/README.md` — claimed "depends only on `core`", which is false; now names the four
+      `_shared` imports and points at `KNOWN_VIOLATIONS`.
+
 **Code relocation (NOT started):**
 - [ ] move each module's code under `backend/<X>/` (models included) + `version_locations`
-- [ ] fold the `plan_marts/` + `chat/` scaffolds into `serving/`

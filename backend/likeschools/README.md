@@ -12,18 +12,21 @@ peers*, so demographics aren't used as an excuse and improvement is measured fai
 
 ## Where every component lives (component map)
 
-This feature currently spans **7 concerns across the old layout**. To change the algorithm you
-touch these; the reorg (see `docs/MODULES.md`) will pull the swappable ones under this folder.
+**likeschools is the matching ENGINE — it has no serving surface.** It computes peer sets and
+writes `mart_school_peer`; that table is its whole contract. The `/marts/like-schools` and
+`/marts/peer-benchmark` endpoints and the chat tools over them belong to **`serving`** and are
+listed below only so you know where they are — they are not yours to change from here. (Decided
+2026-07-15: `serving` needs `fetch_peer_benchmark` for two other features, so peer serving living
+here forced a cross-module import. See `docs/MODULES.md` and §4 of `ARCHITECTURE.md`.)
 
 | Concern | File(s) today | Notes |
 |---|---|---|
 | **Design docs** | `backend/likeschools/*.md` (concept, lit-review, spec) | drifted — reference only |
 | **Matching engine** | `backend/etl/peers/build_peers.py` | the Mahalanobis matcher (the thing you'd edit to change the algorithm) |
 | **Schema / DDL** | `backend/migrations/versions/0004_peer_tables.py` | creates the 3 owned tables |
-| **ORM models** | `backend/app/models/reference.py` → `FeatMatchVector`, `MartSchoolPeer`, `ModelPartitionStats` | **buried in core `reference.py`; should move here** |
-| **Serving API** | `backend/app/marts.py` → `fetch_like_schools`, `fetch_peer_benchmark`, `/like-schools`, `/peer-benchmark` | reads the tables + `fact_metric` |
-| **Chat tools** | `backend/app/chat.py` → `find_similar_schools`, `compare_to_peers` | wrap the serving fns |
+| **ORM models** | `backend/etl/peers/models.py` → `FeatMatchVector`, `MartSchoolPeer`, `ModelPartitionStats` | moved out of core 2026-07-15; registered via `migrations/env.py` + `0001` |
 | **Dependency** | `backend/requirements.txt` → `scikit-learn` | used only by the matcher |
+| *(not this module)* | `backend/app/marts.py`, `backend/app/chat.py` | peer serving + chat tools — owned by **`serving`**, which reads `mart_school_peer` with SQL |
 
 Legacy, do **not** confuse: `dim_peer_group` + `dim_school.peer_group_id` (in `reference.py`) are
 an **older rule/kmeans peer concept**, superseded by the Mahalanobis `mart_school_peer`. Leave
@@ -76,19 +79,25 @@ NearestNeighbors(metric='mahalanobis', VI=precision_) → keep k nearest, drop s
 
 1. Edit **`backend/etl/peers/build_peers.py`** (`FEATURES`/`CORE`, `level_bucket()`, the distance
    step, `k`, confidence percentile). This is the only file that defines the method.
-2. If you add/rename an **output column**, that's a contract change: update the DDL
-   (`migrations/versions/0004_peer_tables.py` or a new migration), the ORM models in
-   `reference.py`, **and** every downstream reader (`marts.py`, `chat.py`). Otherwise downstream
-   is unaffected.
+2. If you add/rename an **output column**, that's a contract change — `mart_school_peer`'s shape
+   is the only thing the rest of the system depends on. Update the DDL
+   (`migrations/versions/0004_peer_tables.py` or a new migration), the models in
+   `etl/peers/models.py`, **and** every reader (`serving` queries the table with SQL — grep
+   `mart_school_peer`). Otherwise downstream is unaffected: that's the point of the seam.
 3. Rebuild (from `backend/`, needs scikit-learn + DB via Auth Proxy + ADC):
    `python -m etl.peers.build_peers [--k 50] [--year 2025-26] [--conf-pctile 90] [--dry-run]`
 4. Serving is then a cheap indexed lookup — no serving change needed for a pure method change.
 
 ## Reorg target
 
-Pull the swappable pieces under this folder: `build/build_peers.py`, `models.py` (the 3 mart
-models moved out of core `reference.py`), `api/` (the peer endpoints from `marts.py`),
-`migrations/0004_*`, `tests/` (golden peer-set fixtures). The design `.md` docs move to
-`docs/` here. Tracked in `docs/MODULES.md`. **First safe step: move the 3 mart models out of
-`reference.py`** — grep confirms only `build_peers.py` imports them, so it's a 2-file change that
-decouples this module's private tables from the shared contract.
+- [x] **Models out of core** (2026-07-15) — the 3 mart models moved from `app/models/reference.py`
+      to `etl/peers/models.py`. This module's tables are no longer part of the frozen contract, so
+      changing one is no longer a breaking change to everything.
+- [ ] Pull the remaining pieces under this folder: `build/build_peers.py`, `models.py`,
+      `migrations/0004_*`, `tests/` (golden peer-set fixtures); the design `.md` docs to `docs/`
+      here. **No `api/`** — this module has no serving surface. Tracked in `docs/MODULES.md`.
+
+When the models move again, update `migrations/env.py` **and**
+`migrations/versions/0001_initial_schema.py` — both import `etl.peers.models` to register these
+tables on `Base.metadata`, and autogenerate reads a table it can't see as **DROP TABLE**.
+`backend/tests/test_schema_inventory.py` will fail if you forget.
