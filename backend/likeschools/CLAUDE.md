@@ -13,10 +13,10 @@ features, so peer serving living here forced a cross-module import.)
 
 ## Scope — what you may touch
 
-- The matching engine: `backend/etl/peers/build_peers.py`.
+- The matching engine: `backend/likeschools/build_peers.py`.
 - This module's owned tables and their models: `feat_match_vector`, `mart_school_peer`,
-  `model_partition_stats` — models in `backend/etl/peers/models.py`, DDL in
-  `migrations/versions/0004_peer_tables.py`.
+  `model_partition_stats` — models in `backend/likeschools/models.py`, DDL in
+  `likeschools/migrations/0004_peer_tables.py`.
 
 That's the module. Everything else is someone else's.
 
@@ -33,7 +33,7 @@ That's the module. Everything else is someone else's.
   `backend/tests/test_module_boundaries.py` fails CI if you try.
 - **`dim_school` and the rest of `core` are read-only here.** Don't alter the star schema to suit
   the matcher. If you think you need to, that's a `core` change — flag it, don't do it inline.
-- **Models must stay registered.** `etl/peers/models.py` reaches `Base.metadata` only because
+- **Models must stay registered.** `likeschools/models.py` reaches `Base.metadata` only because
   `migrations/env.py` and `0001_initial_schema.py` import it. If you move or rename that module,
   update both — Alembic autogenerate reads a table it can't see as **DROP TABLE**.
   Guarded by `backend/tests/test_schema_inventory.py`.
@@ -44,7 +44,7 @@ That's the module. Everything else is someone else's.
 
 ## Definition of done
 
-- The `python -m etl.peers.build_peers --dry-run` path still runs.
+- The `python -m likeschools.build_peers --dry-run` path still runs.
 - `mart_school_peer` still has the same column shape, or you updated every reader deliberately.
 - `python -m pytest` passes from `backend/` (boundary + schema guards included).
 - A test covers what you changed.

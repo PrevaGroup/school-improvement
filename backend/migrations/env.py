@@ -27,7 +27,7 @@ from app.models import Base      # noqa: E402
 # re-exporting it from app.models — that would make core depend on a module.
 # Guarded by backend/tests/test_schema_inventory.py.
 import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
-import etl.peers.models   # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
+import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
 
 target_metadata = Base.metadata
 config = context.config

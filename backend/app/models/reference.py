@@ -75,7 +75,7 @@ class DimSchool(Base):
 # Moved out of core 2026-07-15 — these were never shared schema:
 #   plan_extraction                                    -> etl/ca/sip/models.py      (sip)
 #   feat_match_vector, mart_school_peer,
-#   model_partition_stats                              -> etl/peers/models.py       (likeschools)
+#   model_partition_stats                              -> likeschools/models.py     (likeschools)
 # They live with the module that writes them, so changing one is no longer a change to
 # the frozen contract. Downstream reads them as TABLES (SQL), never as imports.
 

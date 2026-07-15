@@ -85,7 +85,7 @@ PY
 
 ## 3. Serve
 
-Once `plan_extraction` is populated (and, for peer comparison, `etl/peers/build_peers` has
+Once `plan_extraction` is populated (and, for peer comparison, `likeschools/build_peers` has
 run), the app surfaces it:
 
 - `GET /` — the chat UI (level selector; asks over the plans + peers)

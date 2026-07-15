@@ -50,7 +50,7 @@ from app.models import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 # carve-out), so without these two lines this file would see 14 tables, not 21 — and would
 # "prove" that 7 tables had vanished. If env.py's import list changes, change it here too.
 import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
-import etl.peers.models   # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
+import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
 
 # table -> the module that DECLARES it (whose models.py the class lives in). That's what this
 # file can actually check: Base.metadata is built from declarations, not from who writes rows.
@@ -80,7 +80,7 @@ EXPECTED_TABLES: dict[str, str] = {
     # --- the conformed fact: declared in core (app/models/tenant.py), rows written by
     #     public_metrics. Stays in core — every module reads it, so its shape is contract. ---
     "fact_metric": "core",
-    # --- likeschools' tables — declared in etl/peers/models.py ---
+    # --- likeschools' tables — declared in likeschools/models.py ---
     "feat_match_vector": "likeschools",
     "mart_school_peer": "likeschools",
     "model_partition_stats": "likeschools",
