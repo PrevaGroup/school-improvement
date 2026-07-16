@@ -1,6 +1,10 @@
 # Design note: chat traces + an eval system, without breaking the serving seam
 
-**Status:** parked (the overhaul is later) · **Scope:** `serving`, possibly a new producer ·
+**Status:** superseded by [`eval-trace-system.md`](eval-trace-system.md) (2026-07-16), which
+makes the storage call parked here (hybrid: GCS emission + an `evals` producer module) and
+designs the full continuous-improvement loop. The analysis below — the seam collision, the
+two-layer split, the honesty-first eval target — carries forward unchanged and is referenced
+from there. · **Scope:** `serving`, possibly a new producer ·
 **Raises:** the first real pressure on the "serving owns no tables" invariant
 
 The plan is to overhaul `app/chat.py` to **retain traces** and use them to **fuel an eval
