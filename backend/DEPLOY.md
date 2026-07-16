@@ -7,20 +7,19 @@ it from a `backend/` context. DB access uses the
 Cloud SQL Python Connector when `INSTANCE_CONNECTION_NAME` is set (no Auth Proxy
 sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
 
-> **This document describes the current IAM-gated demo deploy.** The cutover to a
-> Identity Platform-authenticated, internet-reachable service on a custom domain is planned in
-> [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md). Two things here change at that
-> cutover, and both are called out inline below:
-> - the **build context moves to the repo root** (`--source .`), because a multi-stage
->   build that compiles `frontend/` cannot see it from a `backend/` context;
-> - **`--no-allow-unauthenticated` goes away**, which removes both the access gate *and*
->   the Claude spend cap. Do not remove it before its replacements exist.
+> **This document describes the live, internet-reachable deploy** — the go-live cutover
+> ran **2026-07-16**. The service is `--allow-unauthenticated` on `sip.prevagroup.com`
+> (and its `run.app` aliases); the boundary is the app's own Identity Platform sign-in +
+> the domain allowlist, and Claude spend is capped in-app (`app/usage.py`). The plan that
+> got here, with the rationale for each step, is
+> [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md) — now a historical record.
 
 ## Prerequisites (one-time)
 
 1. **Secrets in Secret Manager** (project `school-improvement-501916`):
    - `sip-app-password`, `sip-migrator-password` — already exist (runbook Phase 3).
-   - `anthropic-api-key` — **create this** for `POST /plans/extract`:
+   - `anthropic-api-key` — also exists (used by `POST /plans/extract` and `/api/chat`).
+     In a fresh project, create it with:
      ```bash
      printf %s "sk-ant-..." | gcloud secrets create anthropic-api-key --data-file=-
      ```
@@ -88,23 +87,25 @@ gcloud run deploy sip-api \
 
 - **`--max-instances 4`** caps serverless scale-out so it can't exhaust Postgres
   connections (runbook Phase 3). The engine also uses `pool_pre_ping`.
-- **`--min-instances 0`** for MVP — accept occasional cold starts (free). **At go-live this
-  becomes `--min-instances 1`** (~$6–15/mo): an invited tester's first click shouldn't pay a
-  container start *plus* a Cloud SQL connect. That reads as "broken", not "thrifty".
-- **At go-live the source flag changes** to `--source .`, run from the repo root
-  (`school-improvement/` — where `.git` is, not the parent `SchoolImprovement/`), because the
-  multi-stage Dockerfile builds `frontend/` and cannot see it from a `backend/` context.
-  - **Size is already fine:** the repo is **4.8 MB** (measured 2026-07-15). The 2.8 GB
-    `California/` raw data is a **sibling outside the repo** and was never in scope for upload.
+- **`--min-instances 0`** is still the deployed value (verified against the live service
+  2026-07-16). The go-live plan called for `--min-instances 1` (~$6–15/mo) so an invited
+  tester's first click doesn't pay a container start *plus* a Cloud SQL connect — that reads
+  as "broken", not "thrifty". **Open item:** bump it, or decide cold starts are acceptable
+  and update this line.
+- **`--source .` runs from the repo root** (`school-improvement/` — where `.git` is, not the
+  parent `SchoolImprovement/`), because the multi-stage Dockerfile builds `frontend/` and
+  cannot see it from a `backend/` context.
+  - **Size is fine:** the repo is **4.8 MB** (measured 2026-07-15). The 2.8 GB `California/`
+    raw data is a **sibling outside the repo** and was never in scope for upload.
   - **`.gcloudignore` footgun:** with **no** `.gcloudignore`, gcloud auto-generates one that
-    honors `.gitignore`. **Hand-writing one turns that off** — so a file that forgets
-    `node_modules/` will upload it the first time anyone runs `npm install`. Start it with
-    `#!include:.gitignore` (already covers `node_modules`, `dist`, `__pycache__/`, `.venv/`,
-    `.pytest_cache/`), then add `.git/`.
-  - **`.dockerignore` moves too:** Docker only reads it **at the context root**, so
-    [`backend/.dockerignore`](.dockerignore) becomes **inert** — delete it rather than leave it
-    looking authoritative. The root one must exclude `node_modules/` and `frontend/dist/`
-    (built inside the image) while **keeping `frontend/` source**, which build stage 1 needs.
+    honors `.gitignore`. **Hand-writing one turns that off** — the root
+    [`.gcloudignore`](../.gcloudignore) therefore starts with `#!include:.gitignore` (which
+    covers `node_modules`, `dist`, `__pycache__/`, `.venv/`, `.pytest_cache/`) and then adds
+    `.git/`. Keep that include line when editing the file.
+  - **`.dockerignore` lives at the context root** — Docker only reads it there. The old
+    `backend/.dockerignore` was deleted (it would be inert but look authoritative). The root
+    [`.dockerignore`](../.dockerignore) excludes `node_modules/` and `frontend/dist/` (built
+    inside the image) while **keeping `frontend/` source**, which build stage 1 needs.
 - The Anthropic key is read from Secret Manager via ADC at request time; no env var
   needed in prod. (Set `ANTHROPIC_API_KEY` only for a local dev fallback.)
 - **`ALLOWED_EMAIL_DOMAINS` is required from this deploy on** — every `/api` route now
@@ -112,9 +113,10 @@ gcloud run deploy sip-api \
   every signed-in user 403s with "not on the invite list". `prevagroup.com` only until
   Entra lands (a single value, so no comma and no `^@^` needed yet — see the allowlist
   section below for when gatesfoundation.org joins).
-- **Migration 0005 must run before the next deploy** (`alembic upgrade head`, from Cloud
-  Shell per `backend/README.md`) — /api/chat now refuses (503, fails closed) if the
-  `usage_chat_daily` spend counter is missing.
+- **Migration 0005 (`usage_chat_daily`) is applied** — it ran before the go-live deploy.
+  Still worth knowing: /api/chat refuses (503, fails closed) if the spend counter table is
+  ever missing, so a fresh environment must reach `alembic upgrade head` (from Cloud Shell
+  per `backend/README.md`) before chat works.
 - **Claude spend caps** (in-app, §3.4 — the IAM gate's replacement for its second job):
   `CHAT_DAILY_USER_USD` (default $2/day per signed-in user, ~10–40 heavy messages) and
   `CHAT_DAILY_GLOBAL_USD` (default $20/day everyone combined — the ceiling that holds no
@@ -128,37 +130,30 @@ gcloud run deploy sip-api \
   `gcloud run services proxy`) remains useful for pre-release smoke tests of a closed
   revision.
 
-> ⚠️ **`--no-allow-unauthenticated` is doing two jobs, and it's easy to only notice one.**
-> It gates access *and* it is the only thing capping Anthropic spend — there is no
-> per-user limit in the app, and `/chat` is unauthenticated at the application layer
-> ([`app/chat.py`](app/chat.py) reads `get_db_public`). Flipping this to
-> `--allow-unauthenticated` therefore exposes `POST /chat` and `POST /plans/extract` (an
-> Opus call per PDF) to anyone who finds the `run.app` URL. **The replacements — Identity Platform
-> enforcement, the `DEV_MODE` lockout, and an in-app per-user chat cap — must land first.**
-> See [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md) §3.4 and §3.6.
+> **History:** until 2026-07-16, `--no-allow-unauthenticated` did two jobs — access gate
+> *and* the only Anthropic spend cap. Both replacements shipped before the flag flipped:
+> sign-in + allowlist enforcement in [`app/security.py`](app/security.py), and the in-app
+> spend caps in [`app/usage.py`](app/usage.py) (whose docstring keeps the full rationale).
 
 ## Chat UI (`GET /` + `POST /chat`)
 
 The UI is the React + Vite SPA in [`frontend/`](../frontend), built into the image and served
 by FastAPI itself — **one Cloud Run service, one origin**, so no separate frontend host and no
 CORS. It calls `POST /api/chat`, which runs Claude (`settings.chat_model`, Haiku by default for
-cost) with an inline tool over the public `plan_extraction` + `fact_metric` marts. All reads are
-public (SPSAs are public docs), so there's no tenant/auth in the app yet — access is still the
-IAM gate until Identity Platform sign-in lands.
+cost) with an inline tool over the public `plan_extraction` + `fact_metric` marts. All reads
+are public (SPSAs are public docs), so there is **no tenant** in the app — but every `/api`
+route is Identity Platform-authenticated: the sign-in + allowlist is what replaced the IAM
+gate at go-live.
 
-> **At go-live this page is replaced**, but the *single-origin* property it demonstrates is
-> kept deliberately: the React + Vite SPA is built into the same image and served by the same
-> FastAPI app, so there is still one host and still no CORS. Routes move under `/api/*`, and
-> "no tenant/auth in the app" becomes "**no tenant**, but Identity Platform-authenticated" — the reads stay
-> public; the sign-in is what replaces the IAM gate.
-
-Grant demo users access:
+For a pre-release smoke test of a **closed** revision (the historical IAM-gated posture),
+grant an individual invoker:
 ```bash
 gcloud run services add-iam-policy-binding sip-api --region us-central1 \
   --member="user:teammate@example.com" --role="roles/run.invoker"
 ```
-They then reach it via an identity-aware proxy token (or `gcloud run services proxy sip-api
---region us-central1` for a local authenticated tunnel).
+and reach it via an identity-aware proxy token (or `gcloud run services proxy sip-api
+--region us-central1` for a local authenticated tunnel). The live service doesn't need any of
+this — it's `--allow-unauthenticated`; users just sign in.
 
 ## Who may sign in — `ALLOWED_DOMAIN_PROVIDERS` (the invite list, with teeth)
 
@@ -278,15 +273,18 @@ Token verification is implemented in `app/security.py` (`verify_firebase_token` 
   (recommended), or configure `DOMAIN_TENANT_MAP` (e.g. `{"lbschools.net":"lbusd"}`) to
   map by email domain. The resolved tenant must exist in `dim_tenant`.
 
-For a gated internal test without real sign-in, deploy with `DEV_MODE=true` and call with
-an `X-Dev-Tenant: <tenant_id>` header.
+For a **local** test without real sign-in, run with `DEV_MODE=true` and call with an
+`X-Dev-Tenant: <tenant_id>` header. Local only — on Cloud Run the app refuses to boot with
+`DEV_MODE=true` (next note).
 
-> ⚠️ **`DEV_MODE=true` is safe *only* while `--no-allow-unauthenticated` holds.** The
+> ⚠️ **`DEV_MODE` cannot reach production — structurally, not by convention.** The
 > `X-Dev-Tenant` header is unverified by construction — on a publicly reachable service it
-> is tenant impersonation via a request header, i.e. any caller can read any district. At
-> the go-live cutover the app must **structurally refuse** the dev path when a production
-> signal (`K_SERVICE`, `INSTANCE_CONNECTION_NAME`) is present. A `DEV_MODE=false` deploy
-> flag is not sufficient — it's one hurried `--set-env-vars` edit away from true.
+> would be tenant impersonation via a request header. So the app **refuses to boot** with
+> `DEV_MODE=true` when a production signal (`K_SERVICE`, `INSTANCE_CONNECTION_NAME`) is
+> present ([`app/security.py`](app/security.py) `assert_dev_mode_not_in_production`, tested
+> in `tests/test_security.py`). The env-signal gate exists because a `DEV_MODE=false`
+> deploy flag alone is not sufficient — it's one hurried `--set-env-vars` edit away from
+> true. Fail the deploy, not the security model.
 
 ## Custom domain — `sip.prevagroup.com` (mapped 2026-07-16)
 
@@ -345,21 +343,25 @@ So, deliberately: **no load balancer, no ingress restrictions, no hostname-check
 middleware anywhere in the app.** If we ever harden (custom domain via a global LB with
 internal ingress), that is a **deliberate infra change — never a scaffold feature.**
 
-## ⚠️ Remaining before a real prod cutover
+## Go-live status (cutover ran 2026-07-16)
 
-See [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md) for the sequenced version. In short:
+Everything the plan gated the cutover on shipped before the gate opened
+([`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md) has the sequenced history):
 
-- **Split auth from tenancy** in `app/security.py` — `get_current_principal` (verify only)
-  for public routes, `get_current_tenant` (verify + map) for private ones. Today's
-  `get_current_tenant` **403s any identity without a mapped district**, so gating the
-  public marts on it would reject every outside tester.
-- **Lock `DEV_MODE` out of prod** (above). Prerequisite for opening the gate.
-- **Cap Claude spend in-app** — per-principal daily limit on `/chat`, keyed on the verified
-  Identity Platform subject. Prerequisite for opening the gate.
-- **Provisioning**: a way to create Identity Platform users and attach the `tenant_id` custom claim
-  (`firebase-admin` / Identity Platform Admin API) — one-time onboarding, not the request
-  path. Note public-data testers need **no** claim once auth and tenancy are split.
-- Add the custom domain to Identity Platform **authorized domains**, or sign-in fails there with a
-  confusing error.
-- Create the `anthropic-api-key` secret (above) and confirm the tenant rows exist in
-  `dim_tenant`.
+- ✅ **Auth split from tenancy** in `app/security.py` — `get_current_principal` (verify
+  only) gates every `/api` route; `get_current_tenant` (verify + map, 403s any identity
+  without a mapped district) stays reserved for future private routes.
+- ✅ **`DEV_MODE` locked out of prod** — structural boot refusal (above).
+- ✅ **Claude spend capped in-app** — per-user and global daily caps in `app/usage.py`,
+  keyed on the verified Identity Platform subject.
+- ✅ **Custom domain mapped and in Identity Platform authorized domains**
+  (`sip.prevagroup.com`).
+- ✅ **`anthropic-api-key` secret** created; read via ADC at request time.
+
+Still open:
+
+- **`--min-instances` is still 0** — the plan called for 1 at go-live so testers don't pay
+  cold starts (see the deploy-flags notes above). Bump it or decide to accept cold starts.
+- **Tenant provisioning** — a way to create Identity Platform users with the `tenant_id`
+  custom claim (`firebase-admin` / Identity Platform Admin API) and matching `dim_tenant`
+  rows. Not needed until private district data lands: public-data testers need no claim.
