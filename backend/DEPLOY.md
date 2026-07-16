@@ -192,6 +192,12 @@ real sign-in). The Entra/gatesfoundation.org setup will re-walk this list.
 4. **`localhost` and `127.0.0.1` are different authorized domains.** The default list
    covers `localhost`; a proxy smoke test opened at `http://127.0.0.1:8080` fails with
    `auth/unauthorized-domain`. Use `http://localhost:<port>`, or add `127.0.0.1`.
+5. **Cloud Run has two URL formats, and authorized domains are exact-match.** The same
+   service answers on `<svc>-<hash>-<region-code>.a.run.app` *and*
+   `<svc>-<project#>.<region>.run.app`; the console added the old format, the new console
+   and gcloud advertise the new one. Symptom: sign-in works on one URL and throws
+   `auth/unauthorized-domain` on the other. List every hostname users actually visit —
+   including the custom domain when it lands.
 
 ### Token verification (runtime)
 
@@ -214,53 +220,61 @@ an `X-Dev-Tenant: <tenant_id>` header.
 > signal (`K_SERVICE`, `INSTANCE_CONNECTION_NAME`) is present. A `DEV_MODE=false` deploy
 > flag is not sufficient — it's one hurried `--set-env-vars` edit away from true.
 
-## Custom domain (at go-live, not today)
+## Custom domain — `sip.prevagroup.com` (mapped 2026-07-16)
 
-Cloud Run **domain mapping**; Cloudflare is DNS-only. No load balancer, no `cloudflared`,
-no Workers.
+Cloud Run **domain mapping**. No load balancer, no proxy, no Workers.
+
+> **Reality correction (2026-07-16):** earlier drafts of this section were written around
+> Cloudflare DNS (grey-cloud/orange-cloud doctrine). **prevagroup.com's DNS was never on
+> Cloudflare** — its nameservers are `ns-cloud-b*.googledomains.com` (Google-hosted DNS,
+> managed through the Squarespace panel after the Google Domains sale). The plan said
+> "Cloudflare" and the docs repeated it without an NS lookup. There is no proxy toggle on
+> Google-hosted DNS, so the whole orange-cloud failure class is structurally absent here;
+> the old warnings apply only if DNS ever actually moves to Cloudflare.
 
 ```bash
 # NOTE: managed Cloud Run needs the *beta* surface. The GA `gcloud run domain-mappings`
 # command is Cloud Run for Anthos and will not do this.
 gcloud beta run domain-mappings create \
-  --service sip-api --region us-central1 --domain app.<yourdomain>
+  --service sip-api --region us-central1 --domain sip.prevagroup.com
 ```
 
-One-time, per-project, and in this order — each step blocks the next:
+One-time, per-project, and in this order — each step blocks the next (all executed
+2026-07-16):
 
-1. **Verify domain ownership** in Google Search Console (`gcloud domains verify`). The
-   mapping will not create without it. This is the step everyone forgets.
+1. **Verify domain ownership** (`gcloud domains verify prevagroup.com`). Auto-verified
+   instantly: the Workspace-era `google-site-verification` TXT record already in DNS is
+   accepted as proof. Do not delete that TXT record.
 2. Create the mapping; it prints the DNS record to add.
-3. In Cloudflare, add the record **DNS-only (grey cloud)** — a subdomain gets a CNAME to
-   `ghs.googlehosted.com`. **Do not enable the orange-cloud proxy**: Google's managed cert
-   requires seeing the DNS directly, and proxying breaks validation. (This is also the
-   exact thing someone "helpfully" turns on when the site feels slow.)
-4. **Wait** — cert provisioning can take a few hours. A 404/525 in the meantime is normal.
+3. **In Squarespace → Domains → prevagroup.com → DNS settings** add:
+   CNAME, host `sip`, data `ghs.googlehosted.com.` The CNAME delivers traffic to Google's
+   shared front end; the *mapping* is the routing-table entry that tells that front end
+   which service owns the hostname. Neither works alone.
+4. **Wait** — cert issuance starts once the CNAME is publicly visible. Observed: minutes,
+   plus a short edge-propagation lag after `CertificateProvisioned: True` during which
+   browsers still see TLS handshake failures (`PR_END_OF_FILE_ERROR`). Normal.
+5. **Add the hostname to Identity Platform authorized domains** (see the provisioning
+   traps above) — or sign-in fails there with `auth/unauthorized-domain`.
 
-Prefer a **subdomain** (`app.example.com`). An apex domain needs A/AAAA records instead,
-and Cloudflare's CNAME flattening interacts badly with grey-cloud + Google-managed certs.
+Prefer a **subdomain** (`sip.example.com`). An apex domain needs A/AAAA records instead.
 
 `us-central1` supports domain mappings — verified 2026-07-15 against the regional
 `domains.cloudrun.com/v1` endpoint. If a future region doesn't, **flag it** rather than
 substituting Firebase Hosting rewrites silently.
 
-**Keep the proxy off (grey cloud) — this is not a preference.** Orange cloud **breaks the
-mapping**: Cloudflare hides the CNAME, so Google's managed cert never provisions and the
-mapping sits in "pending certificate provisioning" forever. Full(strict) then fails the origin
-handshake (no cert exists) → 525; Flexible sends HTTP to an HTTPS-only origin → redirect loop.
-There is no working orange-cloud configuration for a Cloud Run domain mapping.
+### Accepted limitation: `*.run.app` stays reachable — do not "fix" this
 
-### Accepted limitation: `*.run.app` bypasses Cloudflare — do not "fix" this
+Every Cloud Run service answers on its run.app URLs — **both formats**
+(`sip-api-4sjiiniraa-uc.a.run.app` and `sip-api-1013838667941.us-central1.run.app` are
+aliases of the same service) — alongside any mapped domain. Anyone who finds those URLs
+skips the custom domain entirely. **That is accepted and intended: Identity Platform token
+verification in FastAPI is the security boundary; the domain is convenience.** It doesn't
+care which hostname a request arrived on. Corollary: every hostname users actually visit
+must be in Identity Platform's authorized-domains list — exact-match, per name.
 
-The `*.run.app` URL stays reachable after mapping, so anyone who finds it skips Cloudflare
-entirely — which means WAF/caching there protects nothing on its own. **That is accepted and
-intended: Identity Platform token verification in FastAPI is the security boundary; the domain is
-convenience.** It doesn't care which hostname a request arrived on.
-
-So, deliberately: **no load balancer, no ingress restrictions, no Cloudflare-header-checking
-middleware, and no Cloudflare-dependent logic anywhere in the app.** If we ever harden (custom
-domain via a global LB with internal ingress, or validating a shared header only Cloudflare
-injects), that is a **deliberate infra change — never a scaffold feature.**
+So, deliberately: **no load balancer, no ingress restrictions, no hostname-checking
+middleware anywhere in the app.** If we ever harden (custom domain via a global LB with
+internal ingress), that is a **deliberate infra change — never a scaffold feature.**
 
 ## ⚠️ Remaining before a real prod cutover
 

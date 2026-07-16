@@ -411,6 +411,20 @@ listed last. Nothing else here is blocked on it — it blocks *testers*, not cod
 
 ### 3.6 — Domain, then open the gate (last)
 
+> ✅ **Executed 2026-07-16, in order.** Migration 0005 applied (Cloud Shell); deployed with
+> `ALLOWED_EMAIL_DOMAINS=prevagroup.com` still gate-closed; proxy-verified 401/200; Tim's
+> E2E sign-in + chat smoke test passed (after fixing four Identity Platform provisioning
+> traps and one pg8000 42P18 — both now documented in DEPLOY.md); gate opened
+> (`allUsers` invoker); `sip.prevagroup.com` mapped and cert provisioned.
+> `--min-instances` stays 0 by choice (cold starts accepted for now).
+>
+> **Reality correction:** prevagroup.com DNS is Google-hosted nameservers managed via
+> Squarespace — **not Cloudflare**. The Cloudflare/grey-cloud steps below were written on
+> an unverified assumption; kept for history, superseded by DEPLOY.md's corrected runbook.
+>
+> **Still open (human, console):** Anthropic auto-reload + low-balance alert; GCP billing
+> alert.
+
 **Verified 2026-07-15:** `us-central1` supports managed Cloud Run domain mappings — the
 regional `domains.cloudrun.com/v1` endpoint responds (0 mappings today). No Firebase Hosting
 substitution needed. Note the GA `gcloud run domain-mappings` command is **Anthos-only**;
