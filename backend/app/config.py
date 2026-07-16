@@ -60,6 +60,20 @@ class Settings(BaseSettings):
     tenant_claim: str = "tenant_id"
     domain_tenant_map: dict[str, str] = {}
 
+    # --- chat trace emission (app/traces.py — docs/design/eval-trace-system.md phase 1) ---
+    # Unset = tracing disabled entirely (the dev default). When set, each /api/chat turn
+    # writes one JSONL object to gs://<bucket>/traces/v1/ from a background task. The write
+    # is fire-and-forget by decision (§8.1): no retries, a lost trace only logs a warning.
+    # The bucket's 90-day lifecycle rule is set at bucket creation, not here.
+    traces_bucket: str | None = None
+    # Salt for principal_hash in traces (identity is hashed, never stored raw). Prod: Secret
+    # Manager; a literal dev fallback overrides it, same pattern as the DB passwords.
+    trace_salt: str | None = None
+    trace_salt_secret: str = "trace-principal-salt"
+    # Stamped by the deploy (--set-env-vars GIT_SHA=$(git rev-parse HEAD)) so a trace can
+    # attribute a behavior delta to a code change. Falls back to K_REVISION in traces.py.
+    git_sha: str | None = None
+
     # --- Claude spend caps for /api/chat (app/usage.py) ---
     # Dollars/day, derived from raw token counts x MODEL_PRICES. Per-user bounds one runaway
     # account; global bounds (cap x allowlisted users) — the real exposure once the IAM gate
@@ -195,6 +209,10 @@ class Settings(BaseSettings):
     @property
     def anthropic_api_key_value(self) -> str:
         return self.anthropic_api_key or self._secret(self.anthropic_api_key_secret)
+
+    @property
+    def trace_salt_value(self) -> str:
+        return self.trace_salt or self._secret(self.trace_salt_secret)
 
 
 settings = Settings()
