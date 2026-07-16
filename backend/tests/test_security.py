@@ -195,8 +195,8 @@ def test_any_gmail_is_rejected(verified):
 def test_unverified_email_is_rejected_even_on_an_allowed_domain(verified):
     """THE BYPASS THIS CLOSES — do not delete.
 
-    A token proves GCIP issued it; it does NOT prove the address inside belongs to the caller.
-    GCIP's email/password provider lets anyone register any address unverified. Check the
+    A token proves Identity Platform issued it; it does NOT prove the address inside belongs to the caller.
+    Identity Platform's email/password provider lets anyone register any address unverified. Check the
     domain without checking `email_verified` and the allowlist is an honour system: sign up as
     anyone@prevagroup.com, never click a link, walk straight in.
     """

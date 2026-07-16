@@ -20,7 +20,7 @@ produces is described in [`ARCHITECTURE.md`](../ARCHITECTURE.md); the mechanical
 
 | | Today (demo) | After this plan |
 |---|---|---|
-| Access gate | Cloud Run IAM (`run.invoker`) | **GCIP sign-in**, verified per `/api` request |
+| Access gate | Cloud Run IAM (`run.invoker`) | **Identity Platform sign-in**, verified per `/api` request |
 | Reachable at | `*.run.app`, IAM-gated | your domain (Cloud Run domain mapping) + `*.run.app` |
 | Frontend | ~~361-line no-build React from esm.sh~~ | ✅ **React + Vite + TypeScript** in `frontend/`, bundled into the image |
 | Origins | one (app serves its own UI) | **still one** — FastAPI serves the built SPA |
@@ -30,12 +30,12 @@ produces is described in [`ARCHITECTURE.md`](../ARCHITECTURE.md); the mechanical
 | Data served | 100% public marts | **unchanged — still 100% public** |
 
 **Explicitly dropped from the old plan:** Cloudflare Pages (the SPA ships inside the
-container instead), Cloudflare Access, Workers, and Tunnel. Choosing GCIP for identity and
+container instead), Cloudflare Access, Workers, and Tunnel. Choosing Identity Platform for identity and
 FastAPI for serving removed both jobs Cloudflare was there to do. Its remaining role is DNS.
 
 > **Why the tunnel was ever in the plan — worth recording, so it doesn't come back.** It was
 > load-bearing under an *earlier* shape: a vanilla UI on a box you didn't want exposed, gated
-> by Cloudflare Access. Under that plan a tunnel made sense. Moving auth to **GCIP** and
+> by Cloudflare Access. Under that plan a tunnel made sense. Moving auth to **Identity Platform** and
 > serving to **Cloud Run** evaporated both premises — Cloud Run is already a public HTTPS
 > origin, so there is nothing to dial out of, and standing up a VM to host `cloudflared` would
 > be architecture in service of a sentence that outlived its design.
@@ -52,7 +52,7 @@ makes this cutover small:
 
 | Question | Mechanism | Needed for go-live? |
 |---|---|---|
-| **Who are you?** (authentication) | GCIP verifies an ID token | **Yes.** This is the entire reason the service can be exposed. |
+| **Who are you?** (authentication) | Identity Platform verifies an ID token | **Yes.** This is the entire reason the service can be exposed. |
 | **What may you see?** (tenancy) | `tenant_id` claim → `SET LOCAL app.tenant` → RLS | **No.** Every served row is public today. |
 
 Everything the demo serves — `/marts/*`, `/chat`, `/schools` — reads `get_db_public`. So
@@ -119,7 +119,7 @@ even though the predicted breakage didn't.
 | 3.1b Dockerfile → repo root | None — root-level | **Safe** |
 | 3.1c `/api/*` prefix | `app/main.py` + must update #5's `EXPECTED` | **⚠️ See the open question below** |
 | 3.4 / 3.7 chat work | **`chat.py` → `serving/`** | **Coordinate — `serving/` owns the file** |
-| 3.5 GCIP provisioning | None — SPA + GCP console | **Safe** |
+| 3.5 Identity Platform provisioning | None — SPA + GCP console | **Safe** |
 | 3.6 domain + open the gate | None — deploy flags only | **Safe** (gated on 3.4) |
 
 **`app/main.py` is the composition root** and, per `CLAUDE.md`, *"the one exempt file — keep it
@@ -297,7 +297,7 @@ school-improvement/
 
 In [`security.py`](../backend/app/security.py), two dependencies instead of one:
 
-- `get_current_principal` — verify the GCIP ID token, return the claims. **Does not**
+- `get_current_principal` — verify the Identity Platform ID token, return the claims. **Does not**
   require a tenant. This is what public `/api` routes depend on.
 - `get_current_tenant` — calls the above, then maps claims → `tenant_id`, 403 if unmapped.
   Unchanged behaviour; keeps guarding `/api/plans/*` and any future private route.
@@ -322,7 +322,7 @@ app.include_router(marts_router, prefix="/api", dependencies=[Depends(get_curren
 - It also composes with 3.1c: the **same line** applies the `/api` prefix and the auth gate, in
   the one file the target layout already designates the composition root.
 
-This satisfies the "middleware verifying the GCIP ID token on every `/api` route" requirement —
+This satisfies the "middleware verifying the Identity Platform ID token on every `/api` route" requirement —
 same enforcement point and same guarantee, fewer ways to get it wrong. `/health` stays outside
 `/api` and therefore outside the gate, which is what a liveness probe needs.
 
@@ -377,7 +377,7 @@ one hurried `--set-env-vars` edit away from being true. Make it structural:
 controlled." **This plan removes that gate**, and with Cloudflare grey-clouded there is no
 edge rate limiter to inherit. So the control has to be rebuilt in-app, in the same change:
 
-- A **per-principal daily cap** on `/api/chat`, keyed on the verified GCIP `sub`/`email`
+- A **per-principal daily cap** on `/api/chat`, keyed on the verified Identity Platform `sub`/`email`
   (never a client-supplied value). Postgres-backed; a small counter table is fine.
 - Keep `--max-instances 4` and the existing `MAX_TOKENS = 3000` / `MAX_TOOL_ITERS = 5`
   ceilings in [`chat.py`](../backend/app/chat.py).
@@ -387,7 +387,7 @@ edge rate limiter to inherit. So the control has to be rebuilt in-app, in the sa
 - Set **Anthropic auto-reload + a low-balance alert** (already advised in DEPLOY.md) and a
   **GCP billing alert**. Invited testers are trusted-ish, but a runaway loop is not malice.
 
-### 3.5 — GCIP provisioning (the long pole)
+### 3.5 — Identity Platform provisioning (the long pole)
 
 This is the task that actually decides the go-live date, and it's the one the old plan
 listed last. Nothing else here is blocked on it — it blocks *testers*, not code.
@@ -399,7 +399,7 @@ listed last. Nothing else here is blocked on it — it blocks *testers*, not cod
 - **Provisioning:** for public-data testers, no `tenant_id` claim is needed at all — that's
   the whole point of task 3.2. Create users, and set the claim only for district staff who
   will eventually touch `/plans`.
-- Add the domain to GCIP's **authorized domains** or sign-in will fail on the custom domain
+- Add the domain to Identity Platform's **authorized domains** or sign-in will fail on the custom domain
   with a confusing error.
 
 ### 3.6 — Domain, then open the gate (last)
@@ -411,13 +411,13 @@ managed mappings require `gcloud beta run domain-mappings` (gcloud's own help sa
 
 Order matters:
 
-1. Deploy with GCIP enforced, **still `--no-allow-unauthenticated`**. Verify via
+1. Deploy with Identity Platform enforced, **still `--no-allow-unauthenticated`**. Verify via
    `gcloud run services proxy` that a request without a token gets 401 and one with a token
    gets 200.
 2. Only then `--allow-unauthenticated`, and set `--min-instances 1`.
 3. Create the domain mapping; add the CNAME in Cloudflare as **DNS-only (grey cloud)**.
 4. Confirm `*.run.app` is still 401-without-token. **It stays reachable** — the domain is
-   convenience, GCIP is the boundary. If the run.app URL is open, so is the domain.
+   convenience, Identity Platform is the boundary. If the run.app URL is open, so is the domain.
 
 Full commands: [`backend/DEPLOY.md`](../backend/DEPLOY.md).
 
@@ -427,7 +427,7 @@ With Cloudflare reduced to DNS, it is **decorative for security**: anyone who fi
 `run.app` URL skips it entirely, so WAF/caching there protects nothing on its own. That is
 **accepted, deliberately**, and the reasoning is what keeps this scaffold boring:
 
-- **GCIP token verification in FastAPI is the real perimeter** — signature, expiry, audience,
+- **Identity Platform token verification in FastAPI is the real perimeter** — signature, expiry, audience,
   claims read server-side only. That is the conventional Cloud Run pattern, and it does not
   care which hostname the request arrived on.
 - **Therefore: no load balancer, no ingress restrictions, and no Cloudflare-header-checking
@@ -440,7 +440,7 @@ With Cloudflare reduced to DNS, it is **decorative for security**: anyone who fi
   a redirect loop against an HTTPS-only origin. There is no working orange-cloud config here.
 
 > The trap this closes: "Cloudflare is in front, so we're covered." **We are not, and we are
-> not trying to be.** GCIP is the gate, full stop.
+> not trying to be.** Identity Platform is the gate, full stop.
 
 ### 3.7 — Charts: the Vega-Lite contract
 
@@ -475,7 +475,7 @@ DONE (merged) ──────────────────────
   3.3 DEV_MODE lockout              #8
 
 PARALLEL — no reorg collision (new files, or deploy-only):
-  3.1a frontend/ scaffold ─┬─ 3.5 GCIP sign-in in the SPA ──┐
+  3.1a frontend/ scaffold ─┬─ 3.5 Identity Platform sign-in in the SPA ──┐
   3.1b Dockerfile → root ──┘                                │
                                                             │
 COORDINATE with serving/ (the reorg owns chat.py now):      │
@@ -491,7 +491,7 @@ BLOCKED on a human decision:                                 │
 impersonation is closed; but opening the gate before the spend cap still exposes the Anthropic
 balance, and that is not recoverable by "we'll add it next week."
 
-**The critical path to "others can play" is §3.5 (GCIP), not the code.** `identitytoolkit`
+**The critical path to "others can play" is §3.5 (Identity Platform), not the code.** `identitytoolkit`
 isn't even enabled on the project yet, and it gates *testers*, not commits — so start it early
 and in parallel; nothing else waits on it.
 

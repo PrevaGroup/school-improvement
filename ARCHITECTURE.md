@@ -9,12 +9,12 @@ repo, and what's left to build.
 **Stack:** Cloud SQL (Postgres) · Cloud Run (FastAPI) · Cloud Storage + Claude for raw-data /
 plan ingest — *live*. **Planned:** a React + Vite + TypeScript SPA **served by FastAPI from
 the same Cloud Run service** *(the demo serves a no-build React UI from the app itself)* ·
-Google Cloud Identity Platform (GCIP) sign-in *(the demo is gated by Cloud Run IAM)* · the
+**Identity Platform** sign-in *(the demo is gated by Cloud Run IAM)*. Naming decoder, because Google's console will not say any of the older names: the product is **Identity Platform** (formerly "Google Cloud Identity Platform"/GCIP — that acronym appears nowhere in the console), its console URL slug is `customer-identity`, its API is `identitytoolkit.googleapis.com`, and it issues **Firebase** ID tokens. Four names, one thing · the
 domain via **Cloud Run domain mapping**, with Cloudflare as **DNS only**.
 
 **Not used — deliberately:** Cloudflare Pages, Access, Workers, and Tunnel. An earlier plan
 put the frontend on Pages; serving the built SPA from FastAPI keeps **one origin**, which is
-why this codebase has no CORS middleware and needs none. Choosing GCIP for identity left
+why this codebase has no CORS middleware and needs none. Choosing Identity Platform for identity left
 Cloudflare with no job but DNS. The cutover plan: [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md).
 
 **Guiding principle:** this is a *prototype*. Build the isolation seam (`tenant_id` + RLS)
@@ -39,7 +39,7 @@ distinct is what lets this service go on the internet without the tenancy work b
 
 | Question | Mechanism | Load-bearing today? |
 |---|---|---|
-| **Who are you?** (authentication) | GCIP verifies the ID token | **Yes** — it's the only thing that makes public exposure safe |
+| **Who are you?** (authentication) | Identity Platform verifies the ID token | **Yes** — it's the only thing that makes public exposure safe |
 | **What may you see?** (tenancy) | `tenant_id` claim → `SET LOCAL app.tenant` → RLS | **No** — every row served today is public |
 
 Everything the app currently serves (`/marts/*`, `/chat`, `/schools`) reads `get_db_public`.
@@ -53,13 +53,13 @@ bug in both directions:
 - `get_current_tenant` — verify, then map claims → `tenant_id`, 403 if unmapped. Guards
   `/api/plans/*` and every future private route.
 
-> **Planned (production auth).** This GCIP flow is the *target*. The **deployed demo uses
+> **Planned (production auth).** This Identity Platform flow is the *target*. The **deployed demo uses
 > Cloud Run IAM** for access and reads only public marts, so the `SET LOCAL app.tenant` leg
 > below isn't exercised yet.
 
 ```mermaid
 flowchart LR
-    U[Browser<br/>React + Vite SPA] -->|1. sign in| G[GCIP<br/>identity]
+    U[Browser<br/>React + Vite SPA] -->|1. sign in| G[Identity Platform<br/>identity]
     G -->|2. ID token JWT| U
     U -->|3. Bearer token on /api/*| API[Cloud Run: FastAPI<br/>+ the built SPA<br/>ONE origin]
     API -->|4. verify_firebase_token| G
@@ -79,9 +79,9 @@ host and no cross-origin hop, so no CORS and no third-party-cookie exposure.
 > the app must structurally refuse the dev path when a production signal (`K_SERVICE`,
 > `INSTANCE_CONNECTION_NAME`) is present.
 
-1. The user signs in through **GCIP** — email/password, the district's SSO (SAML/OIDC), or
-   a social provider. **No Gmail required**; GCIP is a customer-identity service.
-2. GCIP returns a signed **ID token** (a Firebase/Identity-Platform JWT).
+1. The user signs in through **Identity Platform** — email/password, the district's SSO (SAML/OIDC), or
+   a social provider. **No Gmail required**; Identity Platform is a customer-identity service.
+2. Identity Platform returns a signed **ID token** (a Firebase/Identity-Platform JWT).
 3. The browser calls the API with `Authorization: Bearer <token>`.
 4. [`app/security.py`](backend/app/security.py) **verifies** the token — signature, issuer
    (`securetoken.google.com/<project>`), audience (the project id), expiry — using
@@ -228,15 +228,15 @@ Flexible → redirect loop against an HTTPS-only origin).
 
 > **Accepted limitation — `*.run.app` bypasses Cloudflare, and we do not fix it.** With
 > Cloudflare reduced to DNS, it is decorative for security: anyone with the `run.app` URL skips
-> it, so WAF/caching there protects nothing on its own. **GCIP verification in FastAPI is the
+> it, so WAF/caching there protects nothing on its own. **Identity Platform verification in FastAPI is the
 > perimeter** — it doesn't care which hostname a request arrived on, which is the conventional
 > Cloud Run pattern. Therefore: **no ALB, no ingress restrictions, no Cloudflare-header-checking
 > middleware, and no Cloudflare-dependent logic in the app.** Hardening is a deliberate infra
 > change if we ever want it — never a scaffold feature.
 
 > **Temporary demo, not prod.** What is currently deployed is the MVP demo described in
-> [Status](#status): **IAM-gated** (not GCIP), a **self-served no-build React UI**, reading the
-> **public `plan_extraction`** marts — deliberately *not* the GCIP + private-tenant `/plans`
+> [Status](#status): **IAM-gated** (not Identity Platform), a **self-served no-build React UI**, reading the
+> **public `plan_extraction`** marts — deliberately *not* the Identity Platform + private-tenant `/plans`
 > architecture this document specifies. It's for showing the diagnostic, and is expected to be
 > replaced at the real prod cutover. [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) is the
 > sequenced plan for that cutover.
@@ -283,15 +283,15 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
   **single-school attendance-diagnostic UI** — need-vs-plan, a "schools like you" peer engine,
   and a grounded chat — are **built and deployed to Cloud Run** (see the demo caveat below).
 - **⚠️ The deployed Cloud Run service is a temporary demo, not the production architecture
-  above.** It is gated by **Cloud Run IAM** (`run.invoker`) instead of GCIP sign-in; serves a
+  above.** It is gated by **Cloud Run IAM** (`run.invoker`) instead of Identity Platform sign-in; serves a
   **no-build React UI from the app itself** (no Vite); reads the **public `plan_extraction`**
   table via the batch `extract → GCS JSON → load_plan_extractions` path, **not** the private
   `/plans` tenant path; and runs at `--min-instances 0`. It exists to show the diagnostic, not
   to be the production cutover.
-- **Not done:** GCIP sign-in + user provisioning, the private-tenant `/plans` serving path, and
+- **Not done:** Identity Platform sign-in + user provisioning, the private-tenant `/plans` serving path, and
   the real frontend (React + Vite + TypeScript in `frontend/`).
 - **Next: go public.** [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) sequences the cutover from
-  "IAM-gated, only Tim can open it" to "invited people sign in with GCIP at a real domain."
+  "IAM-gated, only Tim can open it" to "invited people sign in with Identity Platform at a real domain."
   Its load-bearing constraint: **the IAM gate opens last**, after the `DEV_MODE` lockout and
   the in-app Claude spend cap — because IAM is currently what provides both.
 
@@ -309,11 +309,11 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
       the environment (`K_SERVICE` / `INSTANCE_CONNECTION_NAME`), not the flag, plus an
       import-time assert in `main.py`. *(#8.)*
 - [ ] **Enable Identity Platform** — `identitytoolkit.googleapis.com` is **not enabled on the
-      project** (checked 2026-07-15); GCIP does not exist yet. Then the Firebase JS SDK in the
-      SPA (sign-in, token refresh, 401 → redirect) + the custom domain in GCIP **authorized
+      project** (checked 2026-07-15); Identity Platform does not exist yet. Then the Firebase JS SDK in the
+      SPA (sign-in, token refresh, 401 → redirect) + the custom domain in Identity Platform **authorized
       domains**. **This is the critical path to letting anyone in** — it gates testers, not
       code, so start it first and run it in parallel with everything else.
-- [ ] Stand up GCIP user provisioning — create users and set the `tenant_id` custom claim
+- [ ] Stand up Identity Platform user provisioning — create users and set the `tenant_id` custom claim
       (`firebase-admin` / Identity Platform Admin API). Until then, use `DOMAIN_TENANT_MAP`.
       *(Public-data testers need **no** claim — that's the point of the split above.)*
 - [ ] Seed `dim_tenant` with the real districts; create a second tenant for isolation testing.
@@ -322,10 +322,10 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 - [x] `gcloud run deploy` the backend; `anthropic-api-key` secret; runtime SA `secretAccessor`
       + `cloudsql.client`. *(Live 2026-07-14, IAM-gated.)*
 - [ ] **Move Claude spend control into the app** — a per-principal daily cap on `/api/chat`
-      keyed on the verified GCIP subject. The IAM gate is what caps spend today; opening the
+      keyed on the verified Identity Platform subject. The IAM gate is what caps spend today; opening the
       gate removes it, and grey-cloud Cloudflare provides no edge rate limiter to inherit.
       Prerequisite for opening the gate.
-- [ ] Deploy GCIP-enforced but still `--no-allow-unauthenticated`; verify 401-without-token;
+- [ ] Deploy Identity Platform-enforced but still `--no-allow-unauthenticated`; verify 401-without-token;
       **only then** `--allow-unauthenticated` + `--min-instances 1`.
       *(`gcloud beta` is installed as of 2026-07-15, so the domain mapping below is unblocked.)*
 - [ ] Create the domain mapping; CNAME in Cloudflare **grey-cloud**; verify domain ownership

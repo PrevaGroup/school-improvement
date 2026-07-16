@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     chat_model: str = "claude-haiku-4-5"
 
     dev_mode: bool = False
-    # GCIP/Firebase ID-token audience. Defaults to gcp_project (the token's `aud`);
+    # Identity Platform/Firebase ID-token audience. Defaults to gcp_project (the token's `aud`);
     # set explicitly only to override.
     google_oauth_audience: str | None = None
     # How a verified identity becomes a tenant (see app/security.py):
@@ -94,7 +94,7 @@ class Settings(BaseSettings):
         return v
 
     @property
-    def gcip_audience(self) -> str | None:
+    def identity_platform_audience(self) -> str | None:
         return self.google_oauth_audience or self.gcp_project
 
     def _secret(self, secret_id: str) -> str:

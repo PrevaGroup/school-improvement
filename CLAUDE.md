@@ -87,7 +87,7 @@ collected and those tests silently never ran. Any module carve-out that adds
 
 - `docs/MODULES.md` — the module registry: every module, what it owns, what it reads, current
   file locations, and reorg status. **Start here to find a feature's components.**
-- `docs/GO_LIVE_PLAN.md` — the plan to put this on the internet (GCIP sign-in, the `frontend/`
+- `docs/GO_LIVE_PLAN.md` — the plan to put this on the internet (Identity Platform sign-in, the `frontend/`
   SPA, the domain). **Read its §2.5 before touching `serving/` or `app/main.py`.**
 - `ARCHITECTURE.md` — the logical model (5 data layers, trust boundary, pipelines).
 - `backend/core/` — the shared contract (see above).

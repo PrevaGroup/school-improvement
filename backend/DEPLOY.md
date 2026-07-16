@@ -8,7 +8,7 @@ Cloud SQL Python Connector when `INSTANCE_CONNECTION_NAME` is set (no Auth Proxy
 sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
 
 > **This document describes the current IAM-gated demo deploy.** The cutover to a
-> GCIP-authenticated, internet-reachable service on a custom domain is planned in
+> Identity Platform-authenticated, internet-reachable service on a custom domain is planned in
 > [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md). Two things here change at that
 > cutover, and both are called out inline below:
 > - the **build context moves to the repo root** (`--source .`), because a multi-stage
@@ -88,7 +88,7 @@ gcloud run deploy sip-api \
 > per-user limit in the app, and `/chat` is unauthenticated at the application layer
 > ([`app/chat.py`](app/chat.py) reads `get_db_public`). Flipping this to
 > `--allow-unauthenticated` therefore exposes `POST /chat` and `POST /plans/extract` (an
-> Opus call per PDF) to anyone who finds the `run.app` URL. **The replacements — GCIP
+> Opus call per PDF) to anyone who finds the `run.app` URL. **The replacements — Identity Platform
 > enforcement, the `DEV_MODE` lockout, and an in-app per-user chat cap — must land first.**
 > See [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md) §3.4 and §3.6.
 
@@ -99,12 +99,12 @@ by FastAPI itself — **one Cloud Run service, one origin**, so no separate fron
 CORS. It calls `POST /api/chat`, which runs Claude (`settings.chat_model`, Haiku by default for
 cost) with an inline tool over the public `plan_extraction` + `fact_metric` marts. All reads are
 public (SPSAs are public docs), so there's no tenant/auth in the app yet — access is still the
-IAM gate until GCIP sign-in lands.
+IAM gate until Identity Platform sign-in lands.
 
 > **At go-live this page is replaced**, but the *single-origin* property it demonstrates is
 > kept deliberately: the React + Vite SPA is built into the same image and served by the same
 > FastAPI app, so there is still one host and still no CORS. Routes move under `/api/*`, and
-> "no tenant/auth in the app" becomes "**no tenant**, but GCIP-authenticated" — the reads stay
+> "no tenant/auth in the app" becomes "**no tenant**, but Identity Platform-authenticated" — the reads stay
 > public; the sign-in is what replaces the IAM gate.
 
 Grant demo users access:
@@ -117,7 +117,7 @@ They then reach it via an identity-aware proxy token (or `gcloud run services pr
 
 ## Who may sign in — `ALLOWED_EMAIL_DOMAINS` (the invite list)
 
-**Authentication is not invitation.** With GCIP's Google provider enabled, *any* Gmail account
+**Authentication is not invitation.** With Identity Platform's Google provider enabled, *any* Gmail account
 can obtain a valid token for this project. Verifying the token therefore gates **nothing** on
 its own — it proves the caller exists, not that you invited them. `ALLOWED_EMAIL_DOMAINS` is
 what turns "signed in" into "invited", and it is what stands between the open internet and the
@@ -134,7 +134,7 @@ ALLOWED_EMAIL_DOMAINS=prevagroup.com,gatesfoundation.org
   (loud, fixable) rather than opening the door (silent, expensive). If everyone is suddenly
   403ing with *"not on the invite list"*, this is why.
 - **`email_verified` is enforced alongside it** (`app/security.py`). Not optional: a token
-  proves GCIP issued it, **not** that the address inside belongs to the caller. GCIP's
+  proves Identity Platform issued it, **not** that the address inside belongs to the caller. Identity Platform's
   email/password provider lets anyone register any address unverified — so a domain check
   without the verified check is an honour system.
 
@@ -151,7 +151,7 @@ ALLOWED_EMAIL_DOMAINS=prevagroup.com,gatesfoundation.org
 > `gatesfoundation.org=` key — and a silently *shorter* invite list. (Same class of footgun as
 > the "all env vars in ONE flag" note above.)
 
-## Auth (GCIP)
+## Auth (Identity Platform)
 
 Token verification is implemented in `app/security.py` (`verify_firebase_token` via
 `google-auth`). Two things must be in place for `DEV_MODE=false`:
@@ -212,7 +212,7 @@ There is no working orange-cloud configuration for a Cloud Run domain mapping.
 
 The `*.run.app` URL stays reachable after mapping, so anyone who finds it skips Cloudflare
 entirely — which means WAF/caching there protects nothing on its own. **That is accepted and
-intended: GCIP token verification in FastAPI is the security boundary; the domain is
+intended: Identity Platform token verification in FastAPI is the security boundary; the domain is
 convenience.** It doesn't care which hostname a request arrived on.
 
 So, deliberately: **no load balancer, no ingress restrictions, no Cloudflare-header-checking
@@ -230,11 +230,11 @@ See [`docs/GO_LIVE_PLAN.md`](../docs/GO_LIVE_PLAN.md) for the sequenced version.
   public marts on it would reject every outside tester.
 - **Lock `DEV_MODE` out of prod** (above). Prerequisite for opening the gate.
 - **Cap Claude spend in-app** — per-principal daily limit on `/chat`, keyed on the verified
-  GCIP subject. Prerequisite for opening the gate.
-- **Provisioning**: a way to create GCIP users and attach the `tenant_id` custom claim
+  Identity Platform subject. Prerequisite for opening the gate.
+- **Provisioning**: a way to create Identity Platform users and attach the `tenant_id` custom claim
   (`firebase-admin` / Identity Platform Admin API) — one-time onboarding, not the request
   path. Note public-data testers need **no** claim once auth and tenancy are split.
-- Add the custom domain to GCIP **authorized domains**, or sign-in fails there with a
+- Add the custom domain to Identity Platform **authorized domains**, or sign-in fails there with a
   confusing error.
 - Create the `anthropic-api-key` secret (above) and confirm the tenant rows exist in
   `dim_tenant`.

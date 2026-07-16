@@ -4,7 +4,7 @@
 // bundle and the API from the same origin in prod; `vite.config.ts` proxies /api in dev. That
 // is the invariant (see ../../CLAUDE.md), and it's why no CORS middleware exists anywhere.
 //
-// It is also the seam where the GCIP ID token will be attached at go-live
+// It is also the seam where the Identity Platform ID token will be attached at go-live
 // (docs/GO_LIVE_PLAN.md §3.5) — one wrapper to change, not N call sites.
 
 export class ApiError extends Error {
