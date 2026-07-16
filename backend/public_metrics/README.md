@@ -87,7 +87,7 @@ gcloud run jobs deploy ca-caaspp-load \
   --source . --region us-central1 \
   --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public \
   --command python \
-  --args -m,public_metrics.load_ca_caaspp,--data-dir,gs://school-improvement-501916-raw/raw/ca \
+  --args="-m,public_metrics.load_ca_caaspp,--data-dir,gs://school-improvement-501916-raw/raw/ca" \
   --task-timeout 4h --memory 1Gi --max-retries 1
 
 gcloud run jobs execute ca-caaspp-load --region us-central1 --wait
