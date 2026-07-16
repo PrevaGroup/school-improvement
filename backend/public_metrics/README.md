@@ -1,9 +1,10 @@
 # public_metrics — California public-data ETL
 
 Bulk ETL that loads CDE / data.ca.gov public files into the star schema as `fact_metric` rows at
-`tenant_id='public'` (~960k rows across eight public metrics). Per-fact loaders are thin: each
-defines a `SPEC` and calls the shared runner in [`_shared.py`](_shared.py). Naming convention:
-**`load_<state>_<fact>.py`** (here `load_ca_<fact>.py`).
+`tenant_id='public'` (~960k rows across eight public metrics, plus CAASPP ELA/Math). Per-fact
+loaders are thin: each defines a `SPEC` and calls the shared runner in [`_shared.py`](_shared.py) —
+except `load_ca_caaspp.py`, which carries its own machinery (see its docstring for why). Naming
+convention: **`load_<state>_<fact>.py`** (here `load_ca_<fact>.py`).
 
 **Relocated 2026-07-15** from `backend/etl/ca/` — the code, the loaders, and this runbook now live
 together. `etl/ca/` still exists as a bare package marker for `etl.ca.sip`, which is **sip**'s and
@@ -66,7 +67,11 @@ python -m public_metrics.load_ca_stability           --data-dir gs://<bucket>/ra
 python -m public_metrics.load_ca_college_going       --data-dir gs://<bucket>/raw/ca
 python -m public_metrics.load_ca_homeless            --data-dir gs://<bucket>/raw/ca
 python -m public_metrics.load_ca_enrollment          --data-dir gs://<bucket>/raw/ca
+python -m public_metrics.load_ca_caaspp              --data-dir gs://<bucket>/raw/ca
 ```
+
+> Adding CAASPP after an earlier seed? Re-run `seed_ca_dims` first — it adds the two CAASPP
+> metric ids and the `caaspp` group crosswalk (idempotent, `ON CONFLICT DO NOTHING`).
 
 `--data-dir` accepts either a **local path** (`~/raw/ca`) or a **`gs://bucket/prefix` URI**. The raw
 data is laid out by state — `raw/ca/<domain>/…`, `raw/tx/…` later — so the state segment lives in
@@ -87,6 +92,7 @@ writing.
 | `load_ca_college_going.py` | `college_going_rate` | 2021‑22 | `academics/collegegoingrate_16mo_2021-22.txt` | 31,224 |
 | `load_ca_homeless.py` | `homeless_enrollment` | 2023‑24 | `demographics/homeless_2023-24.txt` | 10,669 |
 | `load_ca_enrollment.py` | `enrollment` | 2024‑25 | `demographics/enrollment_censusday_2024-25.txt` | 154,538 |
+| `load_ca_caaspp.py` | `ela_met_standard_pct` + `math_met_standard_pct` | 2023‑24 **and** 2024‑25 | `academics/caaspp_smarterbalanced_all_<year>.zip` (both, one run) | TBD — first load pending |
 
 Row counts above are the pre-NCES figures; the NCES re-key drops the non-school aggregate rows
 (school code `0000000`/`0000001`), so live counts run slightly lower.
@@ -100,7 +106,6 @@ SPEC to filter a split dimension to its total (see `load_ca_college_going.py`).
 
 | Fact | Why it's different |
 |---|---|
-| CAASPP ELA/Math | caret-delimited, zipped ~1 GB, numeric subgroup ids, `% met` / distance-from-standard |
 | SACS financials | Access `.mdb`, **district** grain |
 | Absence-by-reason | several count columns per row (one metric per reason) |
 | SpEd by disability | `ReportingCategory` is disability type + an `A` aggregate level |
@@ -118,10 +123,13 @@ SPEC to filter a split dimension to its total (see `load_ca_college_going.py`).
   inconsistent about column spacing (`Reporting Category` vs `ReportingCategory`) — handled.
 - Batches are 1,000 rows (Postgres 65,535 bind-param/statement limit); facts are de-duplicated per
   batch so `ON CONFLICT` never touches a row twice.
-- **This module has no tests.** The loaders are SPEC-driven and DB-bound; the parsing helpers in
-  `_shared.py` (`_f`, `_i`, `_b`, `field`, `cds_from`, `nces_ids`) are pure and would be the
-  cheapest place to start. Add `backend/public_metrics/tests/` to `pytest.ini`'s `testpaths` when
-  you do, or it will silently never run.
+- **CAASPP** (`load_ca_caaspp.py`) is the one non-SPEC loader: caret-delimited zipped research
+  files, numeric student-group ids (`_shared.CAASPP_GROUP`, a third code scheme), ELA + Math
+  emitted in one pass, **Grade 13 (All Grades) rollup only**. It loads "% Standard Met and
+  Above"; mean scale score (not cross-grade comparable at the rollup) and distance-from-standard
+  (needs per-grade thresholds) are deliberately not loaded — see its docstring.
+- Tests live in `tests/` (`pytest.ini` lists `public_metrics`): characterization tests for the
+  `_shared.py` parsing helpers, and the CAASPP row filter / zip end-to-end (dry run).
 
 ## Related docs
 
