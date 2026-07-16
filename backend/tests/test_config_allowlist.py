@@ -69,3 +69,62 @@ def test_a_plain_string_does_not_crash_settings(monkeypatch):
     boot at all, and no test in test_security.py would have noticed."""
     Settings()  # must not raise
     assert _domains(monkeypatch, "prevagroup.com") == {"prevagroup.com"}
+
+
+# --------------------------------------------------------------------------- #
+# ALLOWED_DOMAIN_PROVIDERS — the domain -> required-provider map (Entra prep).
+# Same NoDecode trap as above, same env-var-path reasoning.
+# --------------------------------------------------------------------------- #
+def _providers(monkeypatch, value: str | None) -> dict[str, str]:
+    monkeypatch.delenv("ALLOWED_DOMAIN_PROVIDERS", raising=False)
+    monkeypatch.delenv("ALLOWED_EMAIL_DOMAINS", raising=False)
+    if value is not None:
+        monkeypatch.setenv("ALLOWED_DOMAIN_PROVIDERS", value)
+    monkeypatch.setenv("APP_DB_PASSWORD", "test-unused")
+    return Settings().allowed_domain_providers
+
+
+def test_provider_map_pairs_form_parses_from_env(monkeypatch):
+    assert _providers(
+        monkeypatch, "prevagroup.com=google.com, gatesfoundation.org=microsoft.com"
+    ) == {"prevagroup.com": "google.com", "gatesfoundation.org": "microsoft.com"}
+
+
+def test_provider_map_json_form_parses_from_env(monkeypatch):
+    assert _providers(monkeypatch, '{"PrevaGroup.com": "Google.com"}') == {
+        "prevagroup.com": "google.com"
+    }
+
+
+def test_provider_map_unset_is_empty(monkeypatch):
+    """FAILS CLOSED, same as the allowlist: with both vars unset, domain_providers is empty
+    and nobody signs in."""
+    assert _providers(monkeypatch, None) == {}
+    monkeypatch.setenv("APP_DB_PASSWORD", "test-unused")
+    assert Settings().domain_providers == {}
+
+
+def test_malformed_pair_refuses_to_start(monkeypatch):
+    """A typo'd map must fail the deploy loudly (container won't boot), not half-open the
+    door with whichever entries happened to parse."""
+    monkeypatch.setenv("ALLOWED_DOMAIN_PROVIDERS", "prevagroup.com=google.com,gates-typo")
+    monkeypatch.setenv("APP_DB_PASSWORD", "test-unused")
+    with pytest.raises(Exception):
+        Settings()
+
+
+def test_legacy_allowlist_maps_every_domain_to_google(monkeypatch):
+    """Backward compatibility for today's prod deploy: ALLOWED_EMAIL_DOMAINS alone means
+    'those domains, Google sign-in' — true for the preva-only era, so a redeploy from old
+    shell history stays correct rather than locking everyone out."""
+    monkeypatch.delenv("ALLOWED_DOMAIN_PROVIDERS", raising=False)
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAINS", "prevagroup.com")
+    monkeypatch.setenv("APP_DB_PASSWORD", "test-unused")
+    assert Settings().domain_providers == {"prevagroup.com": "google.com"}
+
+
+def test_explicit_provider_map_wins_over_legacy_allowlist(monkeypatch):
+    monkeypatch.setenv("ALLOWED_DOMAIN_PROVIDERS", "gatesfoundation.org=microsoft.com")
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAINS", "prevagroup.com")
+    monkeypatch.setenv("APP_DB_PASSWORD", "test-unused")
+    assert Settings().domain_providers == {"gatesfoundation.org": "microsoft.com"}

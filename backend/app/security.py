@@ -137,7 +137,8 @@ async def get_current_principal(
 
 
 def _assert_invited(claims: dict) -> None:
-    """403 unless the caller's **verified** email is in an allowed domain.
+    """403 unless the caller's **verified** email is in an allowed domain — AND arrived
+    through that domain's **required sign-in provider**.
 
     `email_verified` is not a formality — it is the whole control. A token proves Identity Platform issued
     it; it does NOT prove the address inside is yours. Providers differ: Google verifies the
@@ -148,6 +149,15 @@ def _assert_invited(claims: dict) -> None:
     Exact domain match only: `mail.prevagroup.com` does NOT match `prevagroup.com`. Suffix
     matching is how allowlists get bypassed (`notprevagroup.com`, `prevagroup.com.evil.tld`),
     and this list is short enough to spell out.
+
+    The provider binding is the third leg, and it exists for one reason: **access must ride
+    an identity the employer can revoke** (if someone leaves preva, they lose their preva
+    identity, they lose access — Security 101). A *personal* Google account registered on a
+    work address would survive offboarding; binding each domain to its org's own IdP
+    (prevagroup.com -> Google Workspace, gatesfoundation.org -> Entra) makes that identity
+    structurally unusable here, not merely unwelcome. The token's `firebase.sign_in_provider`
+    is server-set by Identity Platform at sign-in — a client cannot claim a provider it
+    didn't come through. Missing claim fails closed, like everything on this path.
     """
     email = str(claims.get("email") or "").strip().lower()
     if "@" not in email:
@@ -158,11 +168,19 @@ def _assert_invited(claims: dict) -> None:
             status.HTTP_403_FORBIDDEN, f"the email {email} is not verified"
         )
 
-    # Fails closed: an unset allowlist admits nobody. See config.allowed_email_domains.
-    if email.rsplit("@", 1)[1] not in settings.allowed_email_domains:
+    # Fails closed: an unset map admits nobody. See config.allowed_domain_providers.
+    required_provider = settings.domain_providers.get(email.rsplit("@", 1)[1])
+    if required_provider is None:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             f"{email} is not on the invite list for this application",
+        )
+
+    actual_provider = str((claims.get("firebase") or {}).get("sign_in_provider") or "").lower()
+    if actual_provider != required_provider:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"{email} must sign in through its organization's identity provider",
         )
 
 

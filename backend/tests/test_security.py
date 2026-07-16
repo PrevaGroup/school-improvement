@@ -37,10 +37,21 @@ def isolate_env(monkeypatch):
     monkeypatch.setattr(security.settings, "tenant_claim", "tenant_id")
     monkeypatch.setattr(security.settings, "domain_tenant_map", {})
     monkeypatch.setattr(security.settings, "allowed_email_domains", {"prevagroup.com"})
+    # Empty map -> the ALLOWED_EMAIL_DOMAINS fallback applies (every domain requires
+    # google.com). Provider-binding tests set this explicitly instead.
+    monkeypatch.setattr(security.settings, "allowed_domain_providers", {})
 
 
-def _claims(email="staff@prevagroup.com", verified=True, **extra) -> dict:
-    return {"email": email, "email_verified": verified, "sub": "uid-1", **extra}
+def _claims(email="staff@prevagroup.com", verified=True, provider="google.com", **extra) -> dict:
+    """Claims as Identity Platform actually issues them: `firebase.sign_in_provider` is
+    server-set at sign-in (a real Google-provider token always carries "google.com")."""
+    return {
+        "email": email,
+        "email_verified": verified,
+        "sub": "uid-1",
+        "firebase": {"sign_in_provider": provider},
+        **extra,
+    }
 
 
 @pytest.fixture
@@ -248,6 +259,79 @@ def test_identity_without_an_email_is_rejected(verified):
         _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
     assert e.value.status_code == 403
     assert "no email" in e.value.detail
+
+
+# --------------------------------------------------------------------------- #
+# Provider ↔ domain binding — "access must ride an identity the employer can revoke"
+#
+# The constraint (Tim, pre-agreed): if someone leaves preva, they lose their preva identity,
+# they lose access — Security 101. A PERSONAL Google account registered on a work address
+# survives offboarding, so each domain is bound to its organization's own IdP and any other
+# arrival path is rejected. `firebase.sign_in_provider` is set by Identity Platform at
+# sign-in; a client cannot claim a provider it didn't come through.
+# --------------------------------------------------------------------------- #
+def test_personal_google_account_on_an_entra_domain_is_rejected(verified, monkeypatch):
+    """THE CASE THE BINDING EXISTS FOR. gatesfoundation.org is an Entra shop: a Google
+    account on a gates address is by definition not the employer's identity — it would
+    survive offboarding. Rejected even though the domain is invited and the email verified."""
+    monkeypatch.setattr(security.settings, "allowed_domain_providers",
+                        {"prevagroup.com": "google.com",
+                         "gatesfoundation.org": "microsoft.com"})
+    verified(_claims(email="analyst@gatesfoundation.org", provider="google.com"))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+    assert "organization's identity provider" in e.value.detail
+
+
+def test_microsoft_arrival_on_a_google_domain_is_rejected(verified, monkeypatch):
+    """The mirror image: preva is Workspace-managed; an Entra-flavored token bearing a preva
+    address didn't come from preva's IdP."""
+    monkeypatch.setattr(security.settings, "allowed_domain_providers",
+                        {"prevagroup.com": "google.com"})
+    verified(_claims(email="staff@prevagroup.com", provider="microsoft.com"))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+
+
+def test_right_provider_for_each_domain_is_admitted(verified, monkeypatch):
+    monkeypatch.setattr(security.settings, "allowed_domain_providers",
+                        {"prevagroup.com": "google.com",
+                         "gatesfoundation.org": "microsoft.com"})
+    verified(_claims(email="analyst@gatesfoundation.org", provider="microsoft.com"))
+    principal = _run(security.get_current_principal(authorization="Bearer good.jwt",
+                                                    x_dev_tenant=None))
+    assert principal["email"] == "analyst@gatesfoundation.org"
+
+
+def test_missing_sign_in_provider_claim_fails_closed(verified):
+    """A token with no firebase.sign_in_provider matches no required provider. Same rule as
+    everything on this path: can't decide -> deny."""
+    claims = _claims()
+    del claims["firebase"]
+    verified(claims)
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+
+
+def test_legacy_allowlist_still_admits_google_arrivals(verified):
+    """Backward compatibility is load-bearing: a deploy still setting only
+    ALLOWED_EMAIL_DOMAINS (today's prod) must keep admitting Google sign-ins — the fallback
+    maps every listed domain to google.com. The autouse fixture models exactly that state."""
+    verified(_claims())  # provider defaults to google.com
+    principal = _run(security.get_current_principal(authorization="Bearer good.jwt",
+                                                    x_dev_tenant=None))
+    assert principal["sub"] == "uid-1"
+
+
+def test_provider_comparison_is_case_insensitive(verified, monkeypatch):
+    monkeypatch.setattr(security.settings, "allowed_domain_providers",
+                        {"prevagroup.com": "google.com"})
+    verified(_claims(provider="GOOGLE.COM"))
+    assert _run(security.get_current_principal(authorization="Bearer good.jwt",
+                                               x_dev_tenant=None))["sub"] == "uid-1"
 
 
 def test_dev_principal_skips_the_allowlist(monkeypatch):
