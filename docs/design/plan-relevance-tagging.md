@@ -91,7 +91,7 @@ The verdict (`responsive` vs `unmet_need`) keys off **attendance-specific funded
 
 State accountability is a narrow lens; the belonging/SEL/climate work districts increasingly fund
 is measured **locally** and is structurally absent from CDE data (every current `METRICS` entry is
-`data_origin="state"`, [`_shared.py:85`](../../backend/etl/ca/_shared.py)). Hand the extractor the
+`data_origin="state"`, [`app/vocab.py`](../../backend/app/vocab.py)). Hand the extractor the
 **global catalog + the tenant's own metrics**, so a district's "Sense of Belonging" maps to *their*
 `belonging_pulse` instead of `none`. Benchmarking must honor `data_origin` + `instrument_dependent`
 (compare only same-instrument, opted-in tenants — `dim_instrument` already models the scales).

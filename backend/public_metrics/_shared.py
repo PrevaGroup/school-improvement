@@ -13,7 +13,11 @@ import csv
 import pathlib
 import sys
 
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))  # -> backend/
+# -> backend/, so `app.config` / `app.models` resolve when a loader runs as a script.
+# parents[1], not [2]: this file moved up a level (etl/ca/ -> public_metrics/) in the
+# reorg, and [2] now lands on the repo root. Tests never catch this — conftest.py
+# already puts backend/ on sys.path.
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 import fsspec  # local paths AND gs:// URIs (gcsfs, via ADC)
 from sqlalchemy import create_engine, text

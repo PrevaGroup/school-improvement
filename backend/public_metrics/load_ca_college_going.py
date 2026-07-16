@@ -3,9 +3,9 @@
 Filters CompleterType='TA' (total) — the file splits each school x group into
 completer-type variants that would otherwise collide on the fact key.
 
-    python -m etl.ca.load_ca_college_going --data-dir ~/raw
+    python -m public_metrics.load_ca_college_going --data-dir ~/raw
 """
-from etl.ca._shared import run_metric_loader
+from ._shared import run_metric_loader
 
 SPEC = dict(
     file="academics/collegegoingrate_16mo_2021-22.txt",

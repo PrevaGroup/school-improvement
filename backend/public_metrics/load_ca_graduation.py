@@ -1,8 +1,8 @@
 """CA graduation — Adjusted Cohort Graduation Rate (2024-25) -> fact_metric.
 
-    python -m etl.ca.load_ca_graduation --data-dir ~/data
+    python -m public_metrics.load_ca_graduation --data-dir ~/data
 """
-from etl.ca._shared import run_metric_loader
+from ._shared import run_metric_loader
 
 SPEC = dict(
     file="academics/acgr_gradcohort_2024-25.txt",

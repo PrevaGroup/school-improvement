@@ -1,8 +1,8 @@
 """CA student stability rate (2023-24) -> fact_metric.
 
-    python -m etl.ca.load_ca_stability --data-dir ~/raw
+    python -m public_metrics.load_ca_stability --data-dir ~/raw
 """
-from etl.ca._shared import run_metric_loader
+from ._shared import run_metric_loader
 
 SPEC = dict(
     file="demographics/mobility_stability_2023-24.txt",
