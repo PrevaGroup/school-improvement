@@ -320,7 +320,7 @@ Traces retain **user questions** — the first user-generated content this syste
 | Phase | What lands | Module |
 |---|---|---|
 | **0** | this doc; storage decision confirmed | docs |
-| **1** | `TraceRecorder` + GCS flush + ops log line; `session_id` in `ChatRequest`; version hashes | `serving` (no tables) |
+| **1** | ✅ shipped — `TraceRecorder` + GCS flush + ops log line (`app/traces.py`); `session_id` in `ChatRequest`; version hashes; Anthropic→neutral stop mapping in chat.py (moves to `AnthropicRunner` in phase 5) | `serving` (no tables) |
 | **2** | `evals` scaffold: migration (5 tables incl. `feedback`, schema only), `ingest_traces` — no feedback endpoint/UI (deferred, §8.5) | `evals` |
 | **3** | seed golden set (~30), T1+T3 graders, `run_evals` + baseline report | `evals` |
 | **4** | T2 judge + calibration, PR-gate wiring, `mine_traces` | `evals` |

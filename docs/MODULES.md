@@ -67,11 +67,12 @@ imports.
 
 `backend/tests/test_module_boundaries.py` enforces this map in CI.
 
-> **Known future pressure on "serving owns no tables":** the planned `chat.py` overhaul retains
-> **traces** to fuel an eval system — and a trace table would make `serving` a **producer**,
-> contradicting the invariant above. The overhaul is parked, but the storage call should be made
-> **before the first trace is written**, not after. Options and a recommendation:
-> [`docs/design/chat-traces-and-evals.md`](design/chat-traces-and-evals.md).
+> **Resolved (2026-07-16): traces do NOT pressure "serving owns no tables".** The storage
+> decision is hybrid: `serving` **emits** each chat turn as a JSONL object to GCS
+> (`app/traces.py` — a fire-and-forget logging write, no table), and a future **`evals`
+> producer module** ingests them into Postgres in batch. The invariant keeps zero exceptions.
+> Design + all five routed decisions:
+> [`docs/design/eval-trace-system.md`](design/eval-trace-system.md).
 
 ## Target physical layout
 

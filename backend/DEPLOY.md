@@ -26,6 +26,25 @@ sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
      ```
 2. **Grant the Cloud Run service account** `roles/secretmanager.secretAccessor` and
    `roles/cloudsql.client`.
+3. **Chat trace emission** (optional until enabled — `docs/design/eval-trace-system.md` phase 1;
+   with TRACES_BUCKET unset the app runs with tracing disabled):
+   - Bucket, with the 90-day lifecycle rule set AT CREATION (retention decision §8.3):
+     ```bash
+     gcloud storage buckets create gs://school-improvement-traces --location=us-central1
+     printf '{"rule":[{"action":{"type":"Delete"},"condition":{"age":90}}]}' > /tmp/lc.json
+     gcloud storage buckets update gs://school-improvement-traces --lifecycle-file=/tmp/lc.json
+     ```
+   - Salt for `principal_hash` (identity in traces is hashed, never raw):
+     ```bash
+     python3 -c "import secrets; print(secrets.token_hex(32))" | tr -d '\n' \
+       | gcloud secrets create trace-principal-salt --data-file=-
+     ```
+   - Grant the service account `roles/storage.objectCreator` on the bucket.
+   - Add to the ONE `--set-env-vars` flag: `TRACES_BUCKET=school-improvement-traces` and
+     `GIT_SHA=$(git rev-parse HEAD)` (what lets a trace attribute a delta to a code change).
+   - A missing piece never breaks chat: flushes are fire-and-forget and log a warning instead
+     of raising. Grep Cloud Logging for `chat_trace` (the per-turn ops line) to confirm
+     traces flow, and for `trace flush failed` to catch a misconfiguration.
 
 ## Anthropic key & credits (don't rely on a reminder)
 

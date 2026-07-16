@@ -11,8 +11,9 @@ Model: `settings.chat_model` (Haiku by default, for cost).
 from __future__ import annotations
 
 import json
+import time
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .db import get_db_public
 from .security import get_current_principal
+from .traces import TraceRecorder, sha256_hex
 from .usage import check_spend_caps, record_chat_usage
 from .marts import (
     fetch_attendance_plans,
@@ -168,6 +170,42 @@ class ChatTurn(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatTurn]
     level: str = "High"  # High | Middle | Primary (from the demo header)
+    # Client-generated conversation id, optional — the stateless API can't infer continuity,
+    # so traces of one conversation join only if the client says so (eval-trace-system.md §2).
+    session_id: str | None = None
+
+
+# --- trace vocabulary mapping (Anthropic wire format -> neutral, eval-trace-system.md §5) ---
+# This mapping is the Anthropic adapter's job, and until the AgentRunner seam lands (phase 5)
+# this file IS the Anthropic adapter — so it lives here, NOT in traces.py. Nothing beyond this
+# file may see a raw `stop_reason`; the trace schema carries only normalized `stop` values.
+ANTHROPIC_STOP_MAP = {
+    "tool_use": "tool_use",
+    "end_turn": "end",
+    "stop_sequence": "end",
+    "max_tokens": "max_tokens",
+    "refusal": "refusal",
+}
+
+
+def _norm_stop(stop_reason: str | None) -> str:
+    # An unmapped value passes through raw — the trace vocabulary is open, and inventing a
+    # neutral name for a stop we've never seen would hide it from the miner.
+    return ANTHROPIC_STOP_MAP.get(stop_reason or "", stop_reason or "unknown")
+
+
+def _norm_usage(u) -> dict:
+    return {
+        "input_tokens": u.input_tokens or 0,
+        "output_tokens": u.output_tokens or 0,
+        "cache_read_input_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
+        "cache_creation_input_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
+    }
+
+
+# Computed, not hand-bumped (§2): a changed catalog changes the hash, so an eval delta can be
+# attributed to a tool-definition change. sort_keys so dict ordering can't fake a change.
+TOOL_CATALOG_HASH = sha256_hex(json.dumps(TOOLS, sort_keys=True))
 
 
 def _resolve_school(db: Session, name: str | None, school_level: str) -> dict | None:
@@ -258,6 +296,7 @@ def _run_tool(name: str, ti: dict, db: Session, school_level: str) -> dict:
 @router.post("")
 def chat(
     req: ChatRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db_public),
     principal: dict = Depends(get_current_principal),  # cached — the mount already verified it
 ) -> dict:
@@ -280,35 +319,64 @@ def chat(
     school_level = LEVEL_TO_SCHOOL_LEVEL[ui_level]
     system = build_system(ui_level)
 
+    # Trace the turn (eval-trace-system.md phase 1). Happy paths flush AFTER the response via
+    # BackgroundTasks; error paths flush inline before raising, because FastAPI drops the
+    # background queue when a handler raises. flush() never raises either way.
+    recorder = TraceRecorder(
+        provider="anthropic", model=settings.chat_model,
+        principal_sub=sub, session_id=req.session_id,
+        ui={"level": ui_level},
+        versions={"prompt_hash": sha256_hex(system), "tool_catalog_hash": TOOL_CATALOG_HASH},
+    )
+    question = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+    recorder.turn_start(question=question, prior_messages=len(messages) - 1,
+                        system_hash=sha256_hex(system))
+
     import anthropic
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key_value)
     tools_used: list[str] = []
     resp = None
+    hit_max_iters = False
     # Summed across loop iterations (up to MAX_TOOL_ITERS + 1 model calls per user message).
     spent = {"input_tokens": 0, "output_tokens": 0,
              "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
     try:
         for i in range(MAX_TOOL_ITERS + 1):
+            t0 = time.perf_counter()
             resp = client.messages.create(
                 model=settings.chat_model, max_tokens=MAX_TOKENS,
                 system=system, tools=TOOLS, messages=messages,
             )
-            u = resp.usage
-            spent["input_tokens"] += u.input_tokens or 0
-            spent["output_tokens"] += u.output_tokens or 0
-            spent["cache_read_input_tokens"] += getattr(u, "cache_read_input_tokens", 0) or 0
-            spent["cache_creation_input_tokens"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+            usage = _norm_usage(resp.usage)
+            for k in spent:
+                spent[k] += usage[k]
+            recorder.model_call(
+                iteration=i, stop=_norm_stop(resp.stop_reason), usage=usage,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                content_digest=sha256_hex(
+                    "".join(b.text for b in resp.content if b.type == "text")),
+            )
             if resp.stop_reason == "refusal":
-                return {"reply": "(the assistant declined to answer that.)", "tools_used": tools_used}
+                reply = "(the assistant declined to answer that.)"
+                recorder.turn_end(reply=reply, status="refusal")
+                background_tasks.add_task(recorder.flush)
+                return {"reply": reply, "tools_used": tools_used}
             if resp.stop_reason != "tool_use" or i == MAX_TOOL_ITERS:
+                hit_max_iters = resp.stop_reason == "tool_use"
                 break
             messages.append({"role": "assistant", "content": resp.content})
             results = []
             for block in resp.content:
                 if block.type == "tool_use":
                     tools_used.append(block.name)
+                    t0 = time.perf_counter()
                     out = _run_tool(block.name, block.input, db, school_level)
+                    recorder.tool_call(
+                        name=block.name, input=block.input, output=out,
+                        error=out.get("error") if isinstance(out, dict) else None,
+                        latency_ms=int((time.perf_counter() - t0) * 1000),
+                    )
                     results.append({
                         "type": "tool_result", "tool_use_id": block.id,
                         "content": json.dumps(out, default=str),
@@ -317,8 +385,12 @@ def chat(
     except anthropic.APIStatusError as e:
         detail = getattr(e, "message", str(e))
         hint = " → add credits at console.anthropic.com" if "credit balance" in detail.lower() else ""
+        recorder.turn_end(reply="", status="error")
+        recorder.flush()
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"model error {e.status_code}: {detail}{hint}")
     except anthropic.APIConnectionError as e:
+        recorder.turn_end(reply="", status="error")
+        recorder.flush()
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"model connection error: {e}")
     finally:
         if any(spent.values()):
@@ -331,4 +403,6 @@ def chat(
             )
 
     reply = "".join(b.text for b in (resp.content if resp else []) if b.type == "text").strip()
+    recorder.turn_end(reply=reply, status="max_iters" if hit_max_iters else "ok")
+    background_tasks.add_task(recorder.flush)
     return {"reply": reply or "(no answer produced)", "tools_used": sorted(set(tools_used))}
