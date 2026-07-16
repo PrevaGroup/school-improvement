@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     # Identity Platform/Firebase ID-token audience. Defaults to gcp_project (the token's `aud`);
     # set explicitly only to override.
     google_oauth_audience: str | None = None
+    # --- session freshness: how long a sign-in lasts (see app/security.py) ---
+    # Days since the token's `auth_time` (the actual sign-in moment — it rides through the
+    # SDK's hourly ID-token refreshes unchanged) before the backend 401s and the SPA routes
+    # back to sign-in. This is the only offboarding bound the app itself controls: refresh
+    # tokens otherwise live forever, so a departed employee's persisted session would too.
+    session_max_age_days: float = 7.0
     # How a verified identity becomes a tenant (see app/security.py):
     #   1) a custom claim on the user (recommended) — this claim name, or
     #   2) fallback: map the email domain, e.g. {"lbschools.net": "lbusd"}.

@@ -17,6 +17,7 @@ No network, no DB: `_verify_identity_token` is patched wherever a real token wou
 dependency (see CLAUDE.md — the dependency list is frozen).
 """
 import asyncio
+import time
 
 import pytest
 from fastapi import HTTPException
@@ -40,16 +41,20 @@ def isolate_env(monkeypatch):
     # Empty map -> the ALLOWED_EMAIL_DOMAINS fallback applies (every domain requires
     # google.com). Provider-binding tests set this explicitly instead.
     monkeypatch.setattr(security.settings, "allowed_domain_providers", {})
+    monkeypatch.setattr(security.settings, "session_max_age_days", 7.0)
 
 
 def _claims(email="staff@prevagroup.com", verified=True, provider="google.com", **extra) -> dict:
     """Claims as Identity Platform actually issues them: `firebase.sign_in_provider` is
-    server-set at sign-in (a real Google-provider token always carries "google.com")."""
+    server-set at sign-in (a real Google-provider token always carries "google.com"), and
+    `auth_time` is the moment of the actual sign-in (fresh here; the session-age tests
+    override it)."""
     return {
         "email": email,
         "email_verified": verified,
         "sub": "uid-1",
         "firebase": {"sign_in_provider": provider},
+        "auth_time": time.time(),
         **extra,
     }
 
@@ -253,12 +258,66 @@ def test_domain_match_is_case_insensitive(verified):
 
 
 def test_identity_without_an_email_is_rejected(verified):
-    """No email → no domain → no decision possible → deny."""
-    verified({"sub": "uid-9", "email_verified": True})
+    """No email → no domain → no decision possible → deny. (auth_time is fresh so the
+    freshness gate — which runs first — passes and the no-email 403 is what's tested.)"""
+    verified({"sub": "uid-9", "email_verified": True, "auth_time": time.time()})
     with pytest.raises(HTTPException) as e:
         _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
     assert e.value.status_code == 403
     assert "no email" in e.value.detail
+
+
+# --------------------------------------------------------------------------- #
+# Session freshness — a sign-in is a lease, not a deed
+#
+# ID tokens expire hourly but the SDK renews them against a refresh token that NEVER
+# expires — so without this gate a session, once granted, lasts forever. `auth_time` is
+# set by Identity Platform at the actual sign-in and rides through every refresh
+# unchanged; aging it out is the only offboarding bound the app itself controls.
+# --------------------------------------------------------------------------- #
+def test_fresh_session_is_admitted(verified):
+    verified(_claims(auth_time=time.time() - 3600))  # signed in an hour ago
+    principal = _run(security.get_current_principal(authorization="Bearer good.jwt",
+                                                    x_dev_tenant=None))
+    assert principal["sub"] == "uid-1"
+
+
+def test_stale_session_is_401_not_403(verified):
+    """Eight days after sign-in: 401 — 'sign in again', which the SPA routes to the
+    sign-in screen. NOT 403, which would read as 'not invited' and dead-end the user."""
+    verified(_claims(auth_time=time.time() - 8 * 86400))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 401
+    assert "sign in again" in e.value.detail
+
+
+def test_session_age_limit_is_configurable(verified, monkeypatch):
+    """The 7 is policy, not code: SESSION_MAX_AGE_DAYS=1 must reject a 2-day-old sign-in."""
+    monkeypatch.setattr(security.settings, "session_max_age_days", 1.0)
+    verified(_claims(auth_time=time.time() - 2 * 86400))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 401
+
+
+def test_missing_auth_time_fails_closed(verified):
+    """Every real Identity Platform token carries auth_time; its absence means the token is
+    not what it claims. Can't decide -> deny, like everything on this path."""
+    claims = _claims()
+    del claims["auth_time"]
+    verified(claims)
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 401
+    assert "auth_time" in e.value.detail
+
+
+def test_garbled_auth_time_fails_closed(verified):
+    verified(_claims(auth_time="not-a-number"))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 401
 
 
 # --------------------------------------------------------------------------- #

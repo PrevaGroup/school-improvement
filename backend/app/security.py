@@ -33,6 +33,7 @@ onboarding action, not part of the request path.
 from __future__ import annotations
 
 import os
+import time
 
 from fastapi import Depends, Header, HTTPException, status
 from google.auth.transport import requests as g_requests
@@ -109,12 +110,13 @@ async def get_current_principal(
 ) -> dict:
     """Verify the caller's identity, check they're invited, and return their claims.
 
-    The gate for public /api routes. Two steps, and both are load-bearing:
+    The gate for public /api routes. Three steps, and all are load-bearing:
 
     1. **Authentication** — the token is real (signature, issuer, audience, expiry).
-    2. **Invitation** — the identity's email domain is on `allowed_email_domains`.
+    2. **Freshness** — the sign-in behind it is recent enough (`session_max_age_days`).
+    3. **Invitation** — the identity's email domain is on `allowed_email_domains`.
 
-    Step 2 exists because **authentication is not invitation**. With a Google provider enabled,
+    Step 3 exists because **authentication is not invitation**. With a Google provider enabled,
     *any* Gmail account can obtain a perfectly valid token for this project — so verification
     alone would gate nothing, and every served route (plus the Anthropic balance behind
     /api/chat) would be open to the internet.
@@ -132,8 +134,37 @@ async def get_current_principal(
 
     token = authorization.split(" ", 1)[1]
     claims = _verify_identity_token(token)
+    _assert_session_fresh(claims)
     _assert_invited(claims)
     return claims
+
+
+def _assert_session_fresh(claims: dict) -> None:
+    """401 when the sign-in behind this token is older than `session_max_age_days`.
+
+    ID tokens expire hourly, but the SDK refreshes them silently against a **refresh token
+    that never expires** — so token expiry alone means a session, once granted, lasts
+    forever. `auth_time` is the counterweight: Identity Platform sets it to the moment of
+    the *actual sign-in* and it rides through every refresh unchanged, so aging it out is
+    a revocation bound the app itself controls (the employer disabling the account stops
+    new sign-ins; this stops the old one from coasting).
+
+    401, not 403, deliberately: signing in again fixes it, and the SPA already routes 401
+    back to the sign-in screen. Fails closed on a missing/garbled auth_time — every real
+    Identity Platform token carries it, so its absence means the token is not what it
+    claims to be.
+    """
+    try:
+        auth_time = float(claims["auth_time"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token has no valid auth_time")
+
+    max_days = settings.session_max_age_days
+    if time.time() - auth_time > max_days * 86400:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            f"signed in more than {max_days:g} days ago — please sign in again",
+        )
 
 
 def _assert_invited(claims: dict) -> None:
