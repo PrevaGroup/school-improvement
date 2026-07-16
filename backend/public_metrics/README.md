@@ -73,6 +73,33 @@ python -m public_metrics.load_ca_caaspp              --data-dir gs://<bucket>/ra
 > Adding CAASPP after an earlier seed? Re-run `seed_ca_dims` first — it adds the two CAASPP
 > metric ids and the `caaspp` group crosswalk (idempotent, `ON CONFLICT DO NOTHING`).
 
+### Long loads: run as a Cloud Run Job, not in Cloud Shell
+
+Cloud Shell recycles on browser inactivity, which kills anything that runs longer than a
+coffee break — the CAASPP load (~1 GB streamed per year) learned this the hard way. Every
+loader is idempotent (batched upserts), so an interrupted run does no damage, but the robust
+home for big loads is a **Cloud Run Job** on the same image the API deploys from. `_engine()`
+switches to the Cloud SQL Python Connector when `INSTANCE_CONNECTION_NAME` is set (mirroring
+`app/db.py`), so no Auth Proxy is involved. From the **repo root** (Dockerfile context):
+
+```bash
+gcloud run jobs deploy ca-caaspp-load \
+  --source . --region us-central1 \
+  --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public \
+  --command python \
+  --args -m,public_metrics.load_ca_caaspp,--data-dir,gs://school-improvement-501916-raw/raw/ca \
+  --task-timeout 4h --memory 1Gi --max-retries 1
+
+gcloud run jobs execute ca-caaspp-load --region us-central1 --wait
+```
+
+The job's service account needs `roles/cloudsql.client` + `roles/secretmanager.secretAccessor`
+(already granted for the API deploy) and read access to the raw bucket
+(`roles/storage.objectViewer` on `school-improvement-501916-raw`) — grant that one if the
+execution fails on GCS. `--max-retries 1` is safe *because* the loaders are idempotent, and
+`load_ca_caaspp` commits per zip, so a retry never redoes a completed year. The same
+`--command/--args` pattern runs any other loader; only the CAASPP load is slow enough to need it.
+
 `--data-dir` accepts either a **local path** (`~/raw/ca`) or a **`gs://bucket/prefix` URI**. The raw
 data is laid out by state — `raw/ca/<domain>/…`, `raw/tx/…` later — so the state segment lives in
 the path, not the code. GCS access uses ADC (`gcloud auth application-default login`, or the Cloud

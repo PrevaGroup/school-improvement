@@ -171,6 +171,30 @@ def _basename(path):
 # DB
 # --------------------------------------------------------------------------- #
 def _engine():
+    """The sip_migrator engine, both ways the loaders actually run.
+
+    Cloud Shell / local: the Auth-Proxy URL (127.0.0.1:5432). Cloud Run **Jobs**: the
+    Cloud SQL Python Connector when INSTANCE_CONNECTION_NAME is set — the same branch
+    `app/db.py._build_engine` takes for the API, mirrored here (not imported: that
+    engine is bound to the sip_app role and built at import time) but connecting as
+    the migrator. Jobs are how the big loads (CAASPP ~1 GB/year) survive — Cloud Shell
+    recycles on browser inactivity mid-load; a Job doesn't.
+    """
+    if settings.instance_connection_name:
+        from google.cloud.sql.connector import Connector, IPTypes
+
+        connector = Connector()
+        url = settings.migration_database_url  # resolve the secret once, not per checkout
+
+        def _getconn():
+            return connector.connect(
+                settings.instance_connection_name,
+                "pg8000",
+                user=url.username, password=url.password, db=settings.db_name,
+                ip_type=IPTypes.PRIVATE if settings.db_ip_type == "private" else IPTypes.PUBLIC,
+            )
+
+        return create_engine("postgresql+pg8000://", creator=_getconn)
     return create_engine(settings.migration_database_url)
 
 

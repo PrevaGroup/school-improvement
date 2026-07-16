@@ -168,10 +168,14 @@ def run():
         for spec in SPECS:
             load_caaspp_zip(None, _join(a.data_dir, spec["file"]), spec["period_id"], xwalk, dry=True)
         return
-    with _engine().begin() as conn:
-        conn.execute(text("SELECT set_config('app.tenant', :t, false)"), {"t": PUBLIC})
-        xwalk = load_crosswalk(a.data_dir)
-        for spec in SPECS:
+    engine = _engine()
+    xwalk = load_crosswalk(a.data_dir)
+    # One transaction PER ZIP, not one across both — each year is ~1 GB streamed and
+    # ~270k upserts, and the whole load is idempotent. If a run dies in the second
+    # year, the first year's commit survives and a re-run only redoes the remainder.
+    for spec in SPECS:
+        with engine.begin() as conn:
+            conn.execute(text("SELECT set_config('app.tenant', :t, false)"), {"t": PUBLIC})
             print(f"Loading CAASPP ELA+Math from {spec['file']}...")
             load_caaspp_zip(conn, _join(a.data_dir, spec["file"]), spec["period_id"], xwalk, dry=False)
     print("Done.")
