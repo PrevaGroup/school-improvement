@@ -23,3 +23,7 @@ scikit-learn>=1.3
 # Cloud Run -> Cloud SQL without the Auth Proxy (app/db.py, when INSTANCE_CONNECTION_NAME set)
 cloud-sql-python-connector[pg8000]>=1.9
 pg8000>=1.31
+# Reverse proxy for Firebase's /__/* namespace (app/auth_proxy.py). Was already here
+# transitively via anthropic; a runtime import that only works by accident is one pip
+# resolution away from a broken container. Declare it.
+httpx>=0.27
