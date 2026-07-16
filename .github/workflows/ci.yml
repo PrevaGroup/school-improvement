@@ -60,6 +60,12 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      # Separate step from the build so a failure reads as "a test broke", not "the build
+      # broke". Covers src/markdown.test.ts, which guards the chat pane's XSS escaping — the
+      # app's only dangerouslySetInnerHTML.
+      - name: Test
+        run: npm test
+
       # `npm run build` = tsc -b && vite build, the same command the Dockerfile's node stage
       # runs. Without this job a type error would pass CI and only fail at Cloud Build — i.e.
       # at deploy, after review. The suite is the gate, so the gate has to cover the frontend.
