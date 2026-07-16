@@ -59,6 +59,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return (
       <div className="auth-screen">
         <h1>School Improvement</h1>
+        <p className="muted auth-tagline">
+          Working proof of concept to demonstrate agentic data analytics best practices
+          according to leading AI companies (e.g.,{" "}
+          <a
+            href="https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Anthropic
+          </a>
+          ,{" "}
+          <a href="https://openai.com/index/inside-our-in-house-data-agent/" target="_blank" rel="noreferrer">
+            OpenAI
+          </a>
+          )
+        </p>
         <p className="muted">Attendance diagnostics · peers · grounded chat</p>
         <button
           className="auth-btn"

@@ -127,6 +127,8 @@
 /* --- auth gate (added with sign-in; uses the same palette variables) --- */
 .auth-screen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; }
 .auth-screen h1 { font-size: 22px; margin: 0; }
+.auth-tagline { max-width: 520px; font-size: 13px; line-height: 1.5; }
+.auth-tagline a { color: inherit; }
 .auth-btn { font: inherit; padding: 9px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--green); color: #fff; cursor: pointer; }
 .auth-btn:hover { filter: brightness(1.05); }
 .auth-err { color: var(--red); font-size: 13px; max-width: 420px; }
