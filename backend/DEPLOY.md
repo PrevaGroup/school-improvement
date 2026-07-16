@@ -55,8 +55,17 @@ gcloud run deploy sip-api \
   --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false,ALLOWED_EMAIL_DOMAINS=prevagroup.com \
   --min-instances 0 \
   --max-instances 4 \
-  --no-allow-unauthenticated
+  --allow-unauthenticated
 ```
+
+> ⚠️ **The `--allow-unauthenticated` flag is not a no-op on redeploys — it MANAGES the IAM
+> binding.** The gate opened for real on 2026-07-16 (`allUsers` granted `run.invoker`;
+> the app's sign-in + allowlist is the boundary). Redeploying with
+> `--no-allow-unauthenticated` — say, by reusing this block from an old shell history —
+> **removes that binding and re-closes the gate**, and every tester starts seeing 403s
+> until someone re-runs `gcloud run services add-iam-policy-binding sip-api
+> --member=allUsers --role=roles/run.invoker`. (This happened once, caught within the
+> minute.) Omitting the flag entirely leaves the existing policy alone, which is also fine.
 
 - **`--max-instances 4`** caps serverless scale-out so it can't exhaust Postgres
   connections (runbook Phase 3). The engine also uses `pool_pre_ping`.
@@ -93,9 +102,12 @@ gcloud run deploy sip-api \
   matter how many allowlisted users show up). Over either → 429 until midnight UTC. Raw
   token counts land per (user, day, model); dollars are derived from the price table in
   `app/usage.py` — update it there when Anthropic reprices.
-- **`--no-allow-unauthenticated`** is the access gate: only Google identities you grant
-  `roles/run.invoker` can reach the service (this is how "who's asking" and your Claude
-  spend are controlled — see below). No app-level login is built.
+- **The access gate is the app's own sign-in** (verified Identity Platform token +
+  `ALLOWED_EMAIL_DOMAINS`), not Cloud Run IAM — since the 2026-07-16 go-live the service
+  is `--allow-unauthenticated` and the spend caps above bound the Claude exposure. The
+  historical IAM-gated posture (grant individual `roles/run.invoker`, reach via
+  `gcloud run services proxy`) remains useful for pre-release smoke tests of a closed
+  revision.
 
 > ⚠️ **`--no-allow-unauthenticated` is doing two jobs, and it's easy to only notice one.**
 > It gates access *and* it is the only thing capping Anthropic spend — there is no
