@@ -60,24 +60,45 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (phase.s === "signed-out") {
     return (
       <div className="auth-screen">
-        <h1>School Improvement</h1>
+        <h1>Agentic School Improvement</h1>
         <p className="muted auth-tagline">
-          Working proof of concept to demonstrate agentic data analytics best practices
-          according to leading AI companies (e.g.,{" "}
-          <a
-            href="https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Anthropic
-          </a>
-          ,{" "}
-          <a href="https://openai.com/index/inside-our-in-house-data-agent/" target="_blank" rel="noreferrer">
-            OpenAI
-          </a>
-          )
+          Working proof of concept for agentic data analytics on school-improvement data.
         </p>
-        <p className="muted">Attendance diagnostics · peers · grounded chat</p>
+        <ul className="auth-pillars muted">
+          <li>
+            <strong>Semantic Data Layer:</strong> A data schema to consume available data and
+            provide a grounded basis for agentic queries.
+          </li>
+          <li>
+            <strong>Tools:</strong> Mechanisms agents use to query the data to scan indicators,
+            prioritize, and begin to analyze root causes.
+          </li>
+          <li>
+            <strong>Guidance:</strong> The agentic experience targets an opinionated perspective
+            based on literature reviews.
+          </li>
+          <li>
+            <strong>Evals:</strong> The agentic harness continuously improves leveraging
+            practices advocated by leading AI companies (e.g.,{" "}
+            <a
+              href="https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Anthropic
+            </a>
+            ,{" "}
+            <a href="https://openai.com/index/inside-our-in-house-data-agent/" target="_blank" rel="noreferrer">
+              OpenAI
+            </a>
+            ).
+          </li>
+        </ul>
+        <p className="muted auth-note">
+          This is a closed system, restricted to a handful of approved organizations. Your
+          email is used to authenticate you and meter usage — it is never shared or used for
+          anything else.
+        </p>
         {/* Email-first sign-in (Home Realm Discovery): people know their email, not their
             employer's identity provider. The routing table decides Google vs Microsoft;
             an uninvited domain is told so right here, before any popup. */}

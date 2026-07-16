@@ -274,12 +274,13 @@ an `X-Dev-Tenant: <tenant_id>` header.
 Cloud Run **domain mapping**. No load balancer, no proxy, no Workers.
 
 > **Reality correction (2026-07-16):** earlier drafts of this section were written around
-> Cloudflare DNS (grey-cloud/orange-cloud doctrine). **prevagroup.com's DNS was never on
-> Cloudflare** — its nameservers are `ns-cloud-b*.googledomains.com` (Google-hosted DNS,
-> managed through the Squarespace panel after the Google Domains sale). The plan said
-> "Cloudflare" and the docs repeated it without an NS lookup. There is no proxy toggle on
-> Google-hosted DNS, so the whole orange-cloud failure class is structurally absent here;
-> the old warnings apply only if DNS ever actually moves to Cloudflare.
+> a third-party proxying DNS provider. **prevagroup.com's DNS was never on one** — its
+> nameservers are `ns-cloud-b*.googledomains.com` (Google-hosted DNS,
+> managed through the Squarespace panel after the Google Domains sale). The plan assumed
+> otherwise and the docs repeated it without an NS lookup. There is no proxy toggle on
+> Google-hosted DNS, so the whole proxied-CNAME failure class (proxy hides the CNAME →
+> Google's managed cert never provisions) is structurally absent here; the old warnings
+> apply only if DNS ever actually moves to a proxying provider.
 
 ```bash
 # NOTE: managed Cloud Run needs the *beta* surface. The GA `gcloud run domain-mappings`
