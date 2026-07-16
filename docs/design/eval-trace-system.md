@@ -1,6 +1,6 @@
 # Design: the eval trace system — a continuous improvement loop for marts & tools
 
-**Status:** proposed (decisions marked ⚖️ route to the human) · **Scope:** `serving` (emission),
+**Status:** decided 2026-07-16 (all five ⚖️ decisions resolved — see §8) · **Scope:** `serving` (emission),
 a **new producer module `evals`** (store + loop), GCS (raw traces) ·
 **Supersedes:** [`chat-traces-and-evals.md`](chat-traces-and-evals.md) — its analysis of the
 seam collision and the honesty-first eval target carries forward unchanged; this doc makes the
@@ -67,7 +67,7 @@ seam survives untouched.
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Why this storage split (the ⚖️ decision the old note parked)
+### Why this storage split (the ⚖️ decision the old note parked — decided, §8.1)
 
 | Option (from the parked note) | Verdict |
 |---|---|
@@ -153,7 +153,7 @@ known silent-failure modes when omitted).
 | `eval_case` | one curated question | question, ui context, expected behavior (graders to run + params, ground-truth SQL/fixture ref), `source` (`seed` \| `mined:<trace_id>`), `status` (`candidate → active → retired`), tags (`honesty`, `tool:<name>`, `equity`, …) |
 | `eval_run` | one execution of a set | ts, versions (git_sha/prompt_hash/model/provider), target (which deployment), aggregate scores, cost_usd |
 | `eval_result` | run × case | per-grader scores, pass/fail verdict, judge rationale, `trace_id` of the eval trace (every eval answer is itself a trace) |
-| `feedback` | one rating | trace_id, 👍/👎, optional comment — ingested via `POST /api/feedback` (owned by this module, mounted in `main.py` like `sip`'s ingest routes) |
+| `feedback` | one rating | trace_id, 👍/👎, optional comment. **Table ships in the phase-2 migration (schema-ready); the `POST /api/feedback` endpoint + UI thumbs are deferred past v1 (§8.5)** — when added, the endpoint is owned by this module, mounted in `main.py` like `sip`'s ingest routes |
 
 **Jobs** (batch, same Cloud Shell / Cloud Run-job pattern as every other producer):
 
@@ -165,11 +165,12 @@ known silent-failure modes when omitted).
 against a deployed revision — the same way the frontend is a client. Nothing in `evals` imports
 `serving`; graders read producers' tables with SQL (the sanctioned seam) for ground truth.
 
-⚖️ **Runner target:** recommend a **tagged, no-traffic Cloud Run revision** for gating runs
-(exact candidate code, zero user exposure — revision tags give it a stable URL) and the **live
-service** for the nightly monitoring run (catches drift the gate can't: data loads, model-side
-changes). Alternative — local uvicorn against Cloud SQL — saves a deploy but tests a
-not-quite-prod stack.
+⚖️ **Runner target (decided — §8.2):** a **tagged, no-traffic Cloud Run revision** for gating
+runs (exact candidate code, zero user exposure — revision tags give it a stable URL) and the
+**live service** for the nightly monitoring run (catches drift the gate can't: data loads,
+model-side changes). The framing that settled it: **evals are change control** — a gate is only
+meaningful against the exact artifact that would ship, which is also why local uvicorn (a
+not-quite-prod stack) was rejected: it breaks the identity between *evaluated* and *shipped*.
 
 **Spend safety for free:** the runner authenticates as its own service principal, so
 `usage_chat_daily` + the per-user/global caps already meter and bound eval spend. Give the eval
@@ -185,7 +186,7 @@ principal its own cap generous enough for a full run, and the loop can never eat
 | **T1** | **honesty/grounding** — the highest-value target (per the parked note: unambiguous failure, ground truth already in the DB, real-world cost of being wrong) | programmatic checks on the trace + a narrow yes/no judge where prose must be read | ~free |
 | **T2** | **usefulness** — grounded, direct, non-regurgitating, actionable for a school planner | LLM-as-judge, versioned rubric, calibrated against a human-labeled subset (report agreement %) | paid, per run |
 | **T3** | **trajectory & efficiency** — right tool, no redundant calls, iterations/tokens/latency/cost | programmatic on the trace | free |
-| **T4** | **production signal** — 👍/👎 + comments, error rates in prod traces | `feedback` + `trace` aggregates | free |
+| **T4** | **production signal** — error rates in prod traces; 👍/👎 + comments once feedback ships (deferred past v1, §8.5) | `trace` aggregates (+ `feedback` later) | free |
 
 T1 concretely, on this codebase:
 
@@ -208,8 +209,12 @@ model — the judge must out-read the system under test.
 ### The flywheel (the actual continuous-improvement loop)
 
 1. **Mine** (weekly, `mine_traces`): tool errors, `_resolve_school` misses, refusals,
-   `max_iters` exits, zero-tool answers to data questions, 👎 feedback, T1 failures on prod
-   traces, plus clustering of questions to spot **unmet question classes**.
+   `max_iters` exits, zero-tool answers to data questions, 👎 feedback (once it ships), T1
+   failures on prod traces, plus clustering of questions to spot **unmet question classes** —
+   the cluster label lands as a derived `question_class` annotation on the trace/candidate.
+   Raw question text is never rewritten or "semantically shrunk" at emission: the verbatim
+   mess is signal (it's what resolution graders test), and distillation is a model call that
+   doesn't belong on the hot path.
 2. **Curate**: mined items land as `eval_case(status='candidate')` with the source trace
    attached. A human promotes to `active` (and strips anything personal — §6). Humans write
    rubrics and promote cases; they do not eyeball every answer.
@@ -272,11 +277,17 @@ comparison a query, not a project. That is the concrete meaning of "supports sta
 agentic logic from all four": the loop measures whichever loop is plugged in, and A/B-ing
 providers on the golden set becomes routine.
 
-⚖️ **Build order:** the seam should land **with the chat overhaul** (it's a refactor of the same
-loop being touched anyway) — but **thin**: neutral catalog + `AnthropicRunner` only.
-`OpenAIRunner`/`GeminiRunner` are written when there's a real reason to run one, not
-speculatively. (Microsoft's Copilot Studio / GitHub Copilot are platforms, not raw model APIs —
-the Azure OpenAI adapter is the practical "Copilot-stack" entry point.)
+⚖️ **Build order (decided — §8.4):** the seam lands **with the chat overhaul** — and
+vendor-agnosticism is a **hard app invariant** (models are commodities): nothing outside a
+runner adapter may know which vendor is plugged in. The seam ships **thin** — neutral catalog +
+`AnthropicRunner`, the one adapter with traffic today — because agnosticism lives in the
+socket, not in pre-writing appliances: `OpenAIRunner`/`GeminiRunner` are commodity shims (three
+enums and a usage dict, the table above) written when there's a real reason to run one.
+(Microsoft's Copilot Studio / GitHub Copilot are platforms, not raw model APIs — the Azure
+OpenAI adapter is the practical "Copilot-stack" entry point.) The invariant is **enforced, not
+aspirational**: Phase 5 ships with a boundary test in the spirit of
+`test_module_boundaries.py` — no vendor SDK import and no vendor wire-format field (e.g.
+`stop_reason`) outside the runner's own file.
 
 Future SOTA patterns this schema already accommodates (and the marts-first tool design matches):
 planner/executor decomposition, sub-agents (nested spans), a sandboxed SQL/code-execution tool
@@ -291,10 +302,12 @@ Traces retain **user questions** — the first user-generated content this syste
 - [`PRIVACY.md`](../PRIVACY.md) already discloses studying usage data to improve the prototype;
   extend it with one plain-English line: chat interactions are retained for a fixed window and
   reviewed to improve the assistant.
-- **Retention:** raw GCS traces 90 days (bucket lifecycle rule, set at bucket creation);
-  `trace` envelope rows kept indefinitely (no message text beyond the question — ⚖️ or drop the
-  question too and keep it only in GCS); **promoted eval cases** kept indefinitely but pass
-  through human review at promotion, where anything personal is stripped.
+- **Retention (decided — §8.3):** raw GCS traces 90 days (bucket lifecycle rule, set at bucket
+  creation); `trace` envelope rows kept **indefinitely, question text included** (no message
+  text beyond the question) — cost and data-minimization risk are negligible at prototype
+  volume. Revisit at volume growth or the moment traces carry private tenant data (below).
+  **Promoted eval cases** kept indefinitely but pass through human review at promotion, where
+  anything personal is stripped.
 - **Identity:** traces carry `principal_hash`, never email. The join to a person exists only
   via the salt, held like other secrets.
 - **Tenancy:** every table and event carries `tenant_id` from day one. Today everything is
@@ -308,21 +321,39 @@ Traces retain **user questions** — the first user-generated content this syste
 |---|---|---|
 | **0** | this doc; storage decision confirmed | docs |
 | **1** | `TraceRecorder` + GCS flush + ops log line; `session_id` in `ChatRequest`; version hashes | `serving` (no tables) |
-| **2** | `evals` scaffold: migration (5 tables), `ingest_traces`, `POST /api/feedback` + UI thumbs | `evals` (+ 2-line `main.py` mount) |
+| **2** | `evals` scaffold: migration (5 tables incl. `feedback`, schema only), `ingest_traces` — no feedback endpoint/UI (deferred, §8.5) | `evals` |
 | **3** | seed golden set (~30), T1+T3 graders, `run_evals` + baseline report | `evals` |
 | **4** | T2 judge + calibration, PR-gate wiring, `mine_traces` | `evals` |
-| **5** | `AgentRunner` seam (thin: Anthropic only) — with the chat overhaul | `serving` |
+| **5** | `AgentRunner` seam (thin: Anthropic only) + vendor-boundary test (§5) — with the chat overhaul | `serving` |
 
 Phase 1 produces value alone (traces to look at); each later phase compounds. Nothing here
 blocks go-live; conversely go-live's §3.6 doesn't block phases 1–4 (traces work behind the IAM
 gate — better to have the loop running **before** strangers arrive).
 
-## 8. Decisions routed to the human (⚖️ recap)
+## 8. Decisions routed to the human (⚖️ recap) — **decided 2026-07-16**
 
-1. **Storage:** hybrid — GCS emission + `evals` producer module (recommended above; resolves
-   the parked note's question, keeps "serving owns no tables" with zero exceptions).
-2. **Runner target:** tagged no-traffic revision for gates + live for nightly (recommended).
-3. **Envelope retention:** keep the question text in the `trace` row indefinitely, or only in
-   the 90-day GCS object?
-4. **Provider seam timing:** with the chat overhaul, thin (recommended), vs. now, vs. later.
-5. **Feedback thumbs in v1:** recommended yes (cheapest real usefulness signal; phase 2).
+1. **Storage: hybrid — accepted.** GCS emission + `evals` producer module. Framing from the
+   decision: the GCS flush is a *logging* write — best-effort by design, no retries, no
+   dead-letter handling. A lost trace nearly doesn't matter; the SLA can be well below
+   four nines. Engineer for cheapness, not reliability.
+2. **Runner target: accepted, with a sharper framing — evals are change control.** The gate
+   must evaluate the exact candidate artifact (tagged no-traffic revision); the nightly run
+   against live is *monitoring* — it watches the inputs change control can't govern (model-side
+   drift, data loads, config). Same cases, two functions, two targets.
+3. **Envelope retention: question text kept indefinitely, for now.** The concerns are cost and
+   data minimization; at prototype volume both are negligible. **Revisit triggers:** volume
+   growth, or the moment traces carry private tenant data (§6's tenancy boundary). Note from
+   the discussion: the raw question is saved *verbatim* — the mess is signal (sloppy phrasing
+   is what resolution graders test). Any semantic shrink (`question_class`) is a derived
+   annotation computed at mine time, never a replacement, and never on the hot path.
+4. **Provider seam: with the chat overhaul — and vendor-agnosticism is a hard app invariant,
+   not a preference.** Models are commodities. Nothing outside a runner adapter may know which
+   vendor is plugged in: trace schema, graders, catalog, harness all speak the neutral
+   vocabulary from day one. Adapters are commodity shims written when actually run
+   (`AnthropicRunner` is merely the one in the socket today). The invariant is **enforced, not
+   aspirational** (same ethos as `test_module_boundaries.py`): Phase 5 ships with a boundary
+   test — no vendor SDK import and no vendor wire-format field outside the runner.
+5. **Feedback thumbs: deferred — not in v1.** The `feedback` table stays in the phase-2
+   migration (schema-ready costs nothing; avoids a second migration later), but the
+   `POST /api/feedback` endpoint and UI thumbs are cut from v1 and added when wanted. T4 in v1
+   is prod-trace error aggregates only.
