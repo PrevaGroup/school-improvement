@@ -400,7 +400,36 @@ listed last. Nothing else here is blocked on it — it blocks *testers*, not cod
   the whole point of task 3.2. Create users, and set the claim only for district staff who
   will eventually touch `/plans`.
 - Add the domain to GCIP's **authorized domains** or sign-in will fail on the custom domain
-  with a confusing error.
+  with a confusing error. (The setting lives at Identity Platform → Settings → **Security** →
+  Authorized Domains — NOT the identically-named "Authorized domains" under Google Auth
+  Platform → Branding, which governs the OAuth consent screen and does nothing for the SDK.)
+
+#### Deferred until Entra lands: bind each domain to its provider
+
+The working model is **provider↔domain pairing**: `prevagroup.com` signs in via Google,
+`gatesfoundation.org` via Entra. Know that this pairing is a **norm, not an enforcement** —
+anyone can create a Google account on any mailbox they control (the "Google Docs with your
+work email" flow, mailbox-verified at creation), and Microsoft personal accounts work the same
+way. Two consequences, opposite in timing:
+
+- **Now, the leak is the onboarding path.** Until the client's IT stands up Entra federation,
+  a Google account on a `gatesfoundation.org` address is the *only* way a Gates tester can
+  sign in. Do not enforce the pairing yet — it would lock out exactly those testers.
+- **At Entra cutover, enforce it in `security.py`:** the token's `sign_in_provider` claim must
+  match the domain's designated provider (`gatesfoundation.org` → `microsoft.com`,
+  `prevagroup.com` → `google.com`). The reason is offboarding, not spoofing: **a Google account
+  keeps its verified work email forever** (Google never re-verifies), so a *former* employee
+  retains a token-worthy identity indefinitely — whereas Entra membership dies when IT cuts it.
+  Once a domain maps to a tenant with private data, sign-in provenance IS the offboarding
+  control. One check, its own test, lands in the same change that enables the Microsoft
+  provider.
+
+Identity Platform settings as configured (2026-07-17, deliberate): account linking = **link by
+email** (moot while the pairing holds; absorbs the leak when it doesn't) · activity logging
+**on** · self-serve **create stays on** — sign-up is how Google-provider accounts come into
+being, and disabling it would silently reinstate per-person provisioning, defeating the domain
+allowlist · delete on · no blocking functions (the allowlist lives in the app; that's also why
+the console's Cloud Functions banner is ignorable).
 
 ### 3.6 — Domain, then open the gate (last)
 
