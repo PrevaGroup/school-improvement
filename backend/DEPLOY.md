@@ -167,6 +167,34 @@ ALLOWED_EMAIL_DOMAINS=prevagroup.com,gatesfoundation.org
 
 ## Auth (Identity Platform)
 
+### Provisioning the Google provider — the traps, in the order they bite
+
+Hard-won on 2026-07-16 (each of these produced a different opaque error during the first
+real sign-in). The Entra/gatesfoundation.org setup will re-walk this list.
+
+1. **The provider's two fields are easy to swap, and the console won't stop you.**
+   Identity Platform → Providers → Google: **Web Client ID** takes the
+   `…apps.googleusercontent.com` value; **Web Client Secret** takes the `GOCSPX-…` value.
+   The client's display *name* belongs in neither. Symptom of a swap: Google's consent
+   screen fails with **`Error 401: invalid_client — The OAuth client was not found`**.
+2. **The OAuth client must be type "Web application" and carry the Firebase handler as an
+   authorized redirect URI**: `https://school-improvement-501916.firebaseapp.com/__/auth/handler`.
+   (APIs & Services → Credentials → the client → Authorized redirect URIs; changes take a
+   few minutes to propagate.) Symptom when missing: **`redirect_uri_mismatch`** — and a
+   "Desktop" type client has no redirect-URI section at all; recreate it as Web application.
+3. **Account linking must be "Link accounts that use the same email"**
+   (`signIn.allowDuplicateEmails=false`). Under "create multiple accounts per identity
+   provider", email stops being an identity property and **ID tokens omit the email claim
+   entirely** — so the allowlist (correctly, failing closed) rejects every user as
+   *"signed in as (no email)"*. Worse, user records created under that mode stay
+   email-less forever, even after the setting is fixed: **delete the affected records**
+   (Identity Platform → Users) and have them sign in fresh.
+4. **`localhost` and `127.0.0.1` are different authorized domains.** The default list
+   covers `localhost`; a proxy smoke test opened at `http://127.0.0.1:8080` fails with
+   `auth/unauthorized-domain`. Use `http://localhost:<port>`, or add `127.0.0.1`.
+
+### Token verification (runtime)
+
 Token verification is implemented in `app/security.py` (`verify_firebase_token` via
 `google-auth`). Two things must be in place for `DEV_MODE=false`:
 
