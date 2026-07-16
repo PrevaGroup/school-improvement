@@ -7,7 +7,7 @@ entire contract is the *rows* it produces into core's schema.
 
 | Target | What |
 |---|---|
-| `fact_metric` | ~960k rows @ `tenant_id='public'`, `visibility='public'`, at the conformed grain (school × period × metric × student-group), using **only** ids from core's vocab |
+| `fact_metric` | ~960k rows @ `tenant_id='public'`, `visibility='public'`, at the conformed grain (school × period × metric × student-group), using **only** ids from core's vocab. CAASPP ELA/Math load at the Grade-13 (All Grades) rollup — the grade axis is collapsed to fit the grain |
 | `dim_school` | the school spine, keyed on **NCES** (`CA-<cds>` fallback; non-school aggregates excluded) |
 | `dim_student_group`, `dim_metric`, `dim_period`, `group_crosswalk` | seeded from core's vocab + this module's CA crosswalk (`seed_ca_dims`, idempotent `ON CONFLICT DO NOTHING`) |
 
@@ -19,9 +19,10 @@ Raw CDE / data.ca.gov files (local path or `gs://`, via fsspec); core's vocab (`
 
 ## What stays local to this module
 
-`CDE_CATEGORY` (CDE ReportingCategory → conformed group ids, both code schemes) and `PERIODS` —
-California's adapters *into* the shared vocabulary. A second state brings its own crosswalk and
-reuses the same ids; the adapters never migrate to core.
+`CDE_CATEGORY` (CDE ReportingCategory → conformed group ids, both code schemes), `CAASPP_GROUP`
+(ETS's numeric student-group ids → the same conformed ids) and `PERIODS` — California's adapters
+*into* the shared vocabulary. A second state brings its own crosswalk and reuses the same ids;
+the adapters never migrate to core.
 
 ## Invariants (tested — `public_metrics/tests/`)
 
@@ -34,7 +35,7 @@ reuses the same ids; the adapters never migrate to core.
 ## Entry points
 
 `python -m public_metrics.seed_ca_dims --data-dir <path|gs://>` once, then any
-`python -m public_metrics.load_ca_<fact>` (× 8). Cloud Shell only; `--dry-run` supported.
+`python -m public_metrics.load_ca_<fact>` (× 9). Cloud Shell only; `--dry-run` supported.
 Connects as `sip_migrator` with `SET app.tenant='public'`.
 
 ## Serving surface

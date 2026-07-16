@@ -73,6 +73,23 @@ CDE_CATEGORY = {
     "SG_HM": "homeless", "SG_FS": "foster", "SG_MG": "migrant",
 }
 
+# CAASPP research-file "Student Group ID" -> conformed student_group_id. ETS's numeric
+# scheme (Table A of the research-file layout), a third code system alongside the two CDE
+# ReportingCategory schemes above. Keys are canonical ints-as-strings — the files zero-pad
+# ("001"); load_ca_caaspp normalizes before lookup. Unmapped ids are skipped on purpose:
+# they're either a different axis (parent education, ethnicity-x-SES intersections) or the
+# complement groups ("Not homeless", "Not foster") the platform doesn't conform.
+CAASPP_GROUP = {
+    "1": "all",
+    "3": "gender_m", "4": "gender_f",
+    "74": "race_black", "75": "race_amerind", "76": "race_asian", "77": "race_filipino",
+    "78": "race_hispanic", "79": "race_pacific", "80": "race_white", "144": "race_two",
+    "160": "el",       # "English learners (excl. RFEP)" — the EL group CDE reports on
+    "128": "swd",      # "Reported disabilities"
+    "31": "sed",       # "Socioeconomically disadvantaged"
+    "28": "migrant", "240": "foster", "52": "homeless",
+}
+
 PERIODS = [
     ("p2021-22", "annual", "2021-22", "2021-22"),
     ("p2022-23", "annual", "2022-23", "2022-23"),
@@ -167,13 +184,15 @@ def seed_reference(conn):
     conn.execute(pg_insert(GroupCrosswalk).values(
         [dict(source_system="cde_reportingcategory", source_code=c, student_group_id=g)
          for c, g in CDE_CATEGORY.items()]
+        + [dict(source_system="caaspp", source_code=c, student_group_id=g)
+           for c, g in CAASPP_GROUP.items()]
     ).on_conflict_do_nothing())
     conn.execute(pg_insert(DimMetric).values(METRICS).on_conflict_do_nothing())
     conn.execute(pg_insert(DimPeriod).values(
         [dict(period_id=p, grain=g, school_year=y, label=lbl, tenant_id=PUBLIC, visibility=PUBLIC)
          for p, g, y, lbl in PERIODS]
     ).on_conflict_do_nothing())
-    print(f"  seeded: {len(STUDENT_GROUPS)} groups, {len(CDE_CATEGORY)} crosswalk, "
+    print(f"  seeded: {len(STUDENT_GROUPS)} groups, {len(CDE_CATEGORY) + len(CAASPP_GROUP)} crosswalk, "
           f"{len(METRICS)} metrics, {len(PERIODS)} periods")
 
 
