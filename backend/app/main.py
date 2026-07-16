@@ -19,7 +19,7 @@ from .db import get_db
 from .marts import router as marts_router
 from .models import DimSchool, FactMetric
 from .plans import router as plans_router
-from .security import assert_dev_mode_not_in_production
+from .security import assert_dev_mode_not_in_production, get_current_principal
 
 # Fail the deploy, not the security model: DEV_MODE + a production environment means the
 # unverified X-Dev-Tenant header would let any caller impersonate any district. Crash loudly at
@@ -41,9 +41,18 @@ app = FastAPI(title="School Improvement Platform API", version="0.1.0")
 # /health is deliberately OUTSIDE /api: it's an unauthenticated liveness probe, not an API
 # route, and it must never sit behind the auth dependency that /api will gain at go-live.
 API = "/api"
-app.include_router(plans_router, prefix=API)
-app.include_router(marts_router, prefix=API)
-app.include_router(chat_router, prefix=API)
+# Every mounted /api route requires a VERIFIED, INVITED identity — applied here at the mount,
+# not per-route, so a new endpoint in a module is gated by construction and cannot be
+# forgotten. get_current_principal = token verified (signature/issuer/audience) AND the email's
+# domain is on ALLOWED_EMAIL_DOMAINS. It deliberately does NOT require a tenant — everything
+# served today is public data; tenancy stays get_current_tenant's job on the private routes.
+# (Middleware was considered and rejected: it needs hand-written path matching to exempt /,
+# /health and the SPA assets, and a bug there either locks out the login page or silently
+# exempts an API route. A router-level dependency has no path logic to get wrong.)
+_REQUIRE_SIGN_IN = [Depends(get_current_principal)]
+app.include_router(plans_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
+app.include_router(marts_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
+app.include_router(chat_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 
 # The built SPA (frontend/dist), produced by `vite build` in the Dockerfile's node stage and
 # copied in beside the app. Absent in a bare dev checkout — see _spa_index below.
@@ -59,6 +68,15 @@ if (_DIST / "assets").is_dir():
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@app.get(f"{API}/me")
+def me(principal: dict = Depends(get_current_principal)) -> dict:
+    """The invite probe. The SPA's AuthGate calls this once after sign-in, BEFORE loading the
+    app: 200 proves the token verifies end-to-end AND the caller is on the invite list; 403
+    becomes a clear "not invited" screen instead of a page of scattered fetch errors. Returns
+    only what the gate displays — never the raw claims."""
+    return {"email": principal.get("email")}
 
 
 @app.get(f"{API}/schools")

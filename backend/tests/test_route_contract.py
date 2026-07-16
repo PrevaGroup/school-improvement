@@ -21,8 +21,10 @@ from app.main import app
 # path -> the HTTP methods it answers.
 EXPECTED: dict[str, set[str]] = {
     # NOT under /api — an unauthenticated liveness probe, not an API route. It must stay
-    # outside the prefix that gains the auth dependency at go-live.
+    # outside the prefix, which now carries the sign-in dependency.
     "/health": {"GET"},
+    # The invite probe: the SPA's AuthGate calls it after sign-in, before loading the app.
+    "/api/me": {"GET"},
     # --- everything below is under /api (see app/main.py; docs/GO_LIVE_PLAN.md §3.1c) ---
     "/api/schools": {"GET"},
     "/api/schools/{school_id}/metrics": {"GET"},

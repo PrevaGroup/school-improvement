@@ -52,7 +52,7 @@ gcloud run deploy sip-api \
   --source . \
   --region us-central1 \
   --add-cloudsql-instances school-improvement-501916:us-central1:school-improvement-sql \
-  --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false \
+  --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false,ALLOWED_EMAIL_DOMAINS=prevagroup.com \
   --min-instances 0 \
   --max-instances 4 \
   --no-allow-unauthenticated
@@ -79,6 +79,11 @@ gcloud run deploy sip-api \
     (built inside the image) while **keeping `frontend/` source**, which build stage 1 needs.
 - The Anthropic key is read from Secret Manager via ADC at request time; no env var
   needed in prod. (Set `ANTHROPIC_API_KEY` only for a local dev fallback.)
+- **`ALLOWED_EMAIL_DOMAINS` is required from this deploy on** — every `/api` route now
+  demands a verified, invited identity, and the allowlist fails closed: forget it and
+  every signed-in user 403s with "not on the invite list". `prevagroup.com` only until
+  Entra lands (a single value, so no comma and no `^@^` needed yet — see the allowlist
+  section below for when gatesfoundation.org joins).
 - **`--no-allow-unauthenticated`** is the access gate: only Google identities you grant
   `roles/run.invoker` can reach the service (this is how "who's asking" and your Claude
   spend are controlled — see below). No app-level login is built.

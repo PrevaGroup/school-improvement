@@ -14,9 +14,19 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // The ONE place the ID token is attached — this is why every call goes through this
+  // wrapper. The SDK refreshes the token automatically; signed out -> no header -> the
+  // backend 401s -> the AuthGate shows sign-in. Imported lazily so unit tests of pure
+  // helpers never touch the Firebase SDK.
+  const { idToken } = await import("./firebase");
+  const token = await idToken();
   const res = await fetch(`/api${path}`, {
     ...init,
-    headers: { ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers },
+    headers: {
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
   });
   if (!res.ok) {
     // A JSON 404 here means a mistyped API path. It is NOT the SPA fallback returning
