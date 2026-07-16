@@ -17,7 +17,7 @@ loaders, on Cloud SQL.
 | [`docs/TARGET_SCHEMA.md`](docs/TARGET_SCHEMA.md) | The data model spec — five layers (raw / staging / star / augment / marts), tenancy + RLS, missingness, instruments |
 | [`docs/DATA_CATALOG.md`](docs/DATA_CATALOG.md) | The raw CA data sources and how they were obtained |
 | [`backend/`](backend/) | FastAPI + SQLAlchemy + Alembic app: RLS schema, Secret-Manager config, and the ETL loaders |
-| [`backend/etl/ca/`](backend/etl/ca/) | California public-data loaders (`load_ca_<fact>.py`) + [their README](backend/etl/ca/README.md) |
+| [`backend/public_metrics/`](backend/public_metrics/) | California public-data loaders (`load_ca_<fact>.py`) + [their README](backend/public_metrics/README.md) |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Architecture: request/trust flow, data-model layers, ingest pipelines, repo index, remaining tasks |
 | [`CLAUDE.md`](CLAUDE.md) | How to work in this repo — module boundaries, `core` as a frozen contract |
 | [`docs/MODULES.md`](docs/MODULES.md) | Module registry — what each module owns and reads, and reorg status |

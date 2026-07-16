@@ -29,7 +29,7 @@ migration) — which is why it lives in `core`, not in a module.
 
 | Module | Owns (writes) | Reads (from core / public) | Serving surface | Status |
 |---|---|---|---|---|
-| **public_metrics** | `fact_metric` @ public | CDE/CA raw files → core dims | (bulk ETL, no API) | scattered |
+| **public_metrics** | `fact_metric` @ public | CDE/CA raw files → core dims | (bulk ETL, no API) | **relocated** |
 | **sip** (plan extraction) | `plan_extraction`, `plan_*` | PDFs, `dim_school` | `/plans/*` (ingest) | scattered |
 | **likeschools** (engine) | `feat_match_vector`, `mart_school_peer`, `model_partition_stats` | `dim_school` (inputs only, never outcomes) | **none — engine only** | **relocated** |
 | **serving** | — (owns no tables) | `plan_extraction`, `fact_metric`, `mart_school_peer`, `dim_*` — all via SQL | `/marts/*`, `/chat` | scattered |
@@ -83,7 +83,7 @@ backend/
   core/                     ← was app/{config,db,security}.py, app/models/{base,reference,tenant}.py
     config.py  db.py  security.py
     models/                   ONLY shared tables: star dims, fact_metric, tenancy
-    vocab/                    conformed vocab (was etl/ca/_shared.py constants)
+    vocab/                    conformed vocab (DONE: app/vocab.py)
     migrations/               the Alembic spine
     sql/                      bootstrap roles, RLS smoketest, reset
     CONTRACT.md               the tables + vocab modules are allowed to depend on
@@ -92,7 +92,7 @@ backend/
   likeschools/              ← DONE 2026-07-15: build_peers.py, models.py, migrations/0004_*
                               ENGINE ONLY — no serving surface
   sip/                      ← was etl/ca/sip/*, app/plans.py, app/plan_loader.py, migration 0003
-  public_metrics/           ← was etl/ca/*.py, _shared.py, seed_ca_dims.py
+  public_metrics/           ← DONE 2026-07-15: _shared.py, load_ca_*.py, seed_ca_dims.py
   serving/                  ← was app/marts.py + app/chat.py (was: separate plan_marts + chat
                               modules; merged 2026-07-15 — see the decision above)
 frontend/                   ← React + Vite (not yet built)
@@ -216,12 +216,28 @@ engine to keep it that way.
       tree is never walked, so the module would go dark to the boundary check — the same silent
       failure as `pytest.ini`'s `testpaths` omitting `tests/`.
 
+**Code relocation — `public_metrics` done 2026-07-15:**
+- [x] `etl/ca/*.py` → `backend/public_metrics/`, and `etl/ca/README.md` (the loader runbook)
+      merged into the module's own README.
+- [x] **Runbook changed:** `python -m etl.ca.<x>` → `python -m public_metrics.<x>`.
+- [x] `_shared.py` had the same `parents[2]` trap as `build_peers.py` — it walks up to `backend/`
+      to make `app.*` importable, and the move shortened its depth by one. Now `parents[1]`.
+      **Check `parents[N]` on every file that changes depth**; tests never catch it, because
+      `conftest.py` already puts `backend/` on `sys.path`.
+- [x] `SOURCE_TREES` + `MODULE_OF_PREFIX` updated (`etl.ca` → `public_metrics`).
+- [x] Owns no migrations — `fact_metric` and the `dim_*` are core's, created in `0001`. So no
+      `version_locations` entry, unlike likeschools.
+- **`etl/ca/` still exists**, holding only `sip/` and an empty `__init__.py` as the package
+  marker for `etl.ca.sip`. It goes away when sip relocates. (sip stopped importing anything from
+  `etl/ca/*.py` in the vocab carve, so this move needed no sip changes at all.)
+
 **Code relocation — remaining (NOT started):**
-- [ ] `public_metrics` (`etl/ca/*.py`) — doesn't touch `main.py`. Changes every loader runbook
-      command (`python -m etl.ca.load_ca_*` → `python -m public_metrics.load_ca_*`).
-- [ ] `sip`, `serving`, `core` — **each changes `app/main.py`'s imports**, which collides with
-      go-live task 3.1c (`/api/*` prefix), also on `main.py` + the route contract. Sequence
-      deliberately; don't run both at once.
+- [ ] `sip` — `etl/ca/sip/*` + `app/plans.py` + `app/plan_loader.py`. Moving only the `etl/ca/sip`
+      half would split one module across two directories, which is worse than leaving it; moving
+      `plans.py` changes `main.py`'s import. So: all at once, and it touches `main.py`.
+- [ ] `serving`, `core` — **each changes `app/main.py`'s imports** too. All three collide with
+      go-live task 3.1c (`/api/*` prefix), which also targets `main.py` + the route contract.
+      Sequence deliberately; don't run both at once.
 - [ ] **While `db.py` moves to `core/`: make the engine lazy.** A function or cached factory —
       **no module-level `create_engine`**. Today `app/db.py` runs `engine = _build_engine()` at
       **import time**, so importing *any* `app` module requires DB credentials **and** an

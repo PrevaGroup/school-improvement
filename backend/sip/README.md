@@ -33,7 +33,7 @@ The extractor uses Claude to read the PDF natively.
 Depends only on `core` — and as of 2026-07-15 that's actually true, enforced by
 `backend/tests/test_module_boundaries.py` rather than asserted here.
 
-It wasn't before: four files imported `etl/ca/_shared.py` (**public_metrics**) for `_engine` and
+It wasn't before: four files imported public_metrics' `_shared.py` for `_engine` and
 the conformed vocab. The vocab moved to `core` (`app/vocab.py`) — a vocabulary two modules must
 agree on can't live inside one of them — and the engine is now this module's own (`_db.py`), a
 deliberate one-line near-copy rather than a shared helper, because sharing an engine factory is
@@ -43,7 +43,7 @@ coupling, not reuse.
   `app.vocab`. The extractor pins its prompt to these so a plan measure maps onto a real
   `dim_metric.metric_id`; an id invented here writes rows that join to nothing.
 - **Engine:** `from ._db import _engine` — runs as the migrator role.
-- **Never** import `etl.ca._shared` or any other module. Read their tables with SQL instead.
+- **Never** import `public_metrics._shared` or any other module. Read their tables with SQL instead.
 
 The RLS-enforced `plan_*` tables are the security-sensitive part — changes there must preserve
 tenant isolation (see `core` security model). `TenantMixin` comes from `core` and must keep coming

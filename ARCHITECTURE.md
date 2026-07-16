@@ -117,7 +117,7 @@ star schema) organised as five conceptual layers:
 
 **A. Public metrics (bulk ETL).** Per-fact loaders read CDE files and write `fact_metric`
 rows at `tenant_id='public'`. Thin scripts over shared machinery — see
-[`backend/etl/ca/`](backend/etl/ca/) and [its README](backend/etl/ca/README.md). Run in
+[`backend/public_metrics/`](backend/public_metrics/) and [its README](backend/public_metrics/README.md). Run in
 Cloud Shell against Cloud SQL via the Auth Proxy.
 
 **B. School improvement plans (PDF → review → DB).** The one that turns a district's SPSA/

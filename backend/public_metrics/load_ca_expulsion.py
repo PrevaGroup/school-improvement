@@ -1,8 +1,8 @@
 """CA expulsion (2023-24) -> fact_metric.
 
-    python -m etl.ca.load_ca_expulsion --data-dir ~/data
+    python -m public_metrics.load_ca_expulsion --data-dir ~/data
 """
-from etl.ca._shared import run_metric_loader
+from ._shared import run_metric_loader
 
 SPEC = dict(
     file="behavior/expulsion_2023-24.txt",

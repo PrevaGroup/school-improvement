@@ -1,8 +1,8 @@
 """CA homeless student enrollment (2023-24, count) -> fact_metric.
 
-    python -m etl.ca.load_ca_homeless --data-dir ~/raw
+    python -m public_metrics.load_ca_homeless --data-dir ~/raw
 """
-from etl.ca._shared import run_metric_loader
+from ._shared import run_metric_loader
 
 SPEC = dict(
     file="demographics/homeless_2023-24.txt",
