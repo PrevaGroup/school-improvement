@@ -367,6 +367,13 @@ one hurried `--set-env-vars` edit away from being true. Make it structural:
 
 ### 3.4 — Move Claude spend control into the app
 
+> ✅ **Shipped (#30, 2026-07-16).** `usage_chat_daily` (migration 0005) counts raw tokens at
+> (principal, UTC day, model) grain; `app/usage.py` derives dollars and enforces
+> `CHAT_DAILY_USER_USD` ($2) + `CHAT_DAILY_GLOBAL_USD` ($20) — 429 over-cap, **503 fails
+> closed** if the counter is unreachable. Core-owned by explicit seam decision (the dry run
+> for traces storage). §3.6 is now unblocked; its deploy must run migration 0005 first.
+> Anthropic/GCP billing alerts below remain a §3.6 human step.
+
 > ⚠️ **`chat.py` belongs to `serving/`, not to this plan** — #6 folded `chat` + `marts` into
 > one module, correcting an earlier claim here that go-live owned the file (§2.5). So §3.4 and
 > §3.7 need **coordination with whoever relocates `serving/`**, not unilateral edits.
@@ -479,7 +486,7 @@ PARALLEL — no reorg collision (new files, or deploy-only):
   3.1b Dockerfile → root ──┘                                │
                                                             │
 COORDINATE with serving/ (the reorg owns chat.py now):      │
-  3.4 chat spend cap  ← GATE BLOCKER ────────────────────────┤
+  3.4 chat spend cap  ✅ SHIPPED #30 ─────────────────────────┤
   3.7 charts + validator                                     │
                                                              │
 BLOCKED on a human decision:                                 │
@@ -487,7 +494,7 @@ BLOCKED on a human decision:                                 │
                                                             ─┘
 ```
 
-**3.6 is last, and 3.4 is now the only remaining hard prerequisite.** §3.3 shipped, so tenant
+**3.6 is last, and every hard prerequisite has now shipped.** §3.3 shipped, so tenant
 impersonation is closed; but opening the gate before the spend cap still exposes the Anthropic
 balance, and that is not recoverable by "we'll add it next week."
 
@@ -506,7 +513,7 @@ and in parallel; nothing else waits on it.
 | Cloud Run domain mapping | — | **$0** |
 | Identity Platform | ~$0 | **~$0** (well under free-tier MAU) |
 | Cloud SQL | ~$10–25 | unchanged |
-| Claude API | usage-based, IAM-capped | **usage-based, app-capped** (task 3.4) |
+| Claude API | usage-based, IAM-capped | **usage-based, app-capped** ($20/day global, task 3.4 ✅) |
 | **Total (excl. Claude)** | ~$15–35/mo | **~$20–45/mo** |
 
 ## 6. Open questions
