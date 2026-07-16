@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import {
   GoogleAuthProvider,
+  OAuthProvider,
   getAuth,
   onAuthStateChanged,
   signInWithPopup,
@@ -33,20 +34,22 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Access rides on an identity the employer can revoke (see the allowlist rationale in
-// security.py). prevagroup.com is Workspace-managed, so its Google identities die with
-// offboarding. gatesfoundation.org waits for Entra — a personal Google account on a work
-// email survives offboarding and is exactly the identity Tim ruled out.
-const provider = new GoogleAuthProvider();
-
-/** Google sign-in via popup.
+/** Sign in via the given Identity Platform provider id ("google.com", "microsoft.com").
+ *
+ * The provider comes from the email-first routing table (auth-routing.ts) — access rides
+ * on an identity the employer can revoke, so each org signs in through ITS OWN IdP and
+ * the backend rejects any other arrival (provider binding in security.py). login_hint
+ * pre-fills the account chooser with the address the user already typed.
  *
  * Popup rather than redirect, still: redirect flows reload the whole app around the
  * round-trip, and popup UX is what testers expect. The old caveat here (Safari/ITP
  * flakiness from a third-party authDomain) was retired when authDomain moved to our own
  * domain via the /__/* reverse proxy — the handler is first-party now.
  */
-export function signInWithGoogle(): Promise<unknown> {
+export function signInWithProvider(providerId: string, loginHint?: string): Promise<unknown> {
+  const provider =
+    providerId === "google.com" ? new GoogleAuthProvider() : new OAuthProvider(providerId);
+  if (loginHint) provider.setCustomParameters({ login_hint: loginHint });
   return signInWithPopup(auth, provider);
 }
 

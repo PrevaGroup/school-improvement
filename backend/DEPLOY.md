@@ -141,17 +141,46 @@ gcloud run services add-iam-policy-binding sip-api --region us-central1 \
 They then reach it via an identity-aware proxy token (or `gcloud run services proxy sip-api
 --region us-central1` for a local authenticated tunnel).
 
-## Who may sign in — `ALLOWED_EMAIL_DOMAINS` (the invite list)
+## Who may sign in — `ALLOWED_DOMAIN_PROVIDERS` (the invite list, with teeth)
 
 **Authentication is not invitation.** With Identity Platform's Google provider enabled, *any* Gmail account
 can obtain a valid token for this project. Verifying the token therefore gates **nothing** on
-its own — it proves the caller exists, not that you invited them. `ALLOWED_EMAIL_DOMAINS` is
+its own — it proves the caller exists, not that you invited them. This map is
 what turns "signed in" into "invited", and it is what stands between the open internet and the
 Anthropic balance behind `/api/chat`.
 
 ```bash
-ALLOWED_EMAIL_DOMAINS=prevagroup.com,gatesfoundation.org
+ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com,gatesfoundation.org=microsoft.com
 ```
+
+One table, three jobs:
+- **Invitation** — the keys are the invited domains (everything below about exact matching
+  and failing closed applies to them).
+- **Routing** — the SPA's email-first screen mirrors this map (`frontend/src/auth-routing.ts`)
+  to send each user to their org's own popup. Keep the two in step when adding an org.
+- **Enforcement** — `security.py` 403s any token whose server-set `sign_in_provider` doesn't
+  match the domain's entry. This is the revocability constraint made structural: preva
+  identities are Workspace-managed, gates identities are Entra; a *personal* Google account
+  on a work address survives offboarding and is therefore not an acceptable identity, even
+  with the right email.
+
+The older `ALLOWED_EMAIL_DOMAINS=prevagroup.com,...` still works and maps every listed
+domain to `google.com` — correct for the preva-only era, so a redeploy from old shell
+history stays safe. Prefer the map for anything new.
+
+### Adding an Entra org (Phase B checklist, in order)
+
+1. Azure: multi-tenant **app registration** (free account) — redirect URI
+   `https://sip.prevagroup.com/__/auth/handler`, NO permissions beyond OIDC defaults
+   (`openid email profile` — the shortest possible consent review).
+2. Identity Platform → Providers → **Microsoft**: paste the registration's client ID +
+   secret (same field-swap trap as Google, see above).
+3. Add `<org-domain>=microsoft.com` to `ALLOWED_DOMAIN_PROVIDERS` and un-comment the same
+   entry in `frontend/src/auth-routing.ts`; deploy.
+4. First sign-in from the org either works (their tenant allows user consent — rare) or
+   throws `AADSTS90094` admin-consent-required, which usually carries a request-approval
+   flow into their IT queue. That request IS the ask; there is no shortcut around a
+   consent-locked tenant.
 
 - **Comma-separated, exact domains.** `mail.prevagroup.com` does **not** match `prevagroup.com`
   — suffix matching is how allowlists get bypassed (`notprevagroup.com`,

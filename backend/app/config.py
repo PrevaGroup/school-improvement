@@ -101,6 +101,56 @@ class Settings(BaseSettings):
             return {str(d).strip().lower() for d in v if str(d).strip()}
         return v
 
+    # --- who may sign in AND HOW: domain -> required sign-in provider ---
+    # e.g. "prevagroup.com=google.com,gatesfoundation.org=microsoft.com" (JSON dict also
+    # accepted). One table, three jobs — invitation (keys), routing (the frontend mirrors
+    # this map for its email-first screen), and ENFORCEMENT: security.py rejects a token
+    # whose sign_in_provider doesn't match the domain's entry. The enforcement is the
+    # Security-101 constraint: access must ride an identity the employer can revoke, so a
+    # personal Google account on a gates address must be structurally impossible, not just
+    # unlinked. Supersedes ALLOWED_EMAIL_DOMAINS (kept as a fallback that maps every domain
+    # to google.com — true for the preva-only era, so old deploys keep working).
+    allowed_domain_providers: Annotated[dict[str, str], NoDecode] = {}
+
+    @field_validator("allowed_domain_providers", mode="before")
+    @classmethod
+    def _split_domain_providers(cls, v):
+        """Accept "a.com=google.com, b.org=microsoft.com" or a JSON dict.
+
+        Same NoDecode dance as the allowlist below (see that comment). A malformed pair
+        raises — a typo'd map should fail the deploy loudly, not half-open the door.
+        Lowercased on both sides: domains for the same reason as the allowlist; provider
+        ids because Identity Platform's are lowercase constants ("google.com").
+        """
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return {}
+            if s.startswith("{"):
+                import json
+                return {str(k).strip().lower(): str(p).strip().lower()
+                        for k, p in json.loads(s).items()}
+            pairs = {}
+            for entry in s.split(","):
+                entry = entry.strip()
+                if not entry:
+                    continue
+                domain, sep, provider = entry.partition("=")
+                if not sep or not domain.strip() or not provider.strip():
+                    raise ValueError(
+                        f"ALLOWED_DOMAIN_PROVIDERS entry {entry!r} is not domain=provider"
+                    )
+                pairs[domain.strip().lower()] = provider.strip().lower()
+            return pairs
+        return v
+
+    @property
+    def domain_providers(self) -> dict[str, str]:
+        """The effective domain -> required-provider table. Fails closed: empty = nobody."""
+        if self.allowed_domain_providers:
+            return self.allowed_domain_providers
+        return {d: "google.com" for d in self.allowed_email_domains}
+
     @property
     def identity_platform_audience(self) -> str | None:
         return self.google_oauth_audience or self.gcp_project
