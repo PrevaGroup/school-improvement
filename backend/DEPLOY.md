@@ -84,6 +84,15 @@ gcloud run deploy sip-api \
   every signed-in user 403s with "not on the invite list". `prevagroup.com` only until
   Entra lands (a single value, so no comma and no `^@^` needed yet — see the allowlist
   section below for when gatesfoundation.org joins).
+- **Migration 0005 must run before the next deploy** (`alembic upgrade head`, from Cloud
+  Shell per `backend/README.md`) — /api/chat now refuses (503, fails closed) if the
+  `usage_chat_daily` spend counter is missing.
+- **Claude spend caps** (in-app, §3.4 — the IAM gate's replacement for its second job):
+  `CHAT_DAILY_USER_USD` (default $2/day per signed-in user, ~10–40 heavy messages) and
+  `CHAT_DAILY_GLOBAL_USD` (default $20/day everyone combined — the ceiling that holds no
+  matter how many allowlisted users show up). Over either → 429 until midnight UTC. Raw
+  token counts land per (user, day, model); dollars are derived from the price table in
+  `app/usage.py` — update it there when Anthropic reprices.
 - **`--no-allow-unauthenticated`** is the access gate: only Google identities you grant
   `roles/run.invoker` can reach the service (this is how "who's asking" and your Claude
   spend are controlled — see below). No app-level login is built.

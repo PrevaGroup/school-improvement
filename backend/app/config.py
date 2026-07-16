@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     tenant_claim: str = "tenant_id"
     domain_tenant_map: dict[str, str] = {}
 
+    # --- Claude spend caps for /api/chat (app/usage.py) ---
+    # Dollars/day, derived from raw token counts x MODEL_PRICES. Per-user bounds one runaway
+    # account; global bounds (cap x allowlisted users) — the real exposure once the IAM gate
+    # opens. The chat loop's own ceilings bound each message well under $1, so $2/day is
+    # ~10-40 heavy messages: invisible to a tester, a wall to a script.
+    chat_daily_user_usd: float = 2.00
+    chat_daily_global_usd: float = 20.00
+
     # --- who may sign in at all (see app/security.py) ---
     # Email domains allowed through the door, e.g. "prevagroup.com,gatesfoundation.org".
     # Authentication is not invitation: with a Google provider enabled, ANY Gmail account can
