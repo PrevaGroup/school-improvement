@@ -46,8 +46,8 @@ loaders, on Cloud SQL.
 **Planned — next up is going public.** [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) sequences
 the cutover from "IAM-gated, only I can open it" to "invited people sign in at a real domain":
 Identity Platform sign-in + provisioning · a React + Vite + TypeScript SPA in `frontend/`, **built into the
-same container and served by FastAPI at one origin** (not Cloudflare Pages — Cloudflare is DNS
-only) · a custom domain via Cloud Run domain mapping · an in-app Claude spend cap.
+same container and served by FastAPI at one origin** · a custom domain via Cloud Run domain
+mapping · an in-app Claude spend cap.
 
 Its load-bearing constraint: **the IAM gate opens last.** IAM is currently both the access gate
 *and* the only cap on Anthropic spend, so its replacements land first.

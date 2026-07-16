@@ -10,12 +10,14 @@ repo, and what's left to build.
 plan ingest — *live*. **Planned:** a React + Vite + TypeScript SPA **served by FastAPI from
 the same Cloud Run service** *(the demo serves a no-build React UI from the app itself)* ·
 **Identity Platform** sign-in *(the demo is gated by Cloud Run IAM)*. Naming decoder, because Google's console will not say any of the older names: the product is **Identity Platform** (formerly "Google Cloud Identity Platform"/GCIP — that acronym appears nowhere in the console), its console URL slug is `customer-identity`, its API is `identitytoolkit.googleapis.com`, and it issues **Firebase** ID tokens. Four names, one thing · the
-domain via **Cloud Run domain mapping**, with Cloudflare as **DNS only**.
+domain via **Cloud Run domain mapping**, with DNS on **Google-hosted nameservers** (managed
+via the Squarespace panel).
 
-**Not used — deliberately:** Cloudflare Pages, Access, Workers, and Tunnel. An earlier plan
-put the frontend on Pages; serving the built SPA from FastAPI keeps **one origin**, which is
-why this codebase has no CORS middleware and needs none. Choosing Identity Platform for identity left
-Cloudflare with no job but DNS. The cutover plan: [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md).
+**Not used — deliberately:** third-party static hosting, edge proxies/WAFs, edge workers, and
+tunnels. An earlier plan put the frontend on a separate static host; serving the built SPA from
+FastAPI keeps **one origin**, which is
+why this codebase has no CORS middleware and needs none. Choosing Identity Platform for identity
+removed the last job an edge provider had. The cutover plan: [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md).
 
 **Guiding principle:** this is a *prototype*. Build the isolation seam (`tenant_id` + RLS)
 correctly now because it's expensive to retrofit; keep everything else simple and upgrade
@@ -218,20 +220,18 @@ runs the image. Those source zips are build inputs only (one per deploy); safe t
 
 **Domain:** a **Cloud Run domain mapping** (`gcloud beta run domain-mappings` — the GA
 `gcloud run domain-mappings` command is Anthos-only), with the CNAME to `ghs.googlehosted.com`
-in Cloudflare as **DNS-only (grey cloud, proxy off)**. `us-central1` supports domain mappings
-(verified 2026-07-15). No load balancer, no tunnel, no `cloudflared`, no `wrangler.toml` —
-**Cloudflare requires zero repo artifacts.**
+in **Google-hosted DNS** (nameservers managed via the Squarespace panel). `us-central1`
+supports domain mappings (verified 2026-07-15). No load balancer, no tunnel, no proxy —
+**the domain requires zero repo artifacts.** Google-hosted DNS has no proxying mode, so the
+CNAME is always visible to Google's cert provisioning — the proxy-hides-the-CNAME failure
+class is structurally absent here.
 
-Orange cloud isn't merely discouraged, it **breaks the mapping**: Cloudflare hides the CNAME,
-so Google's managed cert never provisions (mapping stuck pending; Full(strict) → 525;
-Flexible → redirect loop against an HTTPS-only origin).
-
-> **Accepted limitation — `*.run.app` bypasses Cloudflare, and we do not fix it.** With
-> Cloudflare reduced to DNS, it is decorative for security: anyone with the `run.app` URL skips
-> it, so WAF/caching there protects nothing on its own. **Identity Platform verification in FastAPI is the
+> **Accepted limitation — `*.run.app` stays reachable, and we do not fix it.** The custom
+> domain is convenience, not a boundary: anyone with the `run.app` URL skips
+> it entirely. **Identity Platform verification in FastAPI is the
 > perimeter** — it doesn't care which hostname a request arrived on, which is the conventional
-> Cloud Run pattern. Therefore: **no ALB, no ingress restrictions, no Cloudflare-header-checking
-> middleware, and no Cloudflare-dependent logic in the app.** Hardening is a deliberate infra
+> Cloud Run pattern. Therefore: **no ALB, no ingress restrictions, no hostname-checking
+> middleware, and no edge-dependent logic in the app.** Hardening is a deliberate infra
 > change if we ever want it — never a scaffold feature.
 
 > **Temporary demo, not prod.** What is currently deployed is the MVP demo described in
@@ -323,12 +323,13 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
       + `cloudsql.client`. *(Live 2026-07-14, IAM-gated.)*
 - [ ] **Move Claude spend control into the app** — a per-principal daily cap on `/api/chat`
       keyed on the verified Identity Platform subject. The IAM gate is what caps spend today; opening the
-      gate removes it, and grey-cloud Cloudflare provides no edge rate limiter to inherit.
+      gate removes it, and there is no edge rate limiter to inherit.
       Prerequisite for opening the gate.
 - [ ] Deploy Identity Platform-enforced but still `--no-allow-unauthenticated`; verify 401-without-token;
       **only then** `--allow-unauthenticated` + `--min-instances 1`.
       *(`gcloud beta` is installed as of 2026-07-15, so the domain mapping below is unblocked.)*
-- [ ] Create the domain mapping; CNAME in Cloudflare **grey-cloud**; verify domain ownership
+- [ ] Create the domain mapping; add the CNAME (`ghs.googlehosted.com`) in DNS via the
+      Squarespace panel; verify domain ownership
       in Search Console first (hard prerequisite); allow hours for the cert.
 - [ ] Re-run the tenant-isolation test end-to-end against the deployed API (log in as two
       districts, confirm neither sees the other's plans).
@@ -361,13 +362,13 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 
 ## Cost at MVP scale (rough, USD/mo)
 
-Reflects the go-live target (`min-instances 1`, no Cloudflare compute).
+Reflects the go-live target (`min-instances 1`, no edge compute).
 
 | Item | Cost |
 |---|---|
 | Cloud SQL (small, single-zone) | ~$10–25 |
 | Cloud Run (FastAPI + SPA, **min-instances = 1**, always warm) | ~$6–15 |
-| Cloudflare (DNS only — no Pages/Workers/Access) | $0 |
+| DNS (Google-hosted nameservers, via Squarespace) | $0 |
 | Cloud Run domain mapping | $0 |
 | Identity Platform (under free-tier MAU) | ~$0 |
 | Cloud Storage (raw data, Standard, first 5 GB free) | pennies–$2 |

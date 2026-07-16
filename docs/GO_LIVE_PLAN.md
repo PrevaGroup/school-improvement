@@ -25,19 +25,20 @@ produces is described in [`ARCHITECTURE.md`](../ARCHITECTURE.md); the mechanical
 | Frontend | ~~361-line no-build React from esm.sh~~ | ✅ **React + Vite + TypeScript** in `frontend/`, bundled into the image |
 | Origins | one (app serves its own UI) | **still one** — FastAPI serves the built SPA |
 | API paths | `/marts/*`, `/chat`, `/schools` | **`/api/*`** |
-| Cloudflare | none | **DNS only** (grey cloud, proxy off). No Pages, Access, Workers, Tunnel, or `wrangler.toml`. **Zero repo artifacts** |
+| Edge services (CDN/proxy/tunnel) | none | **still none** — DNS records only. No static-site hosting, edge access control, workers, or tunnel. **Zero repo artifacts** |
 | Min instances | 0 | **1** (no cold starts for invited testers) |
 | Data served | 100% public marts | **unchanged — still 100% public** |
 
-**Explicitly dropped from the old plan:** Cloudflare Pages (the SPA ships inside the
-container instead), Cloudflare Access, Workers, and Tunnel. Choosing Identity Platform for identity and
-FastAPI for serving removed both jobs Cloudflare was there to do. Its remaining role is DNS.
+**Explicitly dropped from the old plan:** third-party static hosting for the SPA (it ships
+inside the container instead), edge access control, edge workers, and the tunnel. Choosing
+Identity Platform for identity and
+FastAPI for serving removed both jobs the edge provider was there to do.
 
 > **Why the tunnel was ever in the plan — worth recording, so it doesn't come back.** It was
 > load-bearing under an *earlier* shape: a vanilla UI on a box you didn't want exposed, gated
-> by Cloudflare Access. Under that plan a tunnel made sense. Moving auth to **Identity Platform** and
+> by an edge access-control product. Under that plan a tunnel made sense. Moving auth to **Identity Platform** and
 > serving to **Cloud Run** evaporated both premises — Cloud Run is already a public HTTPS
-> origin, so there is nothing to dial out of, and standing up a VM to host `cloudflared` would
+> origin, so there is nothing to dial out of, and standing up a VM to host a tunnel daemon would
 > be architecture in service of a sentence that outlived its design.
 
 **Explicitly still deferred:** the private-tenant `/plans` serving path, per-user roles, and
@@ -381,7 +382,7 @@ one hurried `--set-env-vars` edit away from being true. Make it structural:
 > honesty layer, so a spend cap can't quietly reshape a tool result.
 
 [`DEPLOY.md`](../backend/DEPLOY.md) currently says the IAM gate is "how your Claude spend is
-controlled." **This plan removes that gate**, and with Cloudflare grey-clouded there is no
+controlled." **This plan removes that gate**, and there is no
 edge rate limiter to inherit. So the control has to be rebuilt in-app, in the same change:
 
 - A **per-principal daily cap** on `/api/chat`, keyed on the verified Identity Platform `sub`/`email`
@@ -419,8 +420,9 @@ listed last. Nothing else here is blocked on it — it blocks *testers*, not cod
 > `--min-instances` stays 0 by choice (cold starts accepted for now).
 >
 > **Reality correction:** prevagroup.com DNS is Google-hosted nameservers managed via
-> Squarespace — **not Cloudflare**. The Cloudflare/grey-cloud steps below were written on
-> an unverified assumption; kept for history, superseded by DEPLOY.md's corrected runbook.
+> Squarespace — **not the third-party DNS provider the plan assumed**. The DNS steps below
+> were written on an unverified assumption; kept for history, superseded by DEPLOY.md's
+> corrected runbook.
 >
 > **Still open (human, console):** Anthropic auto-reload + low-balance alert; GCP billing
 > alert.
@@ -436,31 +438,31 @@ Order matters:
    `gcloud run services proxy` that a request without a token gets 401 and one with a token
    gets 200.
 2. Only then `--allow-unauthenticated`, and set `--min-instances 1`.
-3. Create the domain mapping; add the CNAME in Cloudflare as **DNS-only (grey cloud)**.
+3. Create the domain mapping; add the CNAME (`ghs.googlehosted.com`) in DNS.
 4. Confirm `*.run.app` is still 401-without-token. **It stays reachable** — the domain is
    convenience, Identity Platform is the boundary. If the run.app URL is open, so is the domain.
 
 Full commands: [`backend/DEPLOY.md`](../backend/DEPLOY.md).
 
-#### Accepted limitation: `*.run.app` bypasses Cloudflare — **do not "fix" this**
+#### Accepted limitation: `*.run.app` bypasses the custom domain — **do not "fix" this**
 
-With Cloudflare reduced to DNS, it is **decorative for security**: anyone who finds the
-`run.app` URL skips it entirely, so WAF/caching there protects nothing on its own. That is
+The custom domain is **convenience, not a security boundary**: anyone who finds the
+`run.app` URL skips it entirely. That is
 **accepted, deliberately**, and the reasoning is what keeps this scaffold boring:
 
 - **Identity Platform token verification in FastAPI is the real perimeter** — signature, expiry, audience,
   claims read server-side only. That is the conventional Cloud Run pattern, and it does not
   care which hostname the request arrived on.
-- **Therefore: no load balancer, no ingress restrictions, and no Cloudflare-header-checking
-  middleware.** Do not add Cloudflare-dependent logic anywhere in the app. Hardening (custom
-  domain via a global LB with internal ingress, or validating a shared header only Cloudflare
-  injects) is a **deliberate infra change if we ever want it — never a scaffold feature.**
-- **The proxy stays off** (grey cloud) regardless: orange cloud doesn't just forfeit
+- **Therefore: no load balancer, no ingress restrictions, and no hostname-checking
+  middleware.** Do not add edge-dependent logic anywhere in the app. Hardening (custom
+  domain via a global LB with internal ingress, or validating a shared header only an edge
+  proxy injects) is a **deliberate infra change if we ever want it — never a scaffold feature.**
+- **No DNS proxy sits in front** regardless: a proxying DNS layer wouldn't just forfeit
   protection, it **breaks the domain mapping** — Google's managed cert can't provision when
-  Cloudflare hides the CNAME, leaving the mapping pending, Full(strict) at 525, and Flexible in
-  a redirect loop against an HTTPS-only origin. There is no working orange-cloud config here.
+  a proxy hides the CNAME, leaving the mapping stuck pending. There is no working proxied
+  config here.
 
-> The trap this closes: "Cloudflare is in front, so we're covered." **We are not, and we are
+> The trap this closes: "something is in front, so we're covered." **Nothing is, and we are
 > not trying to be.** Identity Platform is the gate, full stop.
 
 ### 3.7 — Charts: the Vega-Lite contract
@@ -523,7 +525,7 @@ and in parallel; nothing else waits on it.
 | Item | Before | After |
 |---|---|---|
 | Cloud Run | ~$0–5 (`min-instances 0`) | **~$6–15** (`min-instances 1`, always warm) |
-| Cloudflare | Pages, free | **$0** — DNS only |
+| Edge / static hosting | planned third-party static host (free) | **$0** — dropped; SPA ships in the container |
 | Cloud Run domain mapping | — | **$0** |
 | Identity Platform | ~$0 | **~$0** (well under free-tier MAU) |
 | Cloud SQL | ~$10–25 | unchanged |
@@ -533,13 +535,11 @@ and in parallel; nothing else waits on it.
 ## 6. Open questions
 
 - **Which domain/subdomain?** A **subdomain** (`app.example.com` → CNAME
-  `ghs.googlehosted.com`) is the clean path. An apex domain needs A/AAAA records instead, and
-  Cloudflare's CNAME flattening interacts badly with grey-cloud + Google-managed certs.
+  `ghs.googlehosted.com`) is the clean path. An apex domain needs A/AAAA records instead.
 - **Domain ownership must be verified** in Google Search Console before the mapping will
   create. One-time, but it's a hard prerequisite people forget.
-- **Cert provisioning takes up to a few hours** and requires the record to stay **grey**.
-  Turning the orange cloud on breaks Google's validation — and it's the exact thing someone
-  "helpfully" does when the site looks slow.
+- **Cert provisioning takes up to a few hours** and requires the CNAME to stay publicly
+  visible to Google's validation (no DNS proxying in front of it).
 - **What replaces `static/index.html`?** Recommend porting it as the first Vite view rather
   than redesigning — it already works, and mixing a port with a redesign makes any regression
   impossible to attribute.
