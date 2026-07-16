@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { marked } from "marked";
 import { api, ApiError } from "../api";
+import { renderMarkdown } from "../markdown";
 import type { ChatTurn, DiagnosticSchool, Level } from "../types";
-
-marked.setOptions({ breaks: true, gfm: true });
 
 interface Msg extends ChatTurn {
   tools?: string[];
@@ -69,13 +67,14 @@ export function Chat({ school, level }: { school: DiagnosticSchool | null; level
               {m.content}
             </div>
           ) : (
-            // The model's output is Markdown by design (the system prompt asks for light
-            // Markdown). It is NOT user-controlled HTML: it comes from our own model call over
-            // our own tools, so this is not the classic XSS sink it resembles.
+            // The ONLY HTML sink in the app. renderMarkdown neutralises raw HTML while
+            // keeping formatting — see ../markdown.ts for why that is not paranoia: the model
+            // is told to quote plan text verbatim, and plan text comes from PDFs we don't
+            // author. Never swap this back to a bare marked.parse().
             <div
               className="m a md"
               key={i}
-              dangerouslySetInnerHTML={{ __html: marked.parse(m.content || "") as string }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }}
             />
           ),
         )}
