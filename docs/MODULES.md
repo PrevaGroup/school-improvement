@@ -112,7 +112,10 @@ branch label later only if it genuinely needs an independent deploy cadence.
 
 - [ ] `README.md` — component map + how-to-change runbook, reconciled to the code
 - [ ] `CLAUDE.md` — module scope + guardrails
-- [ ] `CONTRACT.md` — tables owned, tables/vocab read from core, migration revisions
+- [x] `CONTRACT.md` — tables owned, tables/vocab read from core, migration revisions
+      (all five exist as of 2026-07-16: `core`, `likeschools`, `public_metrics`, `sip`,
+      `serving` — each states what a rewrite must preserve, which is what makes "swappable"
+      checkable rather than aspirational)
 - [ ] code moved under `backend/<X>/`, imports updated
 - [ ] owned migration file(s) relocated + wired via `version_locations`
 - [ ] tests (at minimum a characterization test of current behavior)
