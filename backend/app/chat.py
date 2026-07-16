@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_db_public
+from .security import get_current_principal
+from .usage import check_spend_caps, record_chat_usage
 from .marts import (
     fetch_attendance_plans,
     fetch_like_schools,
@@ -254,8 +256,23 @@ def _run_tool(name: str, ti: dict, db: Session, school_level: str) -> dict:
 
 
 @router.post("")
-def chat(req: ChatRequest, db: Session = Depends(get_db_public)) -> dict:
-    """Answer a question about Long Beach attendance plans + peer comparison, level-scoped."""
+def chat(
+    req: ChatRequest,
+    db: Session = Depends(get_db_public),
+    principal: dict = Depends(get_current_principal),  # cached — the mount already verified it
+) -> dict:
+    """Answer a question about Long Beach attendance plans + peer comparison, level-scoped.
+
+    Spend-capped (§3.4): this endpoint pays Anthropic per token, and once the IAM gate opens
+    it is the only thing standing between the internet's curiosity and the API bill. The cap
+    check runs BEFORE any model call; usage is recorded on every exit path, because tokens
+    spent on completed iterations are spent whether or not the last one succeeded.
+    """
+    # Real tokens always carry `sub` (Firebase sets it); the dev-mode principal doesn't —
+    # fall back to its tenant so local RLS testing still gets a stable counter key.
+    sub = principal.get("sub") or f"dev:{principal.get(settings.tenant_claim, 'unknown')}"
+    check_spend_caps(db, sub)
+
     messages = [{"role": t.role, "content": t.content} for t in req.messages if t.content.strip()]
     if not messages:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "no messages")
@@ -268,12 +285,20 @@ def chat(req: ChatRequest, db: Session = Depends(get_db_public)) -> dict:
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key_value)
     tools_used: list[str] = []
     resp = None
+    # Summed across loop iterations (up to MAX_TOOL_ITERS + 1 model calls per user message).
+    spent = {"input_tokens": 0, "output_tokens": 0,
+             "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
     try:
         for i in range(MAX_TOOL_ITERS + 1):
             resp = client.messages.create(
                 model=settings.chat_model, max_tokens=MAX_TOKENS,
                 system=system, tools=TOOLS, messages=messages,
             )
+            u = resp.usage
+            spent["input_tokens"] += u.input_tokens or 0
+            spent["output_tokens"] += u.output_tokens or 0
+            spent["cache_read_input_tokens"] += getattr(u, "cache_read_input_tokens", 0) or 0
+            spent["cache_creation_input_tokens"] += getattr(u, "cache_creation_input_tokens", 0) or 0
             if resp.stop_reason == "refusal":
                 return {"reply": "(the assistant declined to answer that.)", "tools_used": tools_used}
             if resp.stop_reason != "tool_use" or i == MAX_TOOL_ITERS:
@@ -295,6 +320,15 @@ def chat(req: ChatRequest, db: Session = Depends(get_db_public)) -> dict:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"model error {e.status_code}: {detail}{hint}")
     except anthropic.APIConnectionError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"model connection error: {e}")
+    finally:
+        if any(spent.values()):
+            record_chat_usage(
+                db,
+                principal_sub=sub,
+                principal_email=principal.get("email"),
+                model=settings.chat_model,
+                **spent,
+            )
 
     reply = "".join(b.text for b in (resp.content if resp else []) if b.type == "text").strip()
     return {"reply": reply or "(no answer produced)", "tools_used": sorted(set(tools_used))}

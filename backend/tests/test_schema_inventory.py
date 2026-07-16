@@ -77,6 +77,10 @@ EXPECTED_TABLES: dict[str, str] = {
     "ref_benchmark": "core",
     "tenant_membership": "core",
     "tenant_scope": "core",
+    # --- core OPERATIONAL state (0005): platform bookkeeping, not a data product. The chat
+    #     spend counter — serving writes it through core; keyed by verified principal, no RLS,
+    #     never served through the API. Added same-commit as its migration, per protocol. ---
+    "usage_chat_daily": "core",
     # --- the conformed fact: declared in core (app/models/tenant.py), rows written by
     #     public_metrics. Stays in core — every module reads it, so its shape is contract. ---
     "fact_metric": "core",

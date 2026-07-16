@@ -16,6 +16,7 @@ therefore allowed to know every module:
 backend/tests/test_schema_inventory.py fails if a table stops being registered — because
 autogenerate reads a missing table as DROP TABLE.
 """
+from .ops import UsageChatDaily
 from .base import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 from .reference import (
     DimTenant, TenantScope, TenantMembership,
@@ -32,6 +33,8 @@ __all__ = [
     "DimSchool", "DimDate", "DimStudentGroup", "GroupCrosswalk",
     "DimMetric", "DimInstrument", "DimPeerGroup", "DimMetricRelationship",
     "RefBenchmark",
+    # core operational state (no RLS; never served through the API)
+    "UsageChatDaily",
     # private / tenant-scoped
     "DimPeriod", "FactMetric",
     # the trust boundary a module applies to its own private tables
