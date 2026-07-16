@@ -50,13 +50,14 @@ def test_a_realistic_message_costs_cents_not_dollars():
 # --------------------------------------------------------------------------- #
 class _FakeDB:
     """Stands in for the Session at the exact seam usage.py reads: execute(...).all()
-    returning (model, in, out, cache_read, cache_write) rows. `sub is None` = global."""
+    returning (model, in, out, cache_read, cache_write) rows. The user-scoped query binds
+    :sub; the global one doesn't (two separate statements — the merged one 42P18'd on pg8000)."""
 
     def __init__(self, user_rows, global_rows):
         self._user, self._global = user_rows, global_rows
 
     def execute(self, _sql, params):
-        rows = self._global if params["sub"] is None else self._user
+        rows = self._user if "sub" in params else self._global
         return type("R", (), {"all": lambda self_: rows})()
 
 
