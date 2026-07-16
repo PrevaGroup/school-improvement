@@ -1,7 +1,7 @@
 """Resolve the caller's identity — and, separately, their tenant. The trust boundary (§10.3).
 
 The client never sends its own tenant_id. It signs in via Google Cloud Identity
-Platform (GCIP) and sends the resulting **Firebase/Identity Platform ID token** as
+Platform (Identity Platform) and sends the resulting **Firebase/Identity Platform ID token** as
 `Authorization: Bearer <token>`. We cryptographically verify that token here, then map
 the verified identity to a tenant. The app binds that tenant with SET LOCAL (app/db.py),
 and Postgres RLS does the rest. If verification were skipped or spoofed, a caller could
@@ -22,7 +22,7 @@ Gating *public* data on get_current_tenant would 403 every signed-in user who is
 staff — i.e. every outside tester, since everything served today is public. Gating *private*
 data on get_current_principal would serve one district's plans to another. Pick deliberately.
 
-Token type note: GCIP issues Firebase ID tokens (issuer
+Token type note: Identity Platform issues Firebase ID tokens (issuer
 `https://securetoken.google.com/<project>`, audience = the GCP project id), which is why
 we use `verify_firebase_token` — NOT `verify_oauth2_token` (that's for Google Sign-In
 tokens from accounts.google.com). No `firebase-admin` dependency is needed to verify;
@@ -139,9 +139,9 @@ async def get_current_principal(
 def _assert_invited(claims: dict) -> None:
     """403 unless the caller's **verified** email is in an allowed domain.
 
-    `email_verified` is not a formality — it is the whole control. A token proves GCIP issued
+    `email_verified` is not a formality — it is the whole control. A token proves Identity Platform issued
     it; it does NOT prove the address inside is yours. Providers differ: Google verifies the
-    address, but GCIP's email/password provider lets anyone register any address unverified.
+    address, but Identity Platform's email/password provider lets anyone register any address unverified.
     Check the domain without checking `email_verified` and the allowlist becomes an honour
     system — sign up as anyone@gatesfoundation.org and walk in. Never split these two.
 
@@ -183,16 +183,16 @@ async def get_current_tenant(principal: dict = Depends(get_current_principal)) -
 
 
 def _verify_identity_token(token: str) -> dict:
-    """Verify a GCIP/Firebase ID token and return its claims.
+    """Verify an Identity Platform/Firebase ID token and return its claims.
 
     Checks signature, issuer, audience, and expiry against Google's certs. Any failure
     (tampered, expired, wrong audience) becomes a 401 — never falls through.
     """
-    audience = settings.gcip_audience
+    audience = settings.identity_platform_audience
     if not audience:
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "auth not configured: set GCP_PROJECT (the GCIP token audience)",
+            "auth not configured: set GCP_PROJECT (the Identity Platform token audience)",
         )
     try:
         claims = id_token.verify_firebase_token(token, _google_request, audience=audience)

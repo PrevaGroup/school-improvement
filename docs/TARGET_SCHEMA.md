@@ -529,7 +529,7 @@ Managed identity simplifies authentication but does not replace RLS. **IAM is re
 RLS is row-level** — IAM cannot filter the public/private row mix. The backend authenticates to
 Cloud SQL via the Auth Proxy (or the Cloud SQL Python Connector) as a service account using ADC,
 with the DB-role passwords held in **Secret Manager** (IAM DB auth is a later hardening option);
-**Google Cloud Identity Platform** (OIDC) yields the verified user → tenant. Because the backend
+**Identity Platform** (OIDC) yields the verified user → tenant. Because the backend
 is one service account, the typed-tools + `SET LOCAL` pattern is the natural default. Cloud SQL grants no full superuser, so
 run the public/state loader as the **table owner** (owners bypass RLS unless `FORCE`), not a
 `BYPASSRLS` role.

@@ -13,7 +13,7 @@ loaders, on Cloud SQL.
 
 | Path | What |
 |---|---|
-| [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) | **The plan to put this on the internet** — GCIP sign-in, the `frontend/` SPA, the domain, and why the gate opens last |
+| [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) | **The plan to put this on the internet** — Identity Platform sign-in, the `frontend/` SPA, the domain, and why the gate opens last |
 | [`docs/TARGET_SCHEMA.md`](docs/TARGET_SCHEMA.md) | The data model spec — five layers (raw / staging / star / augment / marts), tenancy + RLS, missingness, instruments |
 | [`docs/DATA_CATALOG.md`](docs/DATA_CATALOG.md) | The raw CA data sources and how they were obtained |
 | [`backend/`](backend/) | FastAPI + SQLAlchemy + Alembic app: RLS schema, Secret-Manager config, and the ETL loaders |
@@ -38,14 +38,14 @@ loaders, on Cloud SQL.
   size, locale — never outcomes) and the **marts layer** are built and serving.
 
 > **⚠️ The deployed service is a temporary demo, not the production architecture.** It is gated
-> by **Cloud Run IAM** (not GCIP), serves a **no-build React UI from the app itself** (no Vite
+> by **Cloud Run IAM** (not Identity Platform), serves a **no-build React UI from the app itself** (no Vite
 > build step), and reads the **public `plan_extraction`** marts rather than the private
 > tenant `/plans` path this repo also specifies. Serving the UI from the app is the one part
 > that *stays* — see the go-live plan below.
 
 **Planned — next up is going public.** [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) sequences
 the cutover from "IAM-gated, only I can open it" to "invited people sign in at a real domain":
-GCIP sign-in + provisioning · a React + Vite + TypeScript SPA in `frontend/`, **built into the
+Identity Platform sign-in + provisioning · a React + Vite + TypeScript SPA in `frontend/`, **built into the
 same container and served by FastAPI at one origin** (not Cloudflare Pages — Cloudflare is DNS
 only) · a custom domain via Cloud Run domain mapping · an in-app Claude spend cap.
 
