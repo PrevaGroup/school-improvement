@@ -1,12 +1,19 @@
 # Go-live plan — making the prototype reachable on the internet
 
-**Goal:** move from an IAM-gated demo that only Tim can open to a signed-in, publicly
-reachable workspace that invited people can play with. "Prototype plus": real sign-in, real
-domain, still one service, still public data.
+> ✅ **Executed — the cutover ran 2026-07-16.** The service is live, `--allow-unauthenticated`,
+> on `sip.prevagroup.com`, gated by Identity Platform sign-in + the domain allowlist, with
+> Claude spend capped in-app. This document is kept as the **historical record** of the plan
+> and its rationale; it no longer describes intent. The current posture (and the short list of
+> loose ends — `--min-instances`, tenant provisioning) lives in
+> [`backend/DEPLOY.md`](../backend/DEPLOY.md).
 
-This document is the **sequenced plan** for that cutover. The end-state architecture it
-produces is described in [`ARCHITECTURE.md`](../ARCHITECTURE.md); the mechanical runbook is
-[`backend/DEPLOY.md`](../backend/DEPLOY.md). Delete this file once the cutover is done.
+**Goal (as written pre-cutover):** move from an IAM-gated demo that only Tim can open to a
+signed-in, publicly reachable workspace that invited people can play with. "Prototype plus":
+real sign-in, real domain, still one service, still public data.
+
+This document was the **sequenced plan** for that cutover. The end-state architecture it
+produced is described in [`ARCHITECTURE.md`](../ARCHITECTURE.md); the mechanical runbook is
+[`backend/DEPLOY.md`](../backend/DEPLOY.md).
 
 > **⚠️ Read [§2.5](#25-coordinating-with-the-modular-backend-overhaul) first.** The modular
 > backend overhaul ([`MODULES.md`](MODULES.md)) is landing **in parallel** with this plan —
