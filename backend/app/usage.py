@@ -66,8 +66,12 @@ def _today_utc() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
-_SPEND_SQL = text(
-    """
+# Two explicit queries, NOT one with `(:sub IS NULL OR principal_sub = :sub)`. The clever
+# single query 42P18'd in production ("could not determine data type of parameter"): pg8000
+# sends untyped parameters, and Postgres cannot infer a type for a parameter whose only
+# uses are `IS NULL` and a comparison against it. The fake-DB unit tests can never catch a
+# dialect error — this one was caught by check_spend_caps failing closed, exactly as designed.
+_SPEND_COLS = """
     SELECT model,
            COALESCE(SUM(input_tokens), 0),
            COALESCE(SUM(output_tokens), 0),
@@ -75,15 +79,17 @@ _SPEND_SQL = text(
            COALESCE(SUM(cache_creation_input_tokens), 0)
       FROM usage_chat_daily
      WHERE usage_date = :day
-       AND (:sub IS NULL OR principal_sub = :sub)
-     GROUP BY model
-    """
-)
+"""
+_SPEND_SQL_USER = text(_SPEND_COLS + "   AND principal_sub = :sub\n GROUP BY model")
+_SPEND_SQL_GLOBAL = text(_SPEND_COLS + " GROUP BY model")
 
 
 def _spend_today_usd(db: Session, sub: str | None) -> float:
     """Today's priced spend — for one principal, or globally when sub is None."""
-    rows = db.execute(_SPEND_SQL, {"day": _today_utc(), "sub": sub}).all()
+    if sub is None:
+        rows = db.execute(_SPEND_SQL_GLOBAL, {"day": _today_utc()}).all()
+    else:
+        rows = db.execute(_SPEND_SQL_USER, {"day": _today_utc(), "sub": sub}).all()
     return sum(estimate_cost_usd(m, i, o, cr, cw) for m, i, o, cr, cw in rows)
 
 
