@@ -56,6 +56,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "app.models": CORE,
     "app.vocab": CORE,
     "app.usage": CORE,   # spend cap — core operational (serving writes THROUGH core, owns nothing)
+    "app.auth_proxy": CORE,  # /__/* reverse proxy — sign-in infrastructure, kin to security.py
     "app.main": "_composition_root",
     "app.plans": "sip",
     "app.plan_loader": "sip",

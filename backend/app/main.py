@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .auth_proxy import router as auth_proxy_router
 from .chat import router as chat_router
 from .db import get_db
 from .marts import router as marts_router
@@ -53,6 +54,12 @@ _REQUIRE_SIGN_IN = [Depends(get_current_principal)]
 app.include_router(plans_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 app.include_router(marts_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 app.include_router(chat_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
+# Firebase's reserved /__/* namespace, reverse-proxied so sign-in runs on OUR domain
+# (custom authDomain — see app/auth_proxy.py). Deliberately UNGATED: it serves the sign-in
+# flow to users who don't have a token yet — same access class as /health and the SPA shell.
+# Not under /api, not in the route contract (include_in_schema=False), and registered before
+# the catch-all below so the SPA fallback never swallows it.
+app.include_router(auth_proxy_router)
 
 # The built SPA (frontend/dist), produced by `vite build` in the Dockerfile's node stage and
 # copied in beside the app. Absent in a bare dev checkout — see _spa_index below.

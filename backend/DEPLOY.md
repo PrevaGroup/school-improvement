@@ -198,6 +198,14 @@ real sign-in). The Entra/gatesfoundation.org setup will re-walk this list.
    and gcloud advertise the new one. Symptom: sign-in works on one URL and throws
    `auth/unauthorized-domain` on the other. List every hostname users actually visit —
    including the custom domain when it lands.
+6. **The account-chooser shows the raw authDomain until Google verifies the brand** —
+   setting the Branding page's App name alone does NOT change "to continue to
+   school-improvement-501916.firebaseapp.com". Our fix: `authDomain` is
+   `sip.prevagroup.com` and the backend reverse-proxies Firebase's reserved `/__/*`
+   namespace to `<project>.firebaseapp.com` (`app/auth_proxy.py`), so the chooser names
+   our domain. Requires `https://sip.prevagroup.com/__/auth/handler` as an **additional
+   authorized redirect URI** on the OAuth client (trap #2's page). Bonus: the auth handler
+   is first-party now, which retires the Safari/ITP popup flakiness.
 
 ### Token verification (runtime)
 

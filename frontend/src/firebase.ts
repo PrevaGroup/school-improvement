@@ -17,9 +17,16 @@ import {
 //   - the backend verifies every token's signature/issuer/audience (app/security.py),
 //   - the domain allowlist decides who is invited (ALLOWED_EMAIL_DOMAINS),
 //   - Identity Platform's authorized-domains list decides where sign-in may run.
+// authDomain is OUR domain, not <project>.firebaseapp.com: the backend reverse-proxies
+// Firebase's reserved /__/* namespace (backend/app/auth_proxy.py), so the OAuth screen says
+// "to continue to sip.prevagroup.com" and the auth handler is first-party (no Safari/ITP
+// third-party-storage flakiness). Requires https://sip.prevagroup.com/__/auth/handler as an
+// authorized redirect URI on the OAuth client — provisioning steps in backend/DEPLOY.md.
+// Local dev signs in through the DEPLOYED handler at this domain; that's fine — the popup
+// result still returns to whatever origin opened it (localhost included, it's authorized).
 const firebaseConfig = {
   apiKey: "AIzaSyAjUQHuedVhmIwP8gDENv88h7bl3-GqQOU",
-  authDomain: "school-improvement-501916.firebaseapp.com",
+  authDomain: "sip.prevagroup.com",
   projectId: "school-improvement-501916",
 };
 
@@ -34,11 +41,10 @@ const provider = new GoogleAuthProvider();
 
 /** Google sign-in via popup.
  *
- * Popup rather than redirect: our app origin (run.app / localhost) differs from authDomain
- * (firebaseapp.com), and signInWithRedirect is the flow most broken by third-party-storage
- * partitioning in that split. Popup works in Chromium today; Safari can still be grumpy —
- * accepted for the prototype, and the durable fix (serving /__/auth from our own domain)
- * is a go-live-hardening task, not a today task.
+ * Popup rather than redirect, still: redirect flows reload the whole app around the
+ * round-trip, and popup UX is what testers expect. The old caveat here (Safari/ITP
+ * flakiness from a third-party authDomain) was retired when authDomain moved to our own
+ * domain via the /__/* reverse proxy — the handler is first-party now.
  */
 export function signInWithGoogle(): Promise<unknown> {
   return signInWithPopup(auth, provider);
