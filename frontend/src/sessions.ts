@@ -111,6 +111,69 @@ export function upsert(sessions: Session[], next: Session, activeId: string | nu
   return dropped.length ? [...keep, ...dropped] : keep;
 }
 
+// A scratch session: never chatted in, so nothing is lost by repointing it at another school.
+// (Workspace changes only ever arrive via chat, so no-messages == untouched.)
+export function isEmptySession(s: Session): boolean {
+  return s.messages.length === 0;
+}
+
+export interface SessionMeta {
+  school_id: string;
+  school_name: string;
+  district_id: string;
+  level: Level;
+}
+
+// Decide the session list + active id when the selected school changes. PURE so the timing-
+// sensitive App effect stays a thin apply. The rules that fix the "sessions get confused" bugs:
+//  - fork (a chat set_school) → a new session with the transcript copied forward (unchanged).
+//  - an EXISTING session for the target school → adopt it; and if we're leaving an empty
+//    scratch session behind, drop it (don't accumulate orphans).
+//  - no session for the target, but the active one is an empty scratch → REPOINT it in place
+//    (same id, reset to the default workspace) instead of spawning a second session.
+//  - otherwise (active has a real conversation, no target session) → create a fresh session,
+//    keeping the conversation intact.
+export function reconcileSchoolChange(
+  sessions: Session[],
+  activeId: string | null,
+  target: SessionMeta,
+  fork: Session | null = null,
+): { sessions: Session[]; activeId: string; spec: WorkspaceSpec } {
+  const act = sessions.find((s) => s.id === activeId) ?? null;
+  if (!fork && act && act.school_id === target.school_id) {
+    return { sessions, activeId: act.id, spec: act.workspace }; // already on this school
+  }
+  if (fork) {
+    const next = forkSession(fork, target);
+    return { sessions: upsert(sessions, next, next.id), activeId: next.id, spec: next.workspace };
+  }
+  const existing = latestForSchool(sessions, target.school_id);
+  if (existing) {
+    const adopted = { ...existing, updated_at: Date.now() };
+    let next = upsert(sessions, adopted, adopted.id);
+    if (act && act.id !== adopted.id && isEmptySession(act)) {
+      next = next.filter((s) => s.id !== act.id); // discard the empty scratch we're leaving
+    }
+    return { sessions: next, activeId: adopted.id, spec: adopted.workspace };
+  }
+  if (act && isEmptySession(act)) {
+    const repointed: Session = {
+      ...act,
+      school_id: target.school_id,
+      school_name: target.school_name,
+      district_id: target.district_id,
+      level: target.level,
+      title: target.school_name,
+      custom_title: false,
+      workspace: JSON.parse(JSON.stringify(DEFAULT_WORKSPACE_SPEC)) as WorkspaceSpec,
+      updated_at: Date.now(),
+    };
+    return { sessions: upsert(sessions, repointed, repointed.id), activeId: repointed.id, spec: repointed.workspace };
+  }
+  const created = createSession(target);
+  return { sessions: upsert(sessions, created, created.id), activeId: created.id, spec: created.workspace };
+}
+
 // Rail timestamp: coarse on purpose — "which of these is recent" is the question it answers.
 export function relTime(ts: number, now: number = Date.now()): string {
   const s = Math.max(0, Math.round((now - ts) / 1000));

@@ -5,11 +5,13 @@ import {
   byRecency,
   createSession,
   forkSession,
+  isEmptySession,
   latestForSchool,
+  reconcileSchoolChange,
   titleFor,
   upsert,
 } from "./sessions";
-import type { Session } from "./sessions";
+import type { Session, SessionMeta } from "./sessions";
 
 const SCHOOL = { school_id: "S1", school_name: "Wilson High", district_id: "0622500", level: "High" as const };
 
@@ -101,5 +103,71 @@ describe("upsert — bounded, active-safe", () => {
     const arr = [a, b];
     byRecency(arr);
     expect(arr[0].id).toBe("a");
+  });
+});
+
+describe("reconcileSchoolChange — no orphans, no confusion", () => {
+  const B: SessionMeta = { school_id: "S2", school_name: "Jordan High", district_id: "0622500", level: "High" };
+
+  it("repoints an EMPTY active session in place instead of spawning a second one", () => {
+    // The reported bug: new (empty) session, change school -> should reuse, not create.
+    const empty = sess({ id: "a", school_id: "S1", school_name: "Wilson High" });
+    const r = reconcileSchoolChange([empty], "a", B);
+    expect(r.sessions).toHaveLength(1); // NOT two
+    expect(r.activeId).toBe("a"); // same session, repointed
+    expect(r.sessions[0].school_id).toBe("S2");
+    expect(r.sessions[0].school_name).toBe("Jordan High");
+    expect(r.sessions[0].workspace.slots[0].metric_id).toBe("chronic_absenteeism_rate"); // reset
+  });
+
+  it("keeps a session that has a real conversation, creating a fresh one for the new school", () => {
+    const chatted = sess({ id: "a", school_id: "S1", messages: [{ role: "user", content: "hi" }] });
+    const r = reconcileSchoolChange([chatted], "a", B);
+    expect(r.sessions).toHaveLength(2); // the conversation is preserved
+    expect(r.sessions.some((s) => s.id === "a")).toBe(true);
+    expect(r.activeId).not.toBe("a");
+    expect(r.sessions.find((s) => s.id === r.activeId)!.school_id).toBe("S2");
+  });
+
+  it("adopts an existing session for the target school and discards the empty scratch left behind", () => {
+    const empty = sess({ id: "a", school_id: "S1", updated_at: 5 });
+    const existingB = sess({ id: "b", school_id: "S2", school_name: "Jordan High", updated_at: 1,
+      messages: [{ role: "user", content: "old q" }] });
+    const r = reconcileSchoolChange([empty, existingB], "a", B);
+    expect(r.activeId).toBe("b"); // adopt the real B session
+    expect(r.sessions.some((s) => s.id === "a")).toBe(false); // empty scratch dropped
+    expect(r.sessions).toHaveLength(1);
+  });
+
+  it("does NOT discard a non-empty session when adopting an existing target", () => {
+    const chatted = sess({ id: "a", school_id: "S1", messages: [{ role: "user", content: "keep me" }] });
+    const existingB = sess({ id: "b", school_id: "S2", messages: [{ role: "user", content: "b" }] });
+    const r = reconcileSchoolChange([chatted, existingB], "a", B);
+    expect(r.activeId).toBe("b");
+    expect(r.sessions.some((s) => s.id === "a")).toBe(true); // conversation preserved
+  });
+
+  it("is a no-op when the active session is already on the target school", () => {
+    const onB = sess({ id: "a", school_id: "S2" });
+    const r = reconcileSchoolChange([onB], "a", B);
+    expect(r.sessions).toHaveLength(1);
+    expect(r.activeId).toBe("a");
+  });
+
+  it("a fork (chat set_school) copies the transcript forward into a new session", () => {
+    const src = sess({ id: "a", school_id: "S1", messages: [{ role: "user", content: "look at Jordan" }] });
+    const r = reconcileSchoolChange([src], "a", B, src);
+    expect(r.activeId).not.toBe("a");
+    const forked = r.sessions.find((s) => s.id === r.activeId)!;
+    expect(forked.school_id).toBe("S2");
+    expect(forked.messages).toEqual(src.messages); // continuous conversation
+    expect(r.sessions.some((s) => s.id === "a")).toBe(true); // source stays
+  });
+});
+
+describe("isEmptySession", () => {
+  it("is empty with no messages, non-empty once a turn lands", () => {
+    expect(isEmptySession(sess({}))).toBe(true);
+    expect(isEmptySession(sess({ messages: [{ role: "user", content: "x" }] }))).toBe(false);
   });
 });
