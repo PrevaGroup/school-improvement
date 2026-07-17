@@ -344,7 +344,7 @@ def test_set_workspace_slot_untouched_slots_keep_the_default(patch_marts):
     ctx = _ctx()
     chat._run_tool("set_workspace_slot", {"slot": 2, "metric_id": "suspension_rate"},
                    DB, "High", ctx=ctx)
-    defaults = chat.DEFAULT_WORKSPACE_SPEC.slots
+    defaults = chat._level_default("High").slots  # seeded from the level-aware default
     assert ctx.spec.slots[0].metric_id == defaults[0].metric_id
     assert ctx.spec.slots[2].metric_id == defaults[2].metric_id
 
@@ -468,7 +468,7 @@ def test_set_school_switches_ctx_and_returns_the_default_workspace(patch_marts, 
     assert calls["fetch_workspace"]["args"][0] == "NEW"
     assert calls["fetch_workspace"]["kwargs"] == {"include_plan": False}
     assert ctx.payloads == {"slot_1": {"a": 1}, "slot_2": {"b": 2}, "slot_3": {"c": 3}}
-    assert ctx.spec.model_dump() == chat.DEFAULT_WORKSPACE_SPEC.model_dump()
+    assert ctx.spec.model_dump() == chat._level_default("High").model_dump()  # level-aware reset
     assert out["school"]["school_name"] == "Jordan High"
 
 

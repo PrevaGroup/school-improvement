@@ -15,6 +15,7 @@ from app.marts import (
     SpotlightItem,
     attendance_slice,
     band_status,
+    default_workspace_spec,
     full_plan_goals,
     resolve_spotlight,
     subgroup_slice,
@@ -208,6 +209,21 @@ def test_unknown_subgroup_is_rejected_with_the_known_groups():
     err = _validate(_spec(g="race_martian"))
     assert "unknown student_group_id 'race_martian'" in err
     assert "el" in err and "swd" in err
+
+
+def test_default_workspace_spec_is_level_aware():
+    """HS opens on grad/college; ES/MS open on CAASPP outcomes (grad/college are HS-only, so
+    the old one-size default rendered as errors on elementary/middle first paint)."""
+    hs = [s.metric_id for s in default_workspace_spec("HS").slots]
+    ms = [s.metric_id for s in default_workspace_spec("MS").slots]
+    es = [s.metric_id for s in default_workspace_spec("ES").slots]
+    assert hs == ["chronic_absenteeism_rate", "grad_rate_acgr", "college_going_rate"]
+    assert ms == ["chronic_absenteeism_rate", "ela_met_standard_pct", "math_met_standard_pct"]
+    assert es == ms  # elementary + middle share the outcome defaults
+    # Every default slot must actually apply to its level — that's the whole point.
+    assert "grad_rate_acgr" not in ms and "college_going_rate" not in ms
+    # An unknown level falls back to HS rather than raising.
+    assert [s.metric_id for s in default_workspace_spec("XX").slots] == hs
 
 
 def test_band_status_flags_thin_bands_only():

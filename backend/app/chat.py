@@ -25,11 +25,12 @@ from .traces import TraceRecorder, sha256_hex
 from .usage import check_spend_caps, record_chat_usage
 from .vocab import METRICS
 from .marts import (
-    DEFAULT_WORKSPACE_SPEC,
+    LEVEL_TO_CODE,
     SlotSpec,
     SpotlightItem,
     SpotlightSpec,
     WorkspaceSpec,
+    default_workspace_spec,
     fetch_attendance_plans,
     fetch_like_schools,
     fetch_metric_by_subgroup,
@@ -39,6 +40,11 @@ from .marts import (
     fetch_workspace,
     resolve_spotlight,
 )
+
+
+def _level_default(school_level: str) -> WorkspaceSpec:
+    """The seed workspace for a dim_school.school_level (High/Middle/Elementary)."""
+    return default_workspace_spec(LEVEL_TO_CODE.get(school_level, "HS"))
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -384,9 +390,11 @@ class ToolCtx:
         self.school: dict | None = None       # set when set_school ran
         self.session_title: str | None = None  # set when rename_session ran
 
-    def ensure_spec(self) -> WorkspaceSpec:
+    def ensure_spec(self, default: WorkspaceSpec) -> WorkspaceSpec:
+        # Only hit when the client sent no workspace but a slot tool ran — seed from the
+        # caller's level-appropriate default, then the tool overwrites the touched slot.
         if self.spec is None:
-            self.spec = DEFAULT_WORKSPACE_SPEC.model_copy(deep=True)
+            self.spec = default.model_copy(deep=True)
         return self.spec
 
     @property
@@ -507,7 +515,7 @@ def _run_workspace_tool(name: str, ti: dict, db: Session, school_level: str, ctx
                         student_group_id=group)
         out = fetch_slot(db, ctx.school_id, spec, school_level)
         if "error" not in out:
-            ws = ctx.ensure_spec()
+            ws = ctx.ensure_spec(_level_default(school_level))
             if slot == "subgroup_slice":
                 ws.subgroup_slice = spec
                 ctx.payloads["subgroup_slice"] = out
@@ -532,7 +540,7 @@ def _run_workspace_tool(name: str, ti: dict, db: Session, school_level: str, ctx
         resolved = resolve_spotlight(items, plan)
         if not resolved["items"]:
             return {"error": resolved.get("note") or "no valid references"}
-        ws = ctx.ensure_spec()
+        ws = ctx.ensure_spec(_level_default(school_level))
         ws.plan_spotlight = SpotlightSpec(plan_year=plan["plan_year"], items=items)
         ctx.spotlight = resolved
         return resolved
@@ -542,10 +550,10 @@ def _run_workspace_tool(name: str, ti: dict, db: Session, school_level: str, ctx
         if not school:
             return {"error": f"no {school_level} school found matching '{ti.get('school_name')}' in the loaded districts"}
         # Client-side this spawns/activates a session pinned to the school (design § Sessions),
-        # so the workspace resets to the defaults; the plan is NOT inlined here — the model
-        # reads it via query_school_plan, the UI fetches it on session activation.
+        # so the workspace resets to the level-appropriate defaults; the plan is NOT inlined
+        # here — the model reads it via query_school_plan, the UI fetches it on activation.
         ctx.school_id = school["school_id"]
-        ctx.spec = DEFAULT_WORKSPACE_SPEC.model_copy(deep=True)
+        ctx.spec = _level_default(school_level).model_copy(deep=True)
         ctx.spotlight = None
         ws = fetch_workspace(db, school["school_id"], ctx.spec, include_plan=False)
         ctx.school = dict(school)

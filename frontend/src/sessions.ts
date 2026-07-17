@@ -44,12 +44,12 @@ function uuid(): string {
     : `sess-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
 
-export function createSession(school: {
-  school_id: string;
-  school_name: string;
-  district_id: string;
-  level: Level;
-}): Session {
+// `defaultSpec` is the LEVEL-AWARE seed (App resolves it from the server-fetched defaults for
+// school.level; falls back to the HS default). A session owns its spec, so it's deep-copied.
+export function createSession(
+  school: { school_id: string; school_name: string; district_id: string; level: Level },
+  defaultSpec: WorkspaceSpec = DEFAULT_WORKSPACE_SPEC,
+): Session {
   const now = Date.now();
   return {
     v: 1,
@@ -61,22 +61,20 @@ export function createSession(school: {
     title: school.school_name, // refined by titleFor() on the first user message
     created_at: now,
     updated_at: now,
-    // Deep copy — a session must own its spec (chat mutations patch slots in place).
-    workspace: JSON.parse(JSON.stringify(DEFAULT_WORKSPACE_SPEC)) as WorkspaceSpec,
+    workspace: JSON.parse(JSON.stringify(defaultSpec)) as WorkspaceSpec,
     messages: [],
   };
 }
 
 // "Let's look at Jordan" mid-conversation FORKS (design § Sessions): the transcript copies
 // forward so the user experiences one continuous conversation, the workspace resets to the
-// defaults, and the rail keeps two honest snapshots of "what was I looking at".
-export function forkSession(from: Session | null, school: {
-  school_id: string;
-  school_name: string;
-  district_id: string;
-  level: Level;
-}): Session {
-  const s = createSession(school);
+// (level-aware) defaults, and the rail keeps two honest snapshots of "what was I looking at".
+export function forkSession(
+  from: Session | null,
+  school: { school_id: string; school_name: string; district_id: string; level: Level },
+  defaultSpec: WorkspaceSpec = DEFAULT_WORKSPACE_SPEC,
+): Session {
+  const s = createSession(school, defaultSpec);
   if (from) s.messages = from.messages.slice();
   return s;
 }
@@ -152,13 +150,14 @@ export function reconcileSchoolChange(
   activeId: string | null,
   target: SessionMeta,
   fork: Session | null = null,
+  defaultSpec: WorkspaceSpec = DEFAULT_WORKSPACE_SPEC,
 ): { sessions: Session[]; activeId: string; spec: WorkspaceSpec } {
   const act = sessions.find((s) => s.id === activeId) ?? null;
   if (!fork && act && act.school_id === target.school_id) {
     return { sessions, activeId: act.id, spec: act.workspace }; // already on this school
   }
   if (fork) {
-    const next = forkSession(fork, target);
+    const next = forkSession(fork, target, defaultSpec);
     return { sessions: upsert(sessions, next, next.id), activeId: next.id, spec: next.workspace };
   }
   const existing = latestForSchool(sessions, target.school_id);
@@ -180,12 +179,12 @@ export function reconcileSchoolChange(
       level: target.level,
       title: target.school_name,
       custom_title: false,
-      workspace: JSON.parse(JSON.stringify(DEFAULT_WORKSPACE_SPEC)) as WorkspaceSpec,
+      workspace: JSON.parse(JSON.stringify(defaultSpec)) as WorkspaceSpec,
       updated_at: Date.now(),
     };
     return { sessions: upsert(sessions, repointed, repointed.id), activeId: repointed.id, spec: repointed.workspace };
   }
-  const created = createSession(target);
+  const created = createSession(target, defaultSpec);
   return { sessions: upsert(sessions, created, created.id), activeId: created.id, spec: created.workspace };
 }
 

@@ -3,7 +3,7 @@ import { api } from "./api";
 import { fmtNum, fmtPct } from "./format";
 import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
-import { DEFAULT_WORKSPACE_SPEC, applyChatWorkspace } from "./workspace";
+import { applyChatWorkspace, defaultSpecForLevel } from "./workspace";
 import {
   byRecency, createSession, forkSession, loadStore, reconcileSchoolChange, relTime, saveStore,
   titleFor, upsert,
@@ -58,8 +58,17 @@ export default function App() {
 
   // The Claude-controlled workspace: `wspec` is what should be on screen (the active
   // session's spec), `ws` is the server-built data for it.
-  const [wspec, setWspec] = useState<WorkspaceSpec>(BOOT_ACTIVE?.workspace ?? DEFAULT_WORKSPACE_SPEC);
+  const [wspec, setWspec] = useState<WorkspaceSpec>(
+    BOOT_ACTIVE?.workspace ?? defaultSpecForLevel(BOOT_ACTIVE?.level ?? "High"),
+  );
   const [ws, setWs] = useState<WorkspaceData | null>(null);
+
+  // Server-owned level-aware default specs (GET /marts/workspace-defaults), fetched once.
+  // `resolveDefault(level)` prefers these; defaultSpecForLevel falls back to the client map
+  // until they load. A new/repointed session for an ES/MS school seeds CAASPP outcomes, not
+  // the HS-only grad/college that would render as errors.
+  const wsDefaultsRef = useRef<Record<string, WorkspaceSpec> | null>(null);
+  const resolveDefault = (lvl: Level) => defaultSpecForLevel(lvl, wsDefaultsRef.current);
 
   // Refs read by effects/handlers without re-triggering them. `wspecRef` is also written
   // DIRECTLY on session adoption so the sibling fetch effect (same commit) sees the adopted
@@ -91,6 +100,11 @@ export default function App() {
       .get<{ districts: District[] }>("/marts/districts")
       .then((d) => setDistricts(d.districts || []))
       .catch(() => {});
+    // The server-owned level-aware defaults (one home for the per-level curation).
+    api
+      .get<Record<string, WorkspaceSpec>>("/marts/workspace-defaults")
+      .then((d) => { wsDefaultsRef.current = d; })
+      .catch(() => {}); // client fallback covers it
   }, []);
 
   // Every selection resolves to a scoped backend query — no "fetch everything, filter
@@ -135,7 +149,7 @@ export default function App() {
     const r = reconcileSchoolChange(cur, activeRef.current, {
       school_id: current.school_id, school_name: current.school_name,
       district_id: districtId, level,
-    }, fork);
+    }, fork, resolveDefault(level));
     setSessions(r.sessions);
     sessionsRef.current = r.sessions;
     setActiveId(r.activeId);
@@ -241,7 +255,7 @@ export default function App() {
       const fresh = createSession({
         school_id: current.school_id, school_name: current.school_name,
         district_id: districtId, level,
-      });
+      }, resolveDefault(level));
       setSessions([fresh]);
       sessionsRef.current = [fresh];
       adoptSession(fresh);
@@ -258,7 +272,7 @@ export default function App() {
     const s = createSession({
       school_id: current.school_id, school_name: current.school_name,
       district_id: districtId, level,
-    });
+    }, resolveDefault(level));
     setSessions((prev) => upsert(prev, s, s.id));
     setActiveId(s.id);
     setWspec(s.workspace);
@@ -306,8 +320,8 @@ export default function App() {
         const forked = forkSession(src, {
           school_id: w.school.school_id, school_name: w.school.school_name,
           district_id: w.school.district_id, level,
-        });
-        if (w.spec) forked.workspace = w.spec;
+        }, resolveDefault(level));
+        if (w.spec) forked.workspace = w.spec; // set_school sends the level-aware default
         setSessions((prev) => upsert(prev, forked, forked.id));
         setActiveId(forked.id);
         setWs((prev) =>

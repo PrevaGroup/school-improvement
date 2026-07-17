@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_WORKSPACE_SPEC, applyChatWorkspace } from "./workspace";
-import type { ChatWorkspace, SlotPayload, WorkspaceData } from "./types";
+import { DEFAULT_WORKSPACE_SPEC, applyChatWorkspace, defaultSpecForLevel } from "./workspace";
+import type { ChatWorkspace, SlotPayload, WorkspaceData, WorkspaceSpec } from "./types";
 
 // applyChatWorkspace is the client half of "Claude controls a spec; the server renders
 // the data": it may only MERGE payloads the server sent — never fabricate, never let a
@@ -67,13 +67,45 @@ describe("applyChatWorkspace — merge, never fabricate", () => {
   });
 });
 
-describe("DEFAULT_WORKSPACE_SPEC mirrors the backend default", () => {
-  it("is the old fixed three-indicator panel, latest year, all students", () => {
+describe("DEFAULT_WORKSPACE_SPEC mirrors the backend HS default", () => {
+  it("is the three-indicator HS panel, latest year, all students", () => {
     expect(DEFAULT_WORKSPACE_SPEC.slots.map((s) => s.metric_id)).toEqual([
       "chronic_absenteeism_rate", "grad_rate_acgr", "college_going_rate",
     ]);
     expect(DEFAULT_WORKSPACE_SPEC.slots.every((s) => s.school_year === null && s.student_group_id === "all")).toBe(true);
     expect(DEFAULT_WORKSPACE_SPEC.subgroup_slice).toBeNull();
     expect(DEFAULT_WORKSPACE_SPEC.plan_spotlight).toBeNull();
+  });
+});
+
+describe("defaultSpecForLevel — level-aware, server-preferred", () => {
+  it("HS leads with grad/college; ES/MS lead with CAASPP outcomes", () => {
+    expect(defaultSpecForLevel("High").slots.map((s) => s.metric_id)).toEqual([
+      "chronic_absenteeism_rate", "grad_rate_acgr", "college_going_rate",
+    ]);
+    const ms = defaultSpecForLevel("Middle").slots.map((s) => s.metric_id);
+    expect(ms).toEqual(["chronic_absenteeism_rate", "ela_met_standard_pct", "math_met_standard_pct"]);
+    // grad/college are HS-only — they must NOT be in the ES/MS default (that was the bug).
+    expect(ms).not.toContain("grad_rate_acgr");
+    expect(defaultSpecForLevel("Primary").slots.map((s) => s.metric_id)).toEqual(ms);
+  });
+
+  it("prefers the server-provided defaults when present", () => {
+    const server: Record<string, WorkspaceSpec> = {
+      Middle: { slots: [
+        { metric_id: "suspension_rate", school_year: null, student_group_id: "all" },
+        { metric_id: "stability_rate", school_year: null, student_group_id: "all" },
+        { metric_id: "chronic_absenteeism_rate", school_year: null, student_group_id: "all" },
+      ], subgroup_slice: null, plan_spotlight: null },
+    };
+    expect(defaultSpecForLevel("Middle", server).slots[0].metric_id).toBe("suspension_rate");
+    // A level the server didn't send still falls back to the client map.
+    expect(defaultSpecForLevel("High", server).slots[1].metric_id).toBe("grad_rate_acgr");
+  });
+
+  it("returns an independent deep copy (a session must own its spec)", () => {
+    const a = defaultSpecForLevel("High");
+    a.slots[0].metric_id = "mutated";
+    expect(defaultSpecForLevel("High").slots[0].metric_id).toBe("chronic_absenteeism_rate");
   });
 });
