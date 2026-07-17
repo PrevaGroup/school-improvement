@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { renderMarkdown } from "../markdown";
-import type { ChatTurn, DiagnosticSchool, Level } from "../types";
+import type { ChatTurn, ChatWorkspace, DiagnosticSchool, Level, WorkspaceSpec } from "../types";
 
 interface Msg extends ChatTurn {
   tools?: string[];
@@ -10,10 +10,27 @@ interface Msg extends ChatTurn {
 interface ChatResponse {
   reply: string;
   tools_used?: string[];
+  workspace?: ChatWorkspace;
 }
 
-export function Chat({ school, level }: { school: DiagnosticSchool | null; level: Level }) {
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+interface Props {
+  school: DiagnosticSchool | null;
+  level: Level;
+  // What the workspace currently shows — sent with every turn so the model's system prompt
+  // describes the true screen ("don't regurgitate the screen" needs ground truth).
+  wspec: WorkspaceSpec;
+  // A turn's workspace mutations, server-built payloads included — App applies them.
+  onWorkspace: (w: ChatWorkspace) => void;
+  // The active session: its id joins traces server-side (eval-trace-system.md §2), its
+  // transcript seeds this pane, and every turn is reported back up into it. App remounts
+  // this component (key={sessionId}) on session switch, so state init here is per-session.
+  sessionId: string | null;
+  initialMessages: ChatTurn[];
+  onMessages: (turns: ChatTurn[]) => void;
+}
+
+export function Chat({ school, level, wspec, onWorkspace, sessionId, initialMessages, onMessages }: Props) {
+  const [msgs, setMsgs] = useState<Msg[]>(initialMessages);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const msgsRef = useRef<HTMLDivElement>(null);
@@ -27,6 +44,7 @@ export function Chat({ school, level }: { school: DiagnosticSchool | null; level
   const chips = school
     ? [
         `Why is ${school.school_name} a concern on attendance?`,
+        `Show chronic absenteeism for English learners`,
         `What are ${school.school_name}'s peers doing that it isn't?`,
       ]
     : [`Compare Long Beach ${level} schools on attendance`];
@@ -36,15 +54,27 @@ export function Chat({ school, level }: { school: DiagnosticSchool | null; level
     setMsgs(next);
     setInput("");
     setBusy(true);
+    const turns = (ms: Msg[]) => ms.map((m) => ({ role: m.role, content: m.content }));
+    onMessages(turns(next)); // persist the question before the round trip, not after it
     try {
       const d = await api.post<ChatResponse>("/chat", {
-        messages: next.map((m) => ({ role: m.role, content: m.content })),
+        messages: turns(next),
         level,
+        session_id: sessionId,
+        school_id: school ? school.school_id : null,
+        workspace: wspec,
       });
-      setMsgs([...next, { role: "assistant", content: d.reply, tools: d.tools_used }]);
+      const done: Msg[] = [...next, { role: "assistant", content: d.reply, tools: d.tools_used }];
+      setMsgs(done);
+      onMessages(turns(done));
+      // Ordering matters on a set_school turn: the transcript above must land in the
+      // CURRENT session before this forks the conversation into the new school's session.
+      if (d.workspace) onWorkspace(d.workspace);
     } catch (e) {
       const detail = e instanceof ApiError ? `${e.status}` : (e as Error).message;
-      setMsgs([...next, { role: "assistant", content: "Error: " + detail }]);
+      const done: Msg[] = [...next, { role: "assistant", content: "Error: " + detail }];
+      setMsgs(done);
+      onMessages(turns(done));
     } finally {
       setBusy(false);
     }

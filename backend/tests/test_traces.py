@@ -318,7 +318,7 @@ def quiet_endpoint(monkeypatch):
     """Neutralize the endpoint's non-trace dependencies: caps, usage, marts, API key, bucket."""
     monkeypatch.setattr(chat, "check_spend_caps", lambda db, sub: None)
     monkeypatch.setattr(chat, "record_chat_usage", lambda db, **kw: None)
-    monkeypatch.setattr(chat, "_run_tool", lambda name, ti, db, lvl: {"peers": []})
+    monkeypatch.setattr(chat, "_run_tool", lambda name, ti, db, lvl, ctx=None: {"peers": []})
     monkeypatch.setattr(chat.settings, "anthropic_api_key", "test-key")
     monkeypatch.setattr(traces.settings, "traces_bucket", None)  # ops line only — no GCS
 

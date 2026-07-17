@@ -25,11 +25,19 @@ from .traces import TraceRecorder, sha256_hex
 from .usage import check_spend_caps, record_chat_usage
 from .vocab import METRICS
 from .marts import (
+    DEFAULT_WORKSPACE_SPEC,
+    SlotSpec,
+    SpotlightItem,
+    SpotlightSpec,
+    WorkspaceSpec,
     fetch_attendance_plans,
     fetch_like_schools,
     fetch_metric_by_subgroup,
     fetch_peer_benchmark,
     fetch_school_plan,
+    fetch_slot,
+    fetch_workspace,
+    resolve_spotlight,
 )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -50,7 +58,30 @@ _METRIC_PARAM_DESC = ("conformed metric id (default chronic_absenteeism_rate). "
                       f"Available: {_METRIC_MENU}.")
 
 
-def build_system(ui_level: str) -> str:
+def _describe_slot(s: SlotSpec) -> str:
+    return f"{s.metric_id} · {s.school_year or 'latest year'} · {s.student_group_id}"
+
+
+def build_system(ui_level: str, workspace: WorkspaceSpec | None = None) -> str:
+    base = _build_system_base(ui_level)
+    if workspace is None:
+        return base
+    # Render the on-screen state so "don't regurgitate the screen" is grounded in what the
+    # screen ACTUALLY shows, and so the model doesn't re-set a slot to its current spec.
+    # Ids verbatim (no DB here — build_system stays pure; its hash is traced).
+    lines = [f"- Slot {i + 1}: {_describe_slot(s)}" for i, s in enumerate(workspace.slots)]
+    lines.append("- Subgroup slice: "
+                 + (_describe_slot(workspace.subgroup_slice) if workspace.subgroup_slice
+                    else "(empty — offer to fill it when a subgroup question comes up)"))
+    pins = len(workspace.plan_spotlight.items) if workspace.plan_spotlight else 0
+    lines.append(f"- Plan spotlight: {pins} pinned item(s)" if pins else "- Plan spotlight: (none)")
+    return (base
+            + "\n\nTHE WORKSPACE CURRENTLY SHOWS (already visible to the user — do not restate "
+              "these charts' numbers, and do not re-set a slot to the spec it already has):\n"
+            + "\n".join(lines))
+
+
+def _build_system_base(ui_level: str) -> str:
     return f"""You help education staff understand and compare California {ui_level} schools — Long Beach Unified plus other loaded districts (e.g. Ventura Unified): how they plan to improve student attendance (chronic absenteeism), how they perform on state metrics (chronic absenteeism, suspension, graduation, college-going, CAASPP ELA/Math academic outcomes), and how each compares to the demographically-similar "schools like it" statewide.
 
 The user selected the {ui_level} level — keep every answer at the {ui_level} level. Long Beach is the default focus, but you can answer about any loaded district's schools when named (e.g. "Ventura High") — the tools resolve a named school in whatever district it belongs to.
@@ -61,6 +92,12 @@ Always call a tool for real data; never invent schools, numbers, budgets, plan t
 - find_similar_schools — the demographically-matched peer schools (statewide, same level) for a school. Answers "who is X like?".
 - compare_to_peers — a school's actual metric value (default: chronic absenteeism; any conformed metric, incl. ela_met_standard_pct / math_met_standard_pct for CAASPP academics) vs its peer-group distribution, with `peer_performance_percentile` where HIGHER always means doing better than peers.
 - query_subgroup_metrics — a school's metric DISAGGREGATED BY STUDENT SUBGROUP (race/ethnicity, gender, English learners, students with disabilities, socioeconomically disadvantaged, foster, homeless). Use this for any "by subgroup", equity, or "which groups are behind" question — including ELA/Math outcomes by subgroup; each subgroup carries its `gap_vs_all`.
+- set_workspace_slot — CHANGE WHAT THE WORKSPACE CHARTS SHOW: put a metric/year/subgroup into indicator slot 1, 2, or 3 (always All Students) or into the "subgroup_slice" (one specific subgroup). Use this whenever the user asks to see, show, chart, or compare an indicator, a different year, or a subgroup — change the chart, then give a one-line takeaway instead of reciting the numbers (the chart carries them).
+- spotlight_plan_items — PIN the plan goals/actions most relevant to what the workspace shows, each with a one-line reason. Reference goals by the `goal_index`/`action_index` fields from query_school_plan output — read the plan first, then pin.
+- set_school — switch the whole workspace to a different school (it opens with the default indicators). Use when the user says "let's look at <school>" — for a one-off comparison question, prefer the query tools instead.
+- rename_session — give the session (the entry in the left rail) a short, specific title. Call it ONCE, after the first exchange makes the line of inquiry clear (e.g. "Wilson — EL absenteeism gap"), or when the user asks.
+
+WORKSPACE CONTROL: the left panel is a workspace YOU control through those tools. Prefer showing over telling — if a chart can carry the answer, set the slot. Never claim a slot changed unless the tool call succeeded.
 
 Ground every claim in tool output. When comparing performance, lead with the peer-relative finding via `peer_performance_percentile` (e.g. "worse than ~70% of similar schools"), then cite concrete strategies/budgets/quotes.
 
@@ -167,6 +204,100 @@ TOOLS = [
             "required": ["school_name"],
         },
     },
+    # --- workspace tools (docs/design/agentic-workspace-and-sessions.md) ---------------- #
+    # These emit a validated SPEC; the server fetches the data and the SAME payload goes to
+    # both the model and the UI, so the screen can never show a number the model invented.
+    {
+        "name": "set_workspace_slot",
+        "description": (
+            "Change what one workspace chart shows for the SELECTED school. Slots 1-3 are the "
+            "indicator charts (always All Students); 'subgroup_slice' is the fourth chart and "
+            "takes ONE specific student subgroup. The chart shape never changes — you choose "
+            "the metric, the school year, and (for the slice) the subgroup. Returns the "
+            "chart-ready data: the school's value vs. its demographic peer band. Use whenever "
+            "the user asks to see/show/chart/compare an indicator, year, or subgroup."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "slot": {"enum": [1, 2, 3, "subgroup_slice"],
+                         "description": "which chart to set: 1, 2, 3, or 'subgroup_slice'."},
+                "metric_id": {"type": "string", "description": (
+                    # Dynamic menu (#50) so a newly-loaded metric is offered here with no edit;
+                    # slots chart PERCENT metrics only (the fixed 0-100 scale), which the server
+                    # enforces — a non-pct id comes back as a corrective error to retry.
+                    f"which metric to chart (percent-scale metrics only). Available: {_METRIC_MENU}.")},
+                "school_year": {"type": "string", "description": (
+                    "optional, '2023-24' format; omit for the latest available year.")},
+                "student_group_id": {"type": "string", "description": (
+                    "REQUIRED for subgroup_slice (ignored for slots 1-3, which always show "
+                    "'all'): e.g. el, swd, sed, foster, homeless, migrant, race_black, "
+                    "race_hispanic, race_white, race_asian, gender_f, gender_m.")},
+            },
+            "required": ["slot", "metric_id"],
+        },
+    },
+    {
+        "name": "spotlight_plan_items",
+        "description": (
+            "Pin the plan goals/actions most relevant to what the workspace currently shows, "
+            "each with a one-line reason — they render above the full goal list, attributed to "
+            "you. Reference goals by goal_index (and optionally action_indices) exactly as "
+            "returned by query_school_plan — call that FIRST and pick from what you read. The "
+            "server renders the pinned items from the stored plan; you author only the reason."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "description": "1-5 pinned items.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "goal_index": {"type": "integer", "description": "0-based, from query_school_plan."},
+                            "action_indices": {"type": "array", "items": {"type": "integer"},
+                                               "description": "optional: specific actions; omit to pin the whole goal."},
+                            "reason": {"type": "string", "description": "one line: why this is relevant to the current indicators."},
+                        },
+                        "required": ["goal_index", "reason"],
+                    },
+                },
+            },
+            "required": ["items"],
+        },
+    },
+    {
+        "name": "set_school",
+        "description": (
+            "Switch the whole workspace to a different school (by partial name, any loaded "
+            "district, same level). The workspace opens on that school with the default "
+            "indicator slots. Use for 'let's look at X instead' — NOT for a one-off question "
+            "about another school (use the query tools for that)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "school_name": {"type": "string", "description": "the school, by (partial) name, e.g. 'Jordan'."},
+            },
+            "required": ["school_name"],
+        },
+    },
+    {
+        "name": "rename_session",
+        "description": (
+            "Rename the current session — the entry for this line of inquiry in the left rail. "
+            "Short and specific (max 60 chars), e.g. 'Wilson — EL absenteeism gap'. Call once, "
+            "after the first exchange makes the topic clear, or when the user asks."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "the new title, max 60 characters."},
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -181,6 +312,11 @@ class ChatRequest(BaseModel):
     # Client-generated conversation id, optional — the stateless API can't infer continuity,
     # so traces of one conversation join only if the client says so (eval-trace-system.md §2).
     session_id: str | None = None
+    # Workspace context (docs/design/agentic-workspace-and-sessions.md): the session's
+    # selected school and the spec of what is currently on screen. Both optional — the
+    # pre-workspace client sends neither and everything behaves as before.
+    school_id: str | None = None
+    workspace: WorkspaceSpec | None = None
 
 
 # --- trace vocabulary mapping (Anthropic wire format -> neutral, eval-trace-system.md §5) ---
@@ -232,7 +368,52 @@ def _resolve_school(db: Session, name: str | None, school_level: str) -> dict | 
     return dict(r) if r else None
 
 
-def _run_tool(name: str, ti: dict, db: Session, school_level: str) -> dict:
+class ToolCtx:
+    """Per-request mutable context for the workspace tools.
+
+    Carries the session's selected school + on-screen spec IN, and accumulates the turn's
+    workspace mutations OUT — chat() serializes it into the response's `workspace` field, so
+    the UI applies exactly the payloads the model saw (one round trip, no refetch, and the
+    screen can never show a number the server didn't just build)."""
+
+    def __init__(self, school_id: str | None = None, workspace: WorkspaceSpec | None = None):
+        self.school_id = school_id
+        self.spec = workspace                 # becomes a DEFAULT copy on first mutation
+        self.payloads: dict[str, dict] = {}   # "slot_1".."slot_3" / "subgroup_slice" -> chart payload
+        self.spotlight: dict | None = None    # resolved spotlight items
+        self.school: dict | None = None       # set when set_school ran
+        self.session_title: str | None = None  # set when rename_session ran
+
+    def ensure_spec(self) -> WorkspaceSpec:
+        if self.spec is None:
+            self.spec = DEFAULT_WORKSPACE_SPEC.model_copy(deep=True)
+        return self.spec
+
+    @property
+    def mutated(self) -> bool:
+        return bool(self.payloads or self.spotlight is not None or self.school is not None
+                    or self.session_title is not None)
+
+    def to_response(self) -> dict:
+        return {
+            "spec": self.spec.model_dump() if self.spec else None,
+            "payloads": self.payloads,
+            "spotlight": self.spotlight,
+            "school": self.school,
+            "session_title": self.session_title,
+        }
+
+
+_NO_SCHOOL = ("no school is selected in the workspace — the user must pick a school first, "
+              "or use set_school to switch to one by name")
+
+
+def _run_tool(name: str, ti: dict, db: Session, school_level: str,
+              ctx: ToolCtx | None = None) -> dict:
+    # `ctx` is keyword-optional so the five original tools keep their pinned 4-arg call
+    # shape (tests/test_chat_tools.py characterizes it); only the workspace tools need it.
+    if name in ("set_workspace_slot", "spotlight_plan_items", "set_school", "rename_session"):
+        return _run_workspace_tool(name, ti, db, school_level, ctx or ToolCtx())
     if name == "query_school_attendance_plans":
         needle = (ti.get("school_name") or "").strip()
         if needle:
@@ -301,6 +482,88 @@ def _run_tool(name: str, ti: dict, db: Session, school_level: str) -> dict:
     return {"error": f"unknown tool: {name}"}
 
 
+def _run_workspace_tool(name: str, ti: dict, db: Session, school_level: str, ctx: ToolCtx) -> dict:
+    """The three workspace tools. Every branch: validate the spec server-side, build the
+    payload from DB rows, and record the mutation on `ctx` ONLY on success — so the
+    response's `workspace` field never carries a slot the model merely attempted."""
+    if name == "set_workspace_slot":
+        if not ctx.school_id:
+            return {"error": _NO_SCHOOL}
+        slot = ti.get("slot")
+        if isinstance(slot, str) and slot.strip() in ("1", "2", "3"):
+            slot = int(slot)
+        if slot not in (1, 2, 3, "subgroup_slice"):
+            return {"error": "slot must be 1, 2, 3, or 'subgroup_slice'"}
+        group = (ti.get("student_group_id") or "all").strip() or "all"
+        if slot == "subgroup_slice":
+            if group == "all":
+                return {"error": ("the subgroup slice shows ONE specific subgroup — pass "
+                                  "student_group_id (e.g. 'el', 'swd', 'sed', 'race_hispanic'); "
+                                  "slots 1-3 are the All-Students charts")}
+        else:
+            group = "all"  # the three indicator slots always show All Students
+        spec = SlotSpec(metric_id=str(ti.get("metric_id") or ""),
+                        school_year=ti.get("school_year") or None,
+                        student_group_id=group)
+        out = fetch_slot(db, ctx.school_id, spec, school_level)
+        if "error" not in out:
+            ws = ctx.ensure_spec()
+            if slot == "subgroup_slice":
+                ws.subgroup_slice = spec
+                ctx.payloads["subgroup_slice"] = out
+            else:
+                ws.slots[slot - 1] = spec
+                ctx.payloads[f"slot_{slot}"] = out
+        return out
+
+    if name == "spotlight_plan_items":
+        if not ctx.school_id:
+            return {"error": _NO_SCHOOL}
+        plan = fetch_school_plan(db, ctx.school_id)
+        if not plan["has_plan"]:
+            return {"error": ("no SPSA on file for this school YET — nothing to spotlight. "
+                              "Its planning is UNKNOWN, not absent.")}
+        try:
+            items = [SpotlightItem(**it) for it in (ti.get("items") or [])]
+        except (TypeError, ValueError) as e:  # pydantic ValidationError subclasses ValueError
+            return {"error": f"bad items shape: {e}"}
+        if not items:
+            return {"error": "items is required — at least one {goal_index, reason}"}
+        resolved = resolve_spotlight(items, plan)
+        if not resolved["items"]:
+            return {"error": resolved.get("note") or "no valid references"}
+        ws = ctx.ensure_spec()
+        ws.plan_spotlight = SpotlightSpec(plan_year=plan["plan_year"], items=items)
+        ctx.spotlight = resolved
+        return resolved
+
+    if name == "set_school":
+        school = _resolve_school(db, ti.get("school_name"), school_level)
+        if not school:
+            return {"error": f"no {school_level} school found matching '{ti.get('school_name')}' in the loaded districts"}
+        # Client-side this spawns/activates a session pinned to the school (design § Sessions),
+        # so the workspace resets to the defaults; the plan is NOT inlined here — the model
+        # reads it via query_school_plan, the UI fetches it on session activation.
+        ctx.school_id = school["school_id"]
+        ctx.spec = DEFAULT_WORKSPACE_SPEC.model_copy(deep=True)
+        ctx.spotlight = None
+        ws = fetch_workspace(db, school["school_id"], ctx.spec, include_plan=False)
+        ctx.school = dict(school)
+        ctx.payloads = {f"slot_{i + 1}": s for i, s in enumerate(ws["slots"])}
+        return {"school": dict(school), **ws}
+
+    if name == "rename_session":
+        # No school guard — a title is session metadata, not data. The client applies it to
+        # the ACTIVE session; the server stores nothing (sessions live in localStorage).
+        title = (ti.get("title") or "").strip()
+        if not title:
+            return {"error": "title is required (max 60 characters)"}
+        ctx.session_title = title[:60]
+        return {"ok": True, "title": ctx.session_title}
+
+    return {"error": f"unknown workspace tool: {name}"}
+
+
 @router.post("")
 def chat(
     req: ChatRequest,
@@ -325,15 +588,21 @@ def chat(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "no messages")
     ui_level = req.level if req.level in LEVEL_TO_SCHOOL_LEVEL else "High"
     school_level = LEVEL_TO_SCHOOL_LEVEL[ui_level]
-    system = build_system(ui_level)
+    system = build_system(ui_level, req.workspace)
+    ctx = ToolCtx(school_id=req.school_id, workspace=req.workspace)
 
     # Trace the turn (eval-trace-system.md phase 1). Happy paths flush AFTER the response via
     # BackgroundTasks; error paths flush inline before raising, because FastAPI drops the
     # background queue when a handler raises. flush() never raises either way.
+    # `workspace` joins the trace envelope only when the client sent one — the key's absence
+    # keeps pre-workspace traces (and their pinned assertions) byte-identical.
+    ui: dict = {"level": ui_level}
+    if req.workspace is not None:
+        ui["workspace"] = req.workspace.model_dump()
     recorder = TraceRecorder(
         provider="anthropic", model=settings.chat_model,
         principal_sub=sub, session_id=req.session_id,
-        ui={"level": ui_level},
+        ui=ui,
         versions={"prompt_hash": sha256_hex(system), "tool_catalog_hash": TOOL_CATALOG_HASH},
     )
     question = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
@@ -369,7 +638,10 @@ def chat(
                 reply = "(the assistant declined to answer that.)"
                 recorder.turn_end(reply=reply, status="refusal")
                 background_tasks.add_task(recorder.flush)
-                return {"reply": reply, "tools_used": tools_used}
+                out = {"reply": reply, "tools_used": tools_used}
+                if ctx.mutated:  # slots already changed before the refusal — the UI must know
+                    out["workspace"] = ctx.to_response()
+                return out
             if resp.stop_reason != "tool_use" or i == MAX_TOOL_ITERS:
                 hit_max_iters = resp.stop_reason == "tool_use"
                 break
@@ -379,7 +651,7 @@ def chat(
                 if block.type == "tool_use":
                     tools_used.append(block.name)
                     t0 = time.perf_counter()
-                    out = _run_tool(block.name, block.input, db, school_level)
+                    out = _run_tool(block.name, block.input, db, school_level, ctx=ctx)
                     recorder.tool_call(
                         name=block.name, input=block.input, output=out,
                         error=out.get("error") if isinstance(out, dict) else None,
@@ -413,4 +685,9 @@ def chat(
     reply = "".join(b.text for b in (resp.content if resp else []) if b.type == "text").strip()
     recorder.turn_end(reply=reply, status="max_iters" if hit_max_iters else "ok")
     background_tasks.add_task(recorder.flush)
-    return {"reply": reply or "(no answer produced)", "tools_used": sorted(set(tools_used))}
+    out = {"reply": reply or "(no answer produced)", "tools_used": sorted(set(tools_used))}
+    if ctx.mutated:
+        # The turn's workspace mutations, with the SAME server-built payloads the model saw —
+        # the UI applies these directly (one round trip, no refetch, nothing model-authored).
+        out["workspace"] = ctx.to_response()
+    return out

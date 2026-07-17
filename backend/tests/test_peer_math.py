@@ -49,6 +49,7 @@ def test_full_plan_goals_empty_document():
 def test_full_plan_goals_keeps_a_goal_with_no_actions():
     out = full_plan_goals({"goals": [{"goal_number": 1, "statement": "S"}]})
     assert out == [{
+        "goal_index": 0,  # canonical spotlight ref — positions, since goal_number can be null
         "goal_number": 1, "goal_type": None, "statement": "S",
         "provenance": None, "actions": [],
     }]

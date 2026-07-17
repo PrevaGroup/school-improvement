@@ -1,4 +1,4 @@
-import type { DiagnosticSchool, Peer, SchoolDetail } from "../types";
+import type { DiagnosticSchool, Peer, SlotPayload, Spotlight, WorkspaceData } from "../types";
 import { fmt1, fmtNum, fmtPct, fmtUSD, nearDup } from "../format";
 import { PeerChart } from "./PeerChart";
 import { StepsInfo } from "./StepsInfo";
@@ -6,7 +6,7 @@ import { StepsInfo } from "./StepsInfo";
 interface Props {
   s: DiagnosticSchool | null;
   peers: Peer[] | null;
-  detail: SchoolDetail | null;
+  ws: WorkspaceData | null;
 }
 
 // `plan_missing` is the one that matters: "not extracted yet" is UNKNOWN, not "has no plan".
@@ -29,40 +29,124 @@ function bannerText(s: DiagnosticSchool): string | undefined {
   return byAlignment[s.alignment];
 }
 
-export function Diagnostic({ s, peers, detail }: Props) {
+// One workspace chart. The shape NEVER varies (that's the design's fixed-shape rule —
+// flipping metric/year/subgroup stays visually comparable); only the labels and the
+// honesty captions (thin band, fixed cohort, missing-is-UNKNOWN) change.
+function Slot({ p }: { p: SlotPayload }) {
+  if (p.error) {
+    // A validation miss (e.g. an HS-only metric after switching to a Middle school) is
+    // rendered, not hidden — the spec is sticky across schools, so this is a real state.
+    return (
+      <div className="ind">
+        <div className="muted" style={{ fontSize: "12px" }}>{p.error}</div>
+      </div>
+    );
+  }
+  const group = p.student_group_id && p.student_group_id !== "all" ? p.student_group_label || p.student_group_id : null;
+  return (
+    <div className="ind">
+      <div className="ind-hd">
+        <span className="ind-name">
+          {p.display_name}
+          {p.target_year ? <span className="d"> ({p.target_year})</span> : null}
+          {group ? <span className="d"> · {group}</span> : null}
+        </span>
+        <span className="ind-val">{p.target_value == null ? "—" : fmt1(p.target_value) + "%"}</span>
+      </div>
+      <PeerChart
+        dist={p.peer_distribution ?? null}
+        value={p.target_value ?? null}
+        direction={p.direction === "higher_better" ? "higher_better" : "lower_better"}
+      />
+      {/* A null value is UNKNOWN (often privacy-suppressed), never 0 — say so. */}
+      {p.target_value == null && p.value_status ? (
+        <div className="ind-cap">Value unavailable — may be privacy-suppressed for small enrollment (unknown, not zero).</div>
+      ) : null}
+      {p.band_status ? <div className="ind-cap">{p.band_status}</div> : null}
+      {p.cohort_note ? <div className="ind-cap">{p.cohort_note}</div> : null}
+    </div>
+  );
+}
+
+// Claude-pinned plan items. Rendered entirely from the stored plan rows the server
+// resolved — the only Claude-authored text on screen is the attributed `reason` line.
+function SpotlightStrip({ spot }: { spot: Spotlight }) {
+  if (!spot.items.length) return null;
+  return (
+    <div className="spot">
+      <div className="spot-hd">Spotlight — pinned by Claude for what the charts show</div>
+      {spot.items.map((it, i) => (
+        <div className="spot-item" key={i}>
+          <div className="spot-reason">→ {it.reason}</div>
+          <div>
+            <strong>
+              {it.goal_type || "goal"} {it.goal_number || ""}
+            </strong>{" "}
+            — {(it.statement || "").slice(0, 140)}
+            {(it.statement || "").length > 140 ? "…" : ""}
+          </div>
+          {it.actions.map((a, ai) => (
+            <div className="act" key={ai}>
+              • {a.strategy_text}
+              <div className="meta">
+                {a.budgeted_amount != null ? fmtUSD(a.budgeted_amount) : "no funding listed"}
+                {a.funding_source_raw ? " · " + a.funding_source_raw : ""}
+                {a.provenance ? " · p" + a.provenance.page : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function Diagnostic({ s, peers, ws }: Props) {
   if (!s) return <div className="muted">Select a school.</div>;
-  const inds = detail ? detail.indicators : null;
-  const plan = detail ? detail.plan : null;
+  const plan = ws ? (ws.plan ?? null) : null;
 
   return (
     <>
       <div className="card">
         <h3 className="h3-row">
-          <span>Indicators</span>
+          <span>School Indicators</span>
           <StepsInfo active="Scan indicators" />
+          <span className="hint">Claude controls these — ask it to change the metric, year, or subgroup →</span>
         </h3>
-        {inds === null ? (
+        {ws === null ? (
           <div className="muted dots">loading indicators</div>
         ) : (
           <div className="inds">
-            {inds.map((ind, i) => (
-              <div className="ind" key={i}>
-                <div className="ind-hd">
-                  <span className="ind-name">
-                    {ind.display_name}
-                    {ind.target_year ? <span className="d"> ({ind.target_year})</span> : null}
-                  </span>
-                  <span className="ind-val">
-                    {ind.target_value == null ? "—" : fmt1(ind.target_value) + "%"}
-                  </span>
-                </div>
-                <PeerChart
-                  dist={ind.peer_distribution}
-                  value={ind.target_value}
-                  direction={ind.direction}
-                />
-              </div>
+            {ws.slots.map((p, i) => (
+              <Slot p={p} key={i} />
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3 className="h3-row">
+          <span>Subgroup slice</span>
+          <span className="info" tabIndex={0}>
+            i
+            <span className="tip">
+              The same fixed chart, cut to ONE student group — the school&rsquo;s subgroup value
+              against the same subgroup across its peer band. Compare years or groups by asking
+              Claude to flip the slice. Suppressed values are unknown, never zero; a thin band is
+              captioned, not hidden.
+            </span>
+          </span>
+        </h3>
+        {ws === null ? (
+          <div className="muted dots">loading</div>
+        ) : ws.subgroup_slice ? (
+          <div className="inds">
+            <Slot p={ws.subgroup_slice} />
+          </div>
+        ) : (
+          <div className="muted">
+            Empty — ask Claude to slice an indicator by a student group, e.g.{" "}
+            <i>&ldquo;show chronic absenteeism for English learners&rdquo;</i>.
           </div>
         )}
       </div>
@@ -72,15 +156,16 @@ export function Diagnostic({ s, peers, detail }: Props) {
           <span>Plan{plan && plan.plan_year ? " · " + plan.plan_year : ""}</span>
           <StepsInfo active="Plan for implementation" />
         </h3>
-        {plan === null ? (
+        {ws === null ? (
           <div className="muted dots">loading plan</div>
-        ) : !plan.has_plan ? (
+        ) : !plan || !plan.has_plan ? (
           <div className="muted">
             No SPSA on file for this school yet — its planning is unknown (not zero). The
             indicators and peers are unaffected.
           </div>
         ) : plan.goals && plan.goals.length ? (
           <>
+            {ws.spotlight ? <SpotlightStrip spot={ws.spotlight} /> : null}
             <div className="plan-sum">
               {plan.goals.length} goals ·{" "}
               {fmtUSD(

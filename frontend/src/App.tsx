@@ -1,12 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { fmtNum, fmtPct } from "./format";
 import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
-import type { District, DiagnosticSchool, Level, Peer, SchoolDetail } from "./types";
+import { DEFAULT_WORKSPACE_SPEC, applyChatWorkspace } from "./workspace";
+import {
+  byRecency, createSession, forkSession, latestForSchool, loadStore, relTime, saveStore,
+  titleFor, upsert,
+} from "./sessions";
+import type { Session } from "./sessions";
+import type {
+  ChatTurn, ChatWorkspace, District, DiagnosticSchool, Level, Peer, WorkspaceData, WorkspaceSpec,
+} from "./types";
 
 const DEMO_DISTRICT = "0622500"; // Long Beach Unified (NCES LEAID) — the demo default
 const LEVELS: Level[] = ["High", "Middle", "Primary"];
+
+// Loaded once at import: the persisted sessions seed the initial picker/workspace state,
+// so a returning user opens on what they were last looking at.
+const BOOT = loadStore();
+const BOOT_ACTIVE = BOOT.sessions.find((s) => s.id === BOOT.active_id) ?? null;
 
 // Header stat. `null` renders as an em dash, never 0 — a missing demographic is unknown, not zero.
 function Feat({ v, kind, lab }: { v: number | string | null; kind: "pct" | "num" | "str"; lab: string }) {
@@ -30,14 +43,48 @@ interface SchoolRow extends DiagnosticSchool {
 }
 
 export default function App() {
-  const [level, setLevel] = useState<Level>("High");
-  const [districtId, setDistrictId] = useState(DEMO_DISTRICT);
+  const [level, setLevel] = useState<Level>(BOOT_ACTIVE?.level ?? "High");
+  const [districtId, setDistrictId] = useState(BOOT_ACTIVE?.district_id ?? DEMO_DISTRICT);
   const [districts, setDistricts] = useState<District[]>([]);
   const [schools, setSchools] = useState<SchoolRow[]>([]);
   const [sel, setSel] = useState<SchoolRow | null>(null);
   const [peers, setPeers] = useState<Peer[] | null>(null);
-  const [detail, setDetail] = useState<SchoolDetail | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+
+  // Sessions: a session pins ONE school + the workspace spec + the transcript. The ACTIVE
+  // session is the source of truth the rest of this state is a view of (design § Sessions).
+  const [sessions, setSessions] = useState<Session[]>(BOOT.sessions);
+  const [activeId, setActiveId] = useState<string | null>(BOOT.active_id);
+
+  // The Claude-controlled workspace: `wspec` is what should be on screen (the active
+  // session's spec), `ws` is the server-built data for it.
+  const [wspec, setWspec] = useState<WorkspaceSpec>(BOOT_ACTIVE?.workspace ?? DEFAULT_WORKSPACE_SPEC);
+  const [ws, setWs] = useState<WorkspaceData | null>(null);
+
+  // Refs read by effects/handlers without re-triggering them. `wspecRef` is also written
+  // DIRECTLY on session adoption so the sibling fetch effect (same commit) sees the adopted
+  // spec, not last render's.
+  const wspecRef = useRef(wspec);
+  wspecRef.current = wspec;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const activeRef = useRef(activeId);
+  activeRef.current = activeId;
+  // A school switch that needs a roster (district/level) reload first parks its target here.
+  const pendingSelRef = useRef<string | null>(BOOT_ACTIVE?.school_id ?? null);
+  // A chat set_school forks the conversation into the new school's session (transcript
+  // copies forward, workspace resets). Set before the selection changes; consumed once.
+  const forkFromRef = useRef<Session | null>(null);
+
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeId) ?? null,
+    [sessions, activeId],
+  );
+
+  // Persist on every mutation (saveStore debounces).
+  useEffect(() => {
+    saveStore({ v: 1, active_id: activeId, sessions });
+  }, [sessions, activeId]);
 
   useEffect(() => {
     api
@@ -57,8 +104,12 @@ export default function App() {
         `/marts/attendance-diagnostic?district_id=${districtId}&level=${level}`,
       )
       .then((d) => {
-        setSchools(d.schools || []);
-        setSel((d.schools || [])[0] || null);
+        const rows = d.schools || [];
+        setSchools(rows);
+        // A session activation / chat set_school that crossed rosters parked its target here.
+        const pending = pendingSelRef.current;
+        pendingSelRef.current = null;
+        setSel((pending && rows.find((s) => s.school_id === pending)) || rows[0] || null);
         setLoadState("ready");
       })
       .catch(() => setLoadState("error"));
@@ -68,28 +119,202 @@ export default function App() {
     () => schools.find((s) => sel && s.school_id === sel.school_id) || sel,
     [schools, sel],
   );
-
   const currentId = current?.school_id;
+
+  // Reconcile the active session with the selected school. Runs BEFORE the fetch effect
+  // below (definition order), so an adopted spec is what gets fetched. Three outcomes:
+  // already-matching session (no-op) · most recent session for this school (adopt its spec
+  // + transcript) · none (create — or FORK, when a chat set_school parked a source session).
+  useEffect(() => {
+    if (!current) return;
+    const cur = sessionsRef.current;
+    const act = cur.find((s) => s.id === activeRef.current) ?? null;
+    if (act && act.school_id === current.school_id) return;
+    const fork = forkFromRef.current;
+    forkFromRef.current = null;
+    const meta = {
+      school_id: current.school_id, school_name: current.school_name,
+      district_id: districtId, level,
+    };
+    let next: Session;
+    if (fork) {
+      next = forkSession(fork, meta);
+    } else {
+      const found = latestForSchool(cur, current.school_id);
+      next = found ? { ...found, updated_at: Date.now() } : createSession(meta);
+    }
+    setSessions((prev) => upsert(prev, next, next.id));
+    setActiveId(next.id);
+    setWspec(next.workspace);
+    wspecRef.current = next.workspace; // sibling fetch effect runs in this same commit
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId]);
+
+  function fetchWorkspace(schoolId: string, spec: WorkspaceSpec) {
+    setWs(null);
+    // One call restores every panel for the spec (charts + spotlight + plan).
+    api
+      .post<WorkspaceData>("/marts/workspace", { school_id: schoolId, spec })
+      .then(setWs)
+      .catch(() => setWs(null));
+  }
+
   useEffect(() => {
     if (!currentId) {
       setPeers(null);
-      setDetail(null);
+      setWs(null);
       return;
     }
     setPeers(null);
-    setDetail(null);
     api
       .get<{ peers: Peer[] }>(`/marts/like-schools?school_id=${currentId}&k=50`)
       .then((d) => setPeers(d.peers || []))
       .catch(() => setPeers([]));
-    api
-      .get<SchoolDetail>(`/marts/school-detail?school_id=${currentId}`)
-      .then(setDetail)
-      .catch(() => setDetail(null));
+    // Keyed on the school only: chat slot changes arrive WITH their payloads
+    // (applyChatWorkspace), so a spec change alone never costs a refetch.
+    fetchWorkspace(currentId, wspecRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
+
+  // The active session's spec follows wspec (chat mutations, adoption). Same-reference
+  // specs (just adopted) short-circuit, so adoption doesn't echo a write.
+  useEffect(() => {
+    const id = activeRef.current;
+    if (!id) return;
+    setSessions((prev) => {
+      const s = prev.find((x) => x.id === id);
+      if (!s || s.workspace === wspec) return prev;
+      return upsert(prev, { ...s, workspace: wspec, updated_at: Date.now() }, id);
+    });
+  }, [wspec]);
+
+  // Chat transcript lands in the active session (title refines off the first question,
+  // unless Claude renamed it — a custom title is never clobbered by the derivation).
+  function onMessages(turns: ChatTurn[]) {
+    const id = activeRef.current;
+    if (!id) return;
+    setSessions((prev) => {
+      const s = prev.find((x) => x.id === id);
+      if (!s) return prev;
+      const upd = { ...s, messages: turns, updated_at: Date.now() };
+      if (!upd.custom_title) upd.title = titleFor(upd);
+      return upsert(prev, upd, id);
+    });
+  }
+
+  // Rail click: adopt the session wholesale — pickers, school, spec, transcript.
+  function activateSession(s: Session) {
+    if (s.id === activeId) return;
+    const touched = { ...s, updated_at: Date.now() };
+    setSessions((prev) => upsert(prev, touched, s.id));
+    setActiveId(s.id);
+    setWspec(s.workspace);
+    wspecRef.current = s.workspace;
+    if (s.district_id !== districtId || s.level !== level) {
+      pendingSelRef.current = s.school_id;
+      if (s.district_id !== districtId) setDistrictId(s.district_id);
+      if (s.level !== level) setLevel(s.level);
+    } else if (s.school_id !== currentId) {
+      const row = schools.find((r) => r.school_id === s.school_id);
+      if (row) setSel(row);
+      else pendingSelRef.current = s.school_id;
+    } else {
+      // Same school, different session (a fresh look) — same selection, so refetch here.
+      fetchWorkspace(s.school_id, s.workspace);
+    }
+  }
+
+  // Fresh look at the current school: old chat context must not contaminate a new inquiry.
+  function newSession() {
+    if (!current) return;
+    const s = createSession({
+      school_id: current.school_id, school_name: current.school_name,
+      district_id: districtId, level,
+    });
+    setSessions((prev) => upsert(prev, s, s.id));
+    setActiveId(s.id);
+    setWspec(s.workspace);
+    wspecRef.current = s.workspace;
+    fetchWorkspace(current.school_id, s.workspace);
+  }
+
+  // Apply a chat turn's workspace mutations. A set_school turn FORKS into a session for
+  // the new school (transcript forward, spec reset — the reconcile effect builds it);
+  // anything else merges the server-built payloads straight into the loaded panels —
+  // no refetch, the model and the screen saw the same data.
+  function onWorkspace(w: ChatWorkspace) {
+    if (w.session_title) {
+      // rename_session: retitle the session the turn ran in (before any fork below).
+      const title = w.session_title;
+      const id = activeRef.current;
+      setSessions((prev) => {
+        const s = prev.find((x) => x.id === id);
+        if (!s) return prev;
+        return upsert(prev, { ...s, title, custom_title: true, updated_at: Date.now() }, id);
+      });
+    }
+    if (w.spec) setWspec(w.spec);
+    if (w.school) {
+      if (w.school.school_id === currentId) {
+        // set_school to the school already on screen = a fresh look: fork the session and
+        // apply its default payloads here (no selection change fires to do it for us).
+        const src = sessionsRef.current.find((s) => s.id === activeRef.current) ?? null;
+        const forked = forkSession(src, {
+          school_id: w.school.school_id, school_name: w.school.school_name,
+          district_id: w.school.district_id, level,
+        });
+        if (w.spec) forked.workspace = w.spec;
+        setSessions((prev) => upsert(prev, forked, forked.id));
+        setActiveId(forked.id);
+        setWs((prev) =>
+          prev
+            ? {
+                ...prev,
+                spec: w.spec ?? prev.spec,
+                slots: [0, 1, 2].map((i) => w.payloads[`slot_${i + 1}`] ?? prev.slots[i]),
+                subgroup_slice: null,
+                spotlight: null,
+              }
+            : prev,
+        );
+      } else {
+        forkFromRef.current = sessionsRef.current.find((s) => s.id === activeRef.current) ?? null;
+        if (w.school.district_id !== districtId) {
+          pendingSelRef.current = w.school.school_id;
+          setDistrictId(w.school.district_id); // roster reload selects it on arrival
+        } else {
+          const row = schools.find((s) => s.school_id === w.school!.school_id);
+          if (row) setSel(row);
+          else pendingSelRef.current = w.school.school_id;
+        }
+      }
+      return;
+    }
+    setWs((prev) => applyChatWorkspace(prev, w));
+  }
 
   return (
     <div className="cols">
+      <div className="rail">
+        <button className="new-sess" onClick={newSession} disabled={!current}>
+          + New session
+        </button>
+        <div className="rail-list">
+          {byRecency(sessions).map((s) => (
+            <div
+              key={s.id}
+              className={"sess" + (s.id === activeId ? " on" : "")}
+              onClick={() => activateSession(s)}
+              title={s.title}
+            >
+              <div className="sess-title">{s.title}</div>
+              <div className="sess-meta">
+                {s.school_name} · {relTime(s.updated_at)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="diag">
         <div className="school-hd">
           <select
@@ -156,10 +381,19 @@ export default function App() {
             </div>
           ) : null}
         </div>
-        <Diagnostic s={current} peers={peers} detail={detail} />
+        <Diagnostic s={current} peers={peers} ws={ws} />
       </div>
       <div className="chat">
-        <Chat school={current} level={level} />
+        <Chat
+          key={activeId ?? "boot"}
+          school={current}
+          level={level}
+          wspec={wspec}
+          onWorkspace={onWorkspace}
+          sessionId={activeId}
+          initialMessages={activeSession?.messages ?? []}
+          onMessages={onMessages}
+        />
       </div>
     </div>
   );
