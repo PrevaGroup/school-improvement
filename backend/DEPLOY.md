@@ -72,11 +72,30 @@ gcloud run deploy sip-api \
   --source . \
   --region us-central1 \
   --add-cloudsql-instances school-improvement-501916:us-central1:school-improvement-sql \
-  --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false,ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com,TRACES_BUCKET=school-improvement-traces,GIT_SHA=$(git rev-parse HEAD) \
+  --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false,ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com,ADMIN_GROUP=usersupport@prevagroup.com,TRACES_BUCKET=school-improvement-traces,GIT_SHA=$(git rev-parse HEAD) \
   --min-instances 0 \
   --max-instances 4 \
   --allow-unauthenticated
 ```
+
+### Administrators — Workspace group `ADMIN_GROUP` (one-time GCP setup)
+
+`is_admin` (app/security.py) checks the caller's verified email against membership in the
+`ADMIN_GROUP` Google Workspace group **live** via the Cloud Identity API — so the admin roster
+is managed in the Workspace admin console (add/remove a member of `usersupport@prevagroup.com`),
+no deploy. It **fails closed**: until the two setup steps below are done, `is_admin` returns
+False for everyone (logged as a warning), which is safe — nobody is wrongly elevated.
+
+1. **Enable the Cloud Identity API** on the project:
+   `gcloud services enable cloudidentity.googleapis.com --project school-improvement-501916`
+2. **Let the Cloud Run runtime service account read the group's membership.** Find the SA
+   (`gcloud run services describe sip-api --region us-central1 --format='value(spec.template.spec.serviceAccountName)'`;
+   empty = the default compute SA `PROJECT_NUMBER-compute@developer.gserviceaccount.com`). Then
+   grant it view access to the group — the simplest is to **add that SA email as a member of
+   `usersupport@prevagroup.com`** (a member can check the group's transitive membership); a
+   Workspace super-admin does this in the Groups console. (Alternative: grant the SA the
+   Groups Reader admin role.) A wrong/absent grant just keeps everyone non-admin — verify via
+   the `admin group check failed …` warning in the logs.
 
 > ⚠️ **The `--allow-unauthenticated` flag is not a no-op on redeploys — it MANAGES the IAM
 > binding.** The gate opened for real on 2026-07-16 (`allUsers` granted `run.invoker`;
