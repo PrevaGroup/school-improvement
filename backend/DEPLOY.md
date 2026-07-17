@@ -25,8 +25,9 @@ sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
      ```
 2. **Grant the Cloud Run service account** `roles/secretmanager.secretAccessor` and
    `roles/cloudsql.client`.
-3. **Chat trace emission** (optional until enabled — `docs/design/eval-trace-system.md` phase 1;
-   with TRACES_BUCKET unset the app runs with tracing disabled):
+3. **Chat trace emission** (`docs/design/eval-trace-system.md` phase 1; with TRACES_BUCKET
+   unset the app runs with tracing disabled. **This infra ran 2026-07-16** — bucket, salt
+   secret, and the IAM grant all exist; in a fresh project redo all three):
    - Bucket, with the 90-day lifecycle rule set AT CREATION (retention decision §8.3):
      ```bash
      gcloud storage buckets create gs://school-improvement-traces --location=us-central1
@@ -39,8 +40,9 @@ sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
        | gcloud secrets create trace-principal-salt --data-file=-
      ```
    - Grant the service account `roles/storage.objectCreator` on the bucket.
-   - Add to the ONE `--set-env-vars` flag: `TRACES_BUCKET=school-improvement-traces` and
-     `GIT_SHA=$(git rev-parse HEAD)` (what lets a trace attribute a delta to a code change).
+   - `TRACES_BUCKET` + `GIT_SHA` ride in the ONE `--set-env-vars` flag — already shown in
+     the Deploy block below (`GIT_SHA` is what lets a trace attribute a delta to a code
+     change, so stamp it from the checkout you actually deploy).
    - A missing piece never breaks chat: flushes are fire-and-forget and log a warning instead
      of raising. Grep Cloud Logging for `chat_trace` (the per-turn ops line) to confirm
      traces flow, and for `trace flush failed` to catch a misconfiguration.
@@ -70,7 +72,7 @@ gcloud run deploy sip-api \
   --source . \
   --region us-central1 \
   --add-cloudsql-instances school-improvement-501916:us-central1:school-improvement-sql \
-  --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false,ALLOWED_EMAIL_DOMAINS=prevagroup.com \
+  --set-env-vars GCP_PROJECT=school-improvement-501916,INSTANCE_CONNECTION_NAME=school-improvement-501916:us-central1:school-improvement-sql,DB_NAME=sip,DB_IP_TYPE=public,DEV_MODE=false,ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com,TRACES_BUCKET=school-improvement-traces,GIT_SHA=$(git rev-parse HEAD) \
   --min-instances 0 \
   --max-instances 4 \
   --allow-unauthenticated
@@ -108,11 +110,19 @@ gcloud run deploy sip-api \
     inside the image) while **keeping `frontend/` source**, which build stage 1 needs.
 - The Anthropic key is read from Secret Manager via ADC at request time; no env var
   needed in prod. (Set `ANTHROPIC_API_KEY` only for a local dev fallback.)
-- **`ALLOWED_EMAIL_DOMAINS` is required from this deploy on** — every `/api` route now
-  demands a verified, invited identity, and the allowlist fails closed: forget it and
-  every signed-in user 403s with "not on the invite list". `prevagroup.com` only until
-  Entra lands (a single value, so no comma and no `^@^` needed yet — see the allowlist
-  section below for when gatesfoundation.org joins).
+- **`ALLOWED_DOMAIN_PROVIDERS` is required** — every `/api` route demands a verified,
+  invited identity, and the map fails closed: forget it and every signed-in user 403s with
+  "not on the invite list". `prevagroup.com=google.com` only until Entra lands (a single
+  entry, so no comma and no `^@^` needed yet — see the invite-list section below for when
+  gatesfoundation.org joins). The `=` **inside** the value is fine: gcloud splits each
+  entry on the *first* `=` only. This var superseded `ALLOWED_EMAIL_DOMAINS` (#41); an
+  earlier revision of this block still showed the old name, and copying it into a redeploy
+  on 2026-07-16 would have silently downgraded the live auth config — this block is
+  reconciled against `gcloud run services describe`, keep it that way.
+- **`TRACES_BUCKET` + `GIT_SHA` turn on chat trace emission** (prerequisite 3 above must
+  have run once). Both are optional in the strict sense — dropping them just disables
+  tracing, chat is unaffected — but a deploy that forgets them silently stops feeding the
+  eval loop, so treat them as part of the standard flag.
 - **Migration 0005 (`usage_chat_daily`) is applied** — it ran before the go-live deploy.
   Still worth knowing: /api/chat refuses (503, fails closed) if the spend counter table is
   ever missing, so a fresh environment must reach `alembic upgrade head` (from Cloud Shell
@@ -213,12 +223,14 @@ history stays safe. Prefer the map for anything new.
 >
 > ```bash
 > gcloud run deploy sip-api --source . --region us-central1 \
->   --set-env-vars ^@^GCP_PROJECT=school-improvement-501916@ALLOWED_EMAIL_DOMAINS=prevagroup.com,gatesfoundation.org@DEV_MODE=false
+>   --set-env-vars ^@^GCP_PROJECT=school-improvement-501916@ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com,gatesfoundation.org=microsoft.com@DEV_MODE=false
 > ```
 >
-> Without it you get `ALLOWED_EMAIL_DOMAINS=prevagroup.com` plus a bogus
-> `gatesfoundation.org=` key — and a silently *shorter* invite list. (Same class of footgun as
-> the "all env vars in ONE flag" note above.)
+> Without it you get `ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com` plus a bogus
+> `gatesfoundation.org` env var holding `microsoft.com` — and a silently *shorter* invite
+> list. (Same class of footgun as the "all env vars in ONE flag" note above.) The `=` signs
+> inside the value are never the problem — gcloud splits entries on the first `=` only; the
+> comma is.
 
 ## Auth (Identity Platform)
 
