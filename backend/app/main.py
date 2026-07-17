@@ -20,7 +20,7 @@ from .db import get_db
 from .marts import router as marts_router
 from .models import DimSchool, FactMetric
 from .plans import router as plans_router
-from .security import assert_dev_mode_not_in_production, get_current_principal
+from .security import assert_dev_mode_not_in_production, get_current_principal, is_admin
 
 # Fail the deploy, not the security model: DEV_MODE + a production environment means the
 # unverified X-Dev-Tenant header would let any caller impersonate any district. Crash loudly at
@@ -88,6 +88,15 @@ def me(principal: dict = Depends(get_current_principal)) -> dict:
     against the opaque `sub`, traces are pseudonymous). `principal` is still verified here; we
     just don't hand the email back to be shown."""
     return {"ok": True}
+
+
+@app.get(f"{API}/admin/status")
+def admin_status(principal: dict = Depends(get_current_principal)) -> dict:
+    """Whether the (verified) caller is an administrator — membership in the Workspace admin
+    group, checked live (security.is_admin). Any signed-in user may ask about THEMSELVES; the
+    SPA uses it to decide whether to show admin UI. Admin-only *actions* gate on
+    `Depends(require_admin)` server-side — this boolean is a UI hint, never the enforcement."""
+    return {"is_admin": is_admin(principal)}
 
 
 @app.get(f"{API}/schools")

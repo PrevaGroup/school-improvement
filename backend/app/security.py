@@ -32,6 +32,7 @@ onboarding action, not part of the request path.
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 
@@ -40,6 +41,8 @@ from google.auth.transport import requests as g_requests
 from google.oauth2 import id_token
 
 from .config import settings
+
+log = logging.getLogger(__name__)
 
 # Reused across requests; it caches Google's public signing certs internally.
 _google_request = g_requests.Request()
@@ -269,3 +272,85 @@ def _tenant_for_claims(claims: dict) -> str | None:
         domain = email.rsplit("@", 1)[1].lower()
         return settings.domain_tenant_map.get(domain)
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Administrator — membership in the Workspace group `settings.admin_group`.
+#
+# Checked LIVE against Cloud Identity, so the admin roster is managed in the Google
+# Workspace console (add/remove a member of usersupport@prevagroup.com) with no deploy.
+# We already verify the caller's identity above; this only asks Google "is that verified
+# email a member of the admin group?". No new dependency — ADC creds (the runtime service
+# account) + the Cloud Identity REST API over httpx.
+#
+# FAILS CLOSED, on the same reasoning as the spend cap: admin is *elevation*, so every
+# unhappy path (no group configured, no email, API unreachable) withholds it, never grants
+# it. Errors are NOT cached — a transient outage must not lock an admin out for the TTL.
+# --------------------------------------------------------------------------- #
+_CI_SCOPE = "https://www.googleapis.com/auth/cloud-identity.groups.readonly"
+_ADMIN_TTL_S = 300  # membership changes rarely; 5 min keeps the API call off the hot path
+_admin_cache: dict[str, tuple[bool, float]] = {}
+_ci_creds = None  # cached ADC credentials, refreshed when expired
+
+
+def _cloud_identity_token() -> str:
+    global _ci_creds
+    if _ci_creds is None:
+        import google.auth
+        _ci_creds, _ = google.auth.default(scopes=[_CI_SCOPE])
+    if not _ci_creds.valid:
+        _ci_creds.refresh(g_requests.Request())
+    return _ci_creds.token
+
+
+def _is_group_member(email: str, group: str) -> bool:
+    """Cloud Identity: is `email` a (transitive) member of `group`? Raises on any API error
+    so the caller can fail closed — never returns a spurious False on an outage."""
+    import httpx
+
+    headers = {"Authorization": f"Bearer {_cloud_identity_token()}"}
+    with httpx.Client(timeout=5.0) as c:
+        look = c.get(
+            "https://cloudidentity.googleapis.com/v1/groups:lookup",
+            params={"groupKey.id": group}, headers=headers,
+        )
+        look.raise_for_status()
+        name = look.json()["name"]  # resource name, e.g. "groups/03abc…"
+        chk = c.get(
+            f"https://cloudidentity.googleapis.com/v1/{name}/memberships:checkTransitiveMembership",
+            params={"query": f"member_key_id == '{email}'"}, headers=headers,
+        )
+        chk.raise_for_status()
+        return bool(chk.json().get("hasMembership"))
+
+
+def is_admin(principal: dict) -> bool:
+    """True iff the verified caller is a member of the admin group. Cached per-email (TTL).
+
+    Fails closed: no group configured, no email, or an API error → not admin. A membership
+    check that ERRORS is not cached, so a transient failure retries next request rather than
+    denying for the whole TTL."""
+    if principal.get("dev_mode"):
+        return True  # the local DEV_MODE principal is admin (non-prod only; mirrors tenancy bypass)
+    email = str(principal.get("email") or "").strip().lower()
+    group = (settings.admin_group or "").strip().lower()
+    if "@" not in email or not group:
+        return False
+    now = time.time()
+    hit = _admin_cache.get(email)
+    if hit and now - hit[1] < _ADMIN_TTL_S:
+        return hit[0]
+    try:
+        member = _is_group_member(email, group)
+    except Exception:
+        log.warning("admin group check failed for %s — withholding admin (fails closed)", email)
+        return False  # deliberately NOT cached — retry next request
+    _admin_cache[email] = (member, now)
+    return member
+
+
+async def require_admin(principal: dict = Depends(get_current_principal)) -> dict:
+    """Gate a route to administrators. 403 for a verified-but-non-admin caller."""
+    if not is_admin(principal):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "this action requires an administrator")
+    return principal

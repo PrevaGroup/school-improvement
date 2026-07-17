@@ -25,6 +25,8 @@ EXPECTED: dict[str, set[str]] = {
     "/health": {"GET"},
     # The invite probe: the SPA's AuthGate calls it after sign-in, before loading the app.
     "/api/me": {"GET"},
+    # Admin-status hint: any signed-in user may ask whether they're an admin (Workspace group).
+    "/api/admin/status": {"GET"},
     # --- everything below is under /api (see app/main.py; docs/GO_LIVE_PLAN.md §3.1c) ---
     "/api/schools": {"GET"},
     "/api/schools/{school_id}/metrics": {"GET"},

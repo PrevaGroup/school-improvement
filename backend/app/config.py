@@ -171,6 +171,14 @@ class Settings(BaseSettings):
             return self.allowed_domain_providers
         return {d: "google.com" for d in self.allowed_email_domains}
 
+    # --- who is an ADMINISTRATOR: membership in a Google Workspace group ---
+    # e.g. "usersupport@prevagroup.com". Admin is checked LIVE against Cloud Identity group
+    # membership (app/security.py is_admin), so the admin list is managed in the Workspace
+    # console — no deploy to add/remove. FAILS CLOSED: empty = nobody is admin, and any
+    # membership-check error withholds admin. Requires the Cloud Identity API enabled and the
+    # runtime service account granted group-read (see backend/DEPLOY.md).
+    admin_group: str = ""
+
     @property
     def identity_platform_audience(self) -> str | None:
         return self.google_oauth_audience or self.gcp_project
