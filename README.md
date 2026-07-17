@@ -25,13 +25,14 @@ loaders, on Cloud SQL.
 
 ## Status
 
-- **Live on Cloud Run** — an IAM-gated **school diagnostic workspace**: three peer-benchmarked
-  indicators (chronic absenteeism, graduation rate, college-going), the school's full SPSA, its
+- **Live on Cloud Run** — an IAM-gated **school diagnostic workspace**: five peer-benchmarked
+  indicators (chronic absenteeism, graduation rate, college-going, CAASPP ELA/Math), the school's full SPSA, its
   demographically-matched peers, and a **grounded chat** with five tools over all of it.
 - Cloud SQL Postgres with the full aggregate **star schema** (21 tables) + **row-level
   security** (tenant isolation proven), credentials in **Google Secret Manager**.
-- **8 public metrics loaded** (chronic absenteeism, suspension, expulsion, graduation,
-  stability, college-going, homelessness, enrollment) — ~960k `fact_metric` rows.
+- **10 public metrics loaded** (chronic absenteeism, suspension, expulsion, graduation,
+  stability, college-going, homelessness, enrollment, CAASPP ELA + Math) — ~1.5M
+  `fact_metric` rows.
 - **SIP extraction run**: 74 of 77 Long Beach SPSAs (plus Ventura) extracted PDF → JSON →
   `plan_extraction`, via the batch path (`batch_extract` → GCS → `load_plan_extractions`).
 - **"Schools like you" peer engine** (Mahalanobis kNN on *inputs* — poverty, EL, disability,

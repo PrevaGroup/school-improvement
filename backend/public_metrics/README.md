@@ -1,7 +1,7 @@
 # public_metrics — California public-data ETL
 
 Bulk ETL that loads CDE / data.ca.gov public files into the star schema as `fact_metric` rows at
-`tenant_id='public'` (~960k rows across eight public metrics, plus CAASPP ELA/Math). Per-fact
+`tenant_id='public'` (~1.5M rows across ten public metrics, incl. CAASPP ELA/Math). Per-fact
 loaders are thin: each defines a `SPEC` and calls the shared runner in [`_shared.py`](_shared.py) —
 except `load_ca_caaspp.py`, which carries its own machinery (see its docstring for why). Naming
 convention: **`load_<state>_<fact>.py`** (here `load_ca_<fact>.py`).
@@ -119,7 +119,7 @@ writing.
 | `load_ca_college_going.py` | `college_going_rate` | 2021‑22 | `academics/collegegoingrate_16mo_2021-22.txt` | 31,224 |
 | `load_ca_homeless.py` | `homeless_enrollment` | 2023‑24 | `demographics/homeless_2023-24.txt` | 10,669 |
 | `load_ca_enrollment.py` | `enrollment` | 2024‑25 | `demographics/enrollment_censusday_2024-25.txt` | 154,538 |
-| `load_ca_caaspp.py` | `ela_met_standard_pct` + `math_met_standard_pct` | 2023‑24 **and** 2024‑25 | `academics/caaspp_smarterbalanced_all_<year>.zip` (both, one run) | TBD — first load pending |
+| `load_ca_caaspp.py` | `ela_met_standard_pct` + `math_met_standard_pct` | 2023‑24 **and** 2024‑25 | `academics/caaspp_smarterbalanced_all_<year>.zip` (both, one run) | 538,005 (268,666 + 269,339) |
 
 Row counts above are the pre-NCES figures; the NCES re-key drops the non-school aggregate rows
 (school code `0000000`/`0000001`), so live counts run slightly lower.

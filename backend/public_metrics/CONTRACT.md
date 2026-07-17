@@ -7,7 +7,7 @@ entire contract is the *rows* it produces into core's schema.
 
 | Target | What |
 |---|---|
-| `fact_metric` | ~960k rows @ `tenant_id='public'`, `visibility='public'`, at the conformed grain (school × period × metric × student-group), using **only** ids from core's vocab. CAASPP ELA/Math load at the Grade-13 (All Grades) rollup — the grade axis is collapsed to fit the grain |
+| `fact_metric` | ~1.5M rows @ `tenant_id='public'`, `visibility='public'`, at the conformed grain (school × period × metric × student-group), using **only** ids from core's vocab. CAASPP ELA/Math load at the Grade-13 (All Grades) rollup — the grade axis is collapsed to fit the grain |
 | `dim_school` | the school spine, keyed on **NCES** (`CA-<cds>` fallback; non-school aggregates excluded) |
 | `dim_student_group`, `dim_metric`, `dim_period`, `group_crosswalk` | seeded from core's vocab + this module's CA crosswalk (`seed_ca_dims`, idempotent `ON CONFLICT DO NOTHING`) |
 
