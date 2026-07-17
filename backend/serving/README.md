@@ -17,7 +17,7 @@ This replaces the earlier `plan_marts` + `chat` scaffolds, and absorbs the peer 
 `ARCHITECTURE.md`).
 
 The reason is concrete: `fetch_peer_benchmark` is needed by the attendance diagnostic **and** the
-school-detail panel **and** the chat tools. Split those across modules and every one of them
+workspace panel **and** the chat tools. Split those across modules and every one of them
 becomes a cross-module import — the one rule gone. Duplicating the percentile/cohort logic instead
 would be worse. So the read surface is **one module** that owns no tables and reads every
 producer's tables with SQL, which keeps the table as the only seam in the system.
@@ -33,7 +33,7 @@ producer's tables with SQL, which keeps the table as the only seam in the system
 |---|---|---|
 | Plan-content marts | `backend/app/marts.py` → `fetch_attendance_plans`, `attendance_slice`, `fetch_attendance_diagnostic` | endpoint-composed (no tables yet; can be materialized later) |
 | Peer serving | `backend/app/marts.py` → `fetch_like_schools`, `fetch_peer_benchmark`, `_pctile` | reads `mart_school_peer` + `fact_metric` |
-| School detail | `backend/app/marts.py` → `fetch_indicators`, `fetch_school_plan`, `full_plan_goals` | the panel: indicator charts + full plan |
+| Workspace (Claude-controlled panel) | `backend/app/marts.py` → `fetch_workspace`, `fetch_slot`, `validate_slot_spec`, `resolve_spotlight`, `fetch_school_plan`, `full_plan_goals` | slot charts + subgroup slice + plan spotlight + full plan; spec-gated (docs/design/agentic-workspace-and-sessions.md) |
 | Subgroup breakdown | `backend/app/marts.py` → `fetch_metric_by_subgroup`, `subgroup_slice` | `fact_metric` disaggregated by student group |
 | Chat endpoint + tools | `backend/app/chat.py` | wraps the fetch fns above — an intra-module import, which is why it's legal |
 

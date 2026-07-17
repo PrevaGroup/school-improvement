@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
@@ -252,14 +253,29 @@ def _pctile(sorted_vals: list[float], q: float) -> float | None:
     return sorted_vals[lo] * (1 - (idx - lo)) + sorted_vals[hi] * (idx - lo)
 
 
-def fetch_peer_benchmark(db: Session, school_id: str, metric_id: str, school_year: str | None = None) -> dict:
+def fetch_peer_benchmark(
+    db: Session,
+    school_id: str,
+    metric_id: str,
+    school_year: str | None = None,
+    student_group_id: str = "all",
+) -> dict:
     """Target school's metric value + its peer-group distribution and percentile.
 
     Guardrail (spec §6): `target_value` is the absolute number and `direction` says which
     way is good, so peer-relative percentile is never shown as the ceiling. (A fixed
     proficiency bar would enrich this once `ref_benchmark` is populated.)
+
+    Workspace params (docs/design/agentic-workspace-and-sessions.md):
+    - `school_year` is the DATA year (None = latest per school, the original behavior).
+      The COHORT stays fixed either way — always the latest `mart_school_peer` set — so
+      "same school vs. same band across years" is apples-to-apples and no per-year peer
+      build is needed. The payload says so via `cohort_note` when a year was requested.
+    - `student_group_id` slices target AND band to the same subgroup (peers' same-subgroup
+      values). Subgroup values are often privacy-suppressed for small n, so the band's `n`
+      shrinks; `band_status` flags a thin band rather than hiding it.
     """
-    yr = school_year or _latest_peer_year(db, school_id)
+    yr = _latest_peer_year(db, school_id)
     if not yr:
         return {"error": "no peer set for this school (run likeschools.build_peers)"}
     peers = db.execute(
@@ -269,14 +285,19 @@ def fetch_peer_benchmark(db: Session, school_id: str, metric_id: str, school_yea
     if not peers:
         return {"error": "no peer set for this school"}
 
+    year_filter = "AND p.school_year = :dy " if school_year else ""
     stmt = text(
         "SELECT f.school_id, f.value, p.school_year "
         "FROM fact_metric f JOIN dim_period p ON f.period_id = p.period_id "
-        "WHERE f.metric_id = :m AND f.student_group_id = 'all' AND f.value IS NOT NULL "
+        "WHERE f.metric_id = :m AND f.student_group_id = :g AND f.value IS NOT NULL "
+        f"{year_filter}"
         "AND f.school_id IN :ids"
     ).bindparams(bindparam("ids", expanding=True))
+    params: dict = {"m": metric_id, "g": student_group_id, "ids": list(peers) + [school_id]}
+    if school_year:
+        params["dy"] = school_year
     latest: dict[str, tuple[float, str]] = {}
-    for r in db.execute(stmt, {"m": metric_id, "ids": list(peers) + [school_id]}).mappings():
+    for r in db.execute(stmt, params).mappings():
         cur = latest.get(r["school_id"])
         y = r["school_year"] or ""
         if cur is None or y > cur[1]:
@@ -311,13 +332,24 @@ def fetch_peer_benchmark(db: Session, school_id: str, metric_id: str, school_yea
     performance = None
     if percentile is not None and direction in ("higher_better", "lower_better"):
         performance = round(100 - percentile if direction == "lower_better" else percentile, 1)
-    return {
+    out = {
         "school_id": school_id, "metric_id": metric_id, "direction": direction, "school_year": yr,
+        "student_group_id": student_group_id,
         "target_value": target[0] if target else None, "target_year": target[1] if target else None,
         "peer_distribution": distribution,               # n = band size (peers + this school)
         "target_percentile_in_band": percentile,         # midrank of the school within its band
         "peer_performance_percentile": performance,      # direction-applied: higher = better than band
+        "band_status": band_status(distribution["n"]) if distribution else None,
     }
+    if school_year:
+        out["cohort_note"] = f"band = the latest peer set ({yr}); values are the {school_year} data year"
+    if out["target_value"] is None:
+        # A missing metric is UNKNOWN (possibly privacy-suppressed for small enrollment),
+        # not zero. chat's compare_to_peers adds the same note (pinned by its tests);
+        # duplicating it here means direct callers (the workspace endpoint) get it too.
+        out["value_status"] = ("this school's value for this metric is not available (it may be "
+                               "privacy-suppressed for small enrollment) — treat as UNKNOWN, never 0.")
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -529,8 +561,9 @@ def districts_ep(db: Session = Depends(get_db_public)) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Selected-school detail — the headline indicator charts (multi-metric) + the
-# FULL plan (every goal/action, not just attendance). Fetched per selected school.
+# Default indicators — the three headline metrics every workspace opens with
+# (feeds DEFAULT_WORKSPACE_SPEC below). The fixed panel + GET /marts/school-detail
+# they once drove were retired when the frontend cut over to POST /marts/workspace.
 # --------------------------------------------------------------------------- #
 INDICATOR_METRICS = [
     ("chronic_absenteeism_rate", "Chronic absenteeism", "lower_better"),
@@ -544,33 +577,26 @@ INDICATOR_METRICS = [
 ]
 
 
-def fetch_indicators(db: Session, school_id: str) -> list[dict]:
-    """Per-school value + peer distribution for the headline indicators (for the charts)."""
-    out = []
-    for mid, name, direction in INDICATOR_METRICS:
-        b = fetch_peer_benchmark(db, school_id, mid)
-        out.append({
-            "metric_id": mid, "display_name": name,
-            "direction": b.get("direction") or direction,
-            "target_value": b.get("target_value"), "target_year": b.get("target_year"),
-            "peer_distribution": b.get("peer_distribution"),
-            "peer_performance_percentile": b.get("peer_performance_percentile"),
-        })
-    return out
-
-
 def full_plan_goals(doc: dict) -> list[dict]:
-    """EVERY goal + action in the plan document — the full SPSA, not attendance-filtered."""
+    """EVERY goal + action in the plan document — the full SPSA, not attendance-filtered.
+
+    `goal_index`/`action_index` are the CANONICAL spotlight references (design doc §
+    "Plan spotlight"): `goal_number`/`action_number` come from the extraction and can be
+    null, so positions in this served array are what `spotlight_plan_items` pins — the
+    model learns them by reading this same output via query_school_plan.
+    """
     goals_out = []
-    for g in doc.get("goals", []) or []:
+    for gi, g in enumerate(doc.get("goals", []) or []):
         actions_out = [{
+            "action_index": ai,
             "action_number": a.get("action_number"),
             "strategy_text": a.get("strategy_text"),
             "budgeted_amount": a.get("budgeted_amount"),
             "funding_source_raw": a.get("funding_source_raw"),
             "provenance": a.get("provenance"),
-        } for a in (g.get("actions", []) or [])]
+        } for ai, a in enumerate(g.get("actions", []) or [])]
         goals_out.append({
+            "goal_index": gi,
             "goal_number": g.get("goal_number"), "goal_type": g.get("goal_type"),
             "statement": g.get("statement"), "provenance": g.get("provenance"),
             "actions": actions_out,
@@ -593,8 +619,229 @@ def fetch_school_plan(db: Session, school_id: str) -> dict:
             "goals": full_plan_goals(row["document"] or {})}
 
 
-@router.get("/school-detail")
-def school_detail_ep(school_id: str, db: Session = Depends(get_db_public)) -> dict:
-    """Everything the panel needs for ONE school: indicator charts + the full plan."""
-    return {"school_id": school_id, "indicators": fetch_indicators(db, school_id),
-            "plan": fetch_school_plan(db, school_id)}
+# --------------------------------------------------------------------------- #
+# Claude-controlled workspace (docs/design/agentic-workspace-and-sessions.md).
+#
+# The governing invariant: Claude controls a SPEC; the server renders the DATA.
+# A spec is validated against dim_metric / dim_period / dim_student_group /
+# plan_extraction, then the payloads the UI charts are built here from DB rows —
+# the model cannot put a number or a plan sentence on screen that it authored.
+# The only model-authored rendered text is the spotlight `reason` (truncated,
+# visibly attributed).
+# --------------------------------------------------------------------------- #
+
+# dim_school.school_level -> the codes dim_metric.applies_to_levels uses.
+LEVEL_TO_CODE = {"Elementary": "ES", "Middle": "MS", "High": "HS"}
+
+THIN_BAND_N = 10       # below this, the band is captioned as thin, not hidden
+REASON_MAX = 200       # spotlight `reason` render cap — a caption, not an essay
+
+
+class SlotSpec(BaseModel):
+    metric_id: str
+    school_year: str | None = None      # None = latest available
+    student_group_id: str = "all"
+
+
+class SpotlightItem(BaseModel):
+    goal_index: int                      # position in full_plan_goals output (canonical ref)
+    action_indices: list[int] | None = None  # None = pin the whole goal (all its actions)
+    reason: str                          # the ONE model-authored line that gets rendered
+
+
+class SpotlightSpec(BaseModel):
+    # Stamped by the server from the plan the items were validated against. On restore,
+    # a mismatch with the school's latest extraction drops the spotlight silently — the
+    # full goal list underneath never lies (design doc § "Plan spotlight").
+    plan_year: str | None = None
+    items: list[SpotlightItem]
+
+
+class WorkspaceSpec(BaseModel):
+    slots: list[SlotSpec] = Field(min_length=3, max_length=3)
+    subgroup_slice: SlotSpec | None = None
+    plan_spotlight: SpotlightSpec | None = None
+
+
+# The default workspace = the original three headline indicators (chronic absenteeism /
+# grad / college-going): first paint before Claude ever acts is the current app. Only the
+# FIRST THREE of INDICATOR_METRICS seed it — WorkspaceSpec is exactly 3 slots, and #47's
+# CAASPP ELA/Math entries are additional *selectable* indicators (they're in the derived
+# fetch_slot_metrics whitelist), not extra default slots. Claude swaps them in per school —
+# which is how an ES/MS school (where grad/college don't apply) gets to CAASPP outcomes.
+DEFAULT_WORKSPACE_SPEC = WorkspaceSpec(
+    slots=[SlotSpec(metric_id=mid) for mid, _, _ in INDICATOR_METRICS[:3]],
+)
+
+
+def fetch_slot_metrics(db: Session) -> dict[str, dict]:
+    """The slot-metric whitelist — DERIVED, not hand-listed: every percent-unit metric.
+
+    PeerChart's fixed 0–100 scale (deliberate, comparability across schools) only makes
+    sense for percent metrics; count metrics (enrollment) are excluded by the same rule.
+    """
+    rows = db.execute(text(
+        "SELECT metric_id, display_name, direction, applies_to_levels "
+        "FROM dim_metric WHERE unit = 'pct' AND direction != 'context'"
+    )).mappings().all()
+    return {r["metric_id"]: dict(r) for r in rows}
+
+
+def band_status(n: int | None) -> str | None:
+    """Thin-band caption (pure). Honesty over hiding: a subgroup band shrinks because
+    peers' values are privacy-suppressed for small n — say so rather than drop the chart."""
+    if n is None or n >= THIN_BAND_N:
+        return None
+    return (f"thin band: only {n} school(s) in the peer band report this slice "
+            "(others privacy-suppressed or missing) — read the comparison cautiously")
+
+
+def validate_slot_spec(
+    spec: SlotSpec,
+    metrics_meta: dict[str, dict],
+    school_level: str | None,
+    known_years: set[str],
+    known_groups: set[str],
+) -> str | None:
+    """Validate a slot spec against the conformed vocabulary (pure — no DB).
+
+    Returns an error string (corrective: lists the valid values so the model can fix its
+    call) or None. A VALID year with no data at the school is NOT an error — missingness
+    is honest payload content (`value_status`), invalidity is a correctable mistake.
+    """
+    if spec.metric_id not in metrics_meta:
+        return (f"'{spec.metric_id}' is not a chartable metric — choose one of: "
+                f"{', '.join(sorted(metrics_meta))}")
+    code = LEVEL_TO_CODE.get(school_level or "")
+    applies = metrics_meta[spec.metric_id].get("applies_to_levels") or ""
+    if code and applies and code not in {c.strip() for c in applies.split(",")}:
+        return (f"'{spec.metric_id}' is not reported for {school_level} schools "
+                f"(applies to: {applies})")
+    if spec.school_year is not None and spec.school_year not in known_years:
+        return (f"unknown school_year '{spec.school_year}' — use the '2023-24' format; "
+                f"known years: {', '.join(sorted(known_years))}")
+    if spec.student_group_id not in known_groups:
+        return (f"unknown student_group_id '{spec.student_group_id}' — known groups: "
+                f"{', '.join(sorted(known_groups))}")
+    return None
+
+
+def _slot_refs(db: Session) -> tuple[dict[str, dict], set[str], dict[str, str]]:
+    """The reference sets a slot validates against (one fetch, shared across slots).
+    Groups map id -> label so the payload can carry the human name for the slice header."""
+    metrics_meta = fetch_slot_metrics(db)
+    known_years = set(db.execute(text(
+        "SELECT DISTINCT school_year FROM dim_period WHERE school_year IS NOT NULL"
+    )).scalars().all())
+    known_groups = {r["student_group_id"]: r["label"] for r in db.execute(
+        text("SELECT student_group_id, label FROM dim_student_group")
+    ).mappings()}
+    return metrics_meta, known_years, known_groups
+
+
+def fetch_slot(
+    db: Session,
+    school_id: str,
+    spec: SlotSpec,
+    school_level: str | None = None,
+    refs: tuple | None = None,
+) -> dict:
+    """One chart-ready slot payload: validate the spec, then the generalized benchmark.
+
+    Same shape the PeerChart renders today (value/year/direction/peer_distribution/
+    percentile) plus the spec echo and display_name — the chart shape never varies,
+    only what's in it (the design's fixed-shape rule)."""
+    metrics_meta, known_years, known_groups = refs or _slot_refs(db)
+    if school_level is None:
+        school_level = db.execute(
+            text("SELECT school_level FROM dim_school WHERE school_id = :s"), {"s": school_id}
+        ).scalar()
+    err = validate_slot_spec(spec, metrics_meta, school_level, known_years, known_groups)
+    if err:
+        return {"error": err}
+    bench = fetch_peer_benchmark(
+        db, school_id, spec.metric_id,
+        school_year=spec.school_year, student_group_id=spec.student_group_id,
+    )
+    return {"slot_spec": spec.model_dump(),
+            "display_name": metrics_meta[spec.metric_id]["display_name"],
+            "student_group_label": (known_groups.get(spec.student_group_id)
+                                    if isinstance(known_groups, dict) else None),
+            **bench}
+
+
+def resolve_spotlight(items: list[SpotlightItem], plan: dict) -> dict:
+    """Resolve spotlight references against the served plan (pure — takes fetch_school_plan
+    output). Everything rendered comes from the plan rows; the model contributed only the
+    selection and the `reason` line (truncated to REASON_MAX). Out-of-range refs are
+    dropped with a note, never guessed."""
+    goals = plan.get("goals") or []
+    out, dropped = [], []
+    for it in items:
+        if not (0 <= it.goal_index < len(goals)):
+            dropped.append(it.goal_index)
+            continue
+        g = goals[it.goal_index]
+        acts = g.get("actions") or []
+        if it.action_indices is None:
+            picked = acts
+        else:
+            picked = [acts[i] for i in it.action_indices if 0 <= i < len(acts)]
+        out.append({
+            "goal_index": it.goal_index,
+            "goal_number": g.get("goal_number"), "goal_type": g.get("goal_type"),
+            "statement": g.get("statement"),
+            "actions": picked,
+            "reason": (it.reason or "")[:REASON_MAX],
+        })
+    res = {"plan_year": plan.get("plan_year"), "items": out}
+    if dropped:
+        res["note"] = (f"dropped out-of-range goal_index refs {dropped} — the plan has "
+                       f"{len(goals)} goals (goal_index is 0-based, from query_school_plan)")
+    return res
+
+
+def fetch_workspace(db: Session, school_id: str, spec: WorkspaceSpec, include_plan: bool = True) -> dict:
+    """Everything the workspace renders for ONE school, driven by a (client-stored) spec.
+
+    One call restores a whole session's panels (design § Sessions): slot charts, the
+    subgroup slice, the resolved spotlight, and (unless suppressed) the full plan."""
+    school_level = db.execute(
+        text("SELECT school_level FROM dim_school WHERE school_id = :s"), {"s": school_id}
+    ).scalar()
+    refs = _slot_refs(db)
+    slots = [fetch_slot(db, school_id, s, school_level, refs) for s in spec.slots]
+    slice_out = (
+        fetch_slot(db, school_id, spec.subgroup_slice, school_level, refs)
+        if spec.subgroup_slice else None
+    )
+    plan = None
+    spotlight = None
+    if include_plan or spec.plan_spotlight:
+        plan = fetch_school_plan(db, school_id)
+    if spec.plan_spotlight and plan and plan["has_plan"]:
+        if spec.plan_spotlight.plan_year in (None, plan["plan_year"]):
+            spotlight = resolve_spotlight(spec.plan_spotlight.items, plan)
+        # else: the plan moved on since the spotlight was pinned — drop it silently;
+        # the full goal list below it never lies (design § "Plan spotlight").
+    out = {
+        "school_id": school_id,
+        "spec": spec.model_dump(),
+        "slots": slots,
+        "subgroup_slice": slice_out,
+        "spotlight": spotlight,
+    }
+    if include_plan:
+        out["plan"] = plan
+    return out
+
+
+class WorkspaceRequest(BaseModel):
+    school_id: str
+    spec: WorkspaceSpec
+
+
+@router.post("/workspace")
+def workspace_ep(req: WorkspaceRequest, db: Session = Depends(get_db_public)) -> dict:
+    """The workspace panels for one school from a client-stored spec (session restore)."""
+    return fetch_workspace(db, req.school_id, req.spec)

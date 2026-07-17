@@ -15,9 +15,10 @@ what lets the peer endpoints live here without breaking the one rule.
 ## Serves — frozen by `tests/test_route_contract.py`
 
 `/api/marts/attendance-plans`, `/api/marts/attendance-diagnostic`, `/api/marts/subgroup-metrics`,
-`/api/marts/districts`, `/api/marts/school-detail`, `/api/marts/like-schools`,
-`/api/marts/peer-benchmark` (GET) · `/api/chat` (POST). Deliberate changes update the test's
-`EXPECTED` in the same commit.
+`/api/marts/districts`, `/api/marts/like-schools`, `/api/marts/peer-benchmark` (GET) ·
+`/api/marts/workspace`, `/api/chat` (POST). Deliberate changes update the test's `EXPECTED`
+in the same commit. (`/api/marts/school-detail` was retired 2026-07-16 when the panel cut
+over to `POST /marts/workspace`.)
 
 ## Response-shape invariants the UI and chat rely on
 
@@ -27,6 +28,13 @@ what lets the peer endpoints live here without breaking the one rule.
   higher-is-better-than-band, whatever the metric's direction.
 - **Cohort framing:** a school is ranked within peers **+ itself**; the peer *list* excludes it.
 - Chat tools never invent data — every answer grounds in these same fetch functions.
+- **Workspace (docs/design/agentic-workspace-and-sessions.md):** Claude controls a *spec*
+  (validated against `dim_metric`/`dim_period`/`dim_student_group`/`plan_extraction`); the
+  server renders the *data*, and the same server-built payload goes to the model and the UI.
+  The only model-authored text rendered in the workspace is the spotlight `reason` (truncated,
+  visibly attributed). Slot metrics are the derived `unit='pct'` whitelist; the year param
+  varies the data year while the peer cohort stays the latest peer set; a subgroup band's
+  small `n` is captioned (`band_status`), never hidden.
 
 ## Known pressure (decide before the first trace is written)
 

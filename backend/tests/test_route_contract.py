@@ -33,10 +33,14 @@ EXPECTED: dict[str, set[str]] = {
     "/api/marts/attendance-diagnostic": {"GET"},
     "/api/marts/subgroup-metrics": {"GET"},
     "/api/marts/districts": {"GET"},
-    "/api/marts/school-detail": {"GET"},
+    # school-detail retired 2026-07-16: the panel reads POST /api/marts/workspace now
+    # (agentic-workspace-and-sessions.md phase 4), and nothing else ever consumed it.
     # --- serving: peer endpoints (likeschools is engine-only; these serve its tables) ---
     "/api/marts/like-schools": {"GET"},
     "/api/marts/peer-benchmark": {"GET"},
+    # --- serving: Claude-controlled workspace (agentic-workspace-and-sessions.md) ---
+    # POST because the body is a nested WorkspaceSpec; used for session restore.
+    "/api/marts/workspace": {"POST"},
     # --- sip ---
     "/api/plans/extract": {"POST"},
     "/api/plans/load": {"POST"},
@@ -86,5 +90,5 @@ def test_frontend_endpoints_survive_the_module_split():
     """
     published = _published()
     for path in ("/api/marts/attendance-diagnostic", "/api/marts/districts",
-                 "/api/marts/like-schools", "/api/marts/school-detail", "/api/chat"):
+                 "/api/marts/like-schools", "/api/marts/workspace", "/api/chat"):
         assert path in published, f"{path} is fetched by the UI but is no longer published"
