@@ -66,6 +66,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "app.traces": "serving",  # trace EMISSION (GCS, no tables) — eval-trace-system.md phase 1
     "likeschools": "likeschools",
     "public_metrics": "public_metrics",
+    "evals": "evals",  # trace store + eval loop (owns 5 tables) — eval-trace-system.md phase 2
 }
 
 # Scanned trees. `tests/`, `scripts/`, and `migrations/` are tooling that legitimately
@@ -76,7 +77,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
 # the way `tests/` did when pytest.ini's `testpaths` omitted it, and just as silently.
 # `test_the_module_map_covers_every_source_file` only guards files inside these trees, so
 # it cannot catch a whole tree being missing. This tuple is the thing to keep honest.
-SOURCE_TREES = ("app", "etl", "likeschools", "public_metrics")
+SOURCE_TREES = ("app", "etl", "likeschools", "public_metrics", "evals")
 
 # --------------------------------------------------------------------------- #
 # Known debt: cross-module imports that exist TODAY, enumerated so the rule can be

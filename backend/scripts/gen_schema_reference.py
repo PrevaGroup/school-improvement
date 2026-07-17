@@ -26,6 +26,7 @@ from app.models import Base, PRIVATE_TABLES  # noqa: E402
 # Add a line when a module starts owning tables. (This is tooling, not core, so it may know them.)
 import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
 import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
+import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback
 
 OUT = ROOT / "SCHEMA_REFERENCE.md"
 

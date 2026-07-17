@@ -51,6 +51,7 @@ from app.models import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 # "prove" that 7 tables had vanished. If env.py's import list changes, change it here too.
 import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
 import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
+import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback
 
 # table -> the module that DECLARES it (whose models.py the class lives in). That's what this
 # file can actually check: Base.metadata is built from declarations, not from who writes rows.
@@ -93,6 +94,15 @@ EXPECTED_TABLES: dict[str, str] = {
     "plan": "sip",
     "plan_goal": "sip",
     "plan_action": "sip",
+    # --- evals' tables — declared in evals/models.py (eval-trace-system.md §3). All carry
+    #     tenant_id (RLS-ready per §6) but are NOT in PRIVATE_TABLES: every row is
+    #     public-tenant today, and the policy flip is a deliberate core move, not a side
+    #     effect of the module existing. ---
+    "trace": "evals",
+    "eval_case": "evals",
+    "eval_run": "evals",
+    "eval_result": "evals",
+    "feedback": "evals",
 }
 
 
@@ -138,6 +148,11 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "feat_match_vector": "0004_peer_tables.py",
     "mart_school_peer": "0004_peer_tables.py",
     "model_partition_stats": "0004_peer_tables.py",
+    "trace": "0006_eval_tables.py",
+    "eval_case": "0006_eval_tables.py",
+    "eval_run": "0006_eval_tables.py",
+    "eval_result": "0006_eval_tables.py",
+    "feedback": "0006_eval_tables.py",
 }
 
 

@@ -128,6 +128,49 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | `display_name` | TEXT |  |
 | `jurisdiction` | TEXT |  |
 
+## `eval_case` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `eval_case_id` | TEXT | PK, NOT NULL |
+| `tenant_id` | TEXT | NOT NULL, default `public` |
+| `question` | TEXT | NOT NULL |
+| `ui` | JSONB |  |
+| `expected` | JSONB |  |
+| `source` | TEXT | NOT NULL |
+| `status` | TEXT | NOT NULL, default `candidate` |
+| `tags` | ARRAY |  |
+| `notes` | TEXT |  |
+| `created_at` | TIMESTAMP | NOT NULL, default `now()` |
+
+## `eval_result` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `eval_run_id` | TEXT | PK, NOT NULL |
+| `eval_case_id` | TEXT | PK, NOT NULL |
+| `tenant_id` | TEXT | NOT NULL, default `public` |
+| `verdict` | TEXT |  |
+| `scores` | JSONB |  |
+| `judge_rationale` | TEXT |  |
+| `trace_id` | TEXT |  |
+
+## `eval_run` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `eval_run_id` | TEXT | PK, NOT NULL |
+| `tenant_id` | TEXT | NOT NULL, default `public` |
+| `ts` | TIMESTAMP | NOT NULL |
+| `set_name` | TEXT |  |
+| `target` | TEXT |  |
+| `provider` | TEXT |  |
+| `model` | TEXT |  |
+| `versions` | JSONB |  |
+| `baseline_run_id` | TEXT |  |
+| `aggregates` | JSONB |  |
+| `cost_usd` | FLOAT |  |
+
 ## `fact_metric` — private (RLS)
 
 | Column | Type | Constraints |
@@ -179,6 +222,18 @@ Documents the **as-built** database. The conceptual design is in [`../California
 | `f_locale_town` | FLOAT |  |
 | `f_locale_rural` | FLOAT |  |
 | `n_imputed` | SMALLINT | NOT NULL, default `0` |
+
+## `feedback` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `feedback_id` | TEXT | PK, NOT NULL |
+| `tenant_id` | TEXT | NOT NULL, default `public` |
+| `trace_id` | TEXT | NOT NULL |
+| `rating` | SMALLINT | NOT NULL |
+| `comment` | TEXT |  |
+| `principal_hash` | TEXT |  |
+| `ts` | TIMESTAMP | NOT NULL, default `now()` |
 
 ## `group_crosswalk` — public reference
 
@@ -301,3 +356,38 @@ Documents the **as-built** database. The conceptual design is in [`../California
 |---|---|---|
 | `tenant_id` | TEXT | PK, NOT NULL |
 | `school_id` | TEXT | PK, NOT NULL |
+
+## `trace` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `trace_id` | TEXT | PK, NOT NULL |
+| `session_id` | TEXT |  |
+| `ts` | TIMESTAMP | NOT NULL |
+| `latency_ms` | INTEGER |  |
+| `status` | TEXT | NOT NULL |
+| `tenant_id` | TEXT | NOT NULL, default `public` |
+| `principal_hash` | TEXT |  |
+| `source` | TEXT | NOT NULL |
+| `question` | TEXT |  |
+| `ui` | JSONB |  |
+| `provider` | TEXT |  |
+| `model` | TEXT |  |
+| `versions` | JSONB |  |
+| `totals` | JSONB |  |
+| `gcs_uri` | TEXT |  |
+| `ingested_at` | TIMESTAMP | NOT NULL, default `now()` |
+
+## `usage_chat_daily` — public reference
+
+| Column | Type | Constraints |
+|---|---|---|
+| `principal_sub` | TEXT | PK, NOT NULL |
+| `usage_date` | DATE | PK, NOT NULL |
+| `model` | TEXT | PK, NOT NULL |
+| `input_tokens` | BIGINT | NOT NULL |
+| `output_tokens` | BIGINT | NOT NULL |
+| `cache_read_input_tokens` | BIGINT | NOT NULL |
+| `cache_creation_input_tokens` | BIGINT | NOT NULL |
+| `message_count` | INTEGER | NOT NULL |
+| `principal_email` | TEXT |  |

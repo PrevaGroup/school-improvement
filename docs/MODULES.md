@@ -33,6 +33,7 @@ migration) — which is why it lives in `core`, not in a module.
 | **sip** (plan extraction) | `plan_extraction`, `plan_*` | PDFs, `dim_school` | `/plans/*` (ingest) | scattered |
 | **likeschools** (engine) | `feat_match_vector`, `mart_school_peer`, `model_partition_stats` | `dim_school` (inputs only, never outcomes) | **none — engine only** | **relocated** |
 | **serving** | — (owns no tables) | `plan_extraction`, `fact_metric`, `mart_school_peer`, `dim_*` — all via SQL | `/marts/*`, `/chat` | scattered |
+| **evals** (trace store + eval loop) | `trace`, `eval_case`, `eval_run`, `eval_result`, `feedback` | GCS trace objects (serving emits); producers' tables via SQL (grader ground truth, phase 3+) | none in v1 (`/api/feedback` deferred) | **relocated** (born in module layout) |
 
 "Scattered" = the feature's code is still spread across the old `app/` + `etl/` + `migrations/`
 layout. **"Relocated"** = it lives under `backend/<X>/`, migration included. See each module's
@@ -96,6 +97,9 @@ backend/
   public_metrics/           ← DONE 2026-07-15: _shared.py, load_ca_*.py, seed_ca_dims.py
   serving/                  ← was app/marts.py + app/chat.py (was: separate plan_marts + chat
                               modules; merged 2026-07-15 — see the decision above)
+  evals/                    ← DONE 2026-07-17: trace store + eval loop (eval-trace-system.md).
+                              Born in the module layout — models.py, migrations/0006_*,
+                              ingest_traces.py, tests/. Producer; no serving surface in v1.
 frontend/                   ← React + Vite (not yet built)
 ```
 
