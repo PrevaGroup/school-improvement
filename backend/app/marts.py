@@ -663,15 +663,36 @@ class WorkspaceSpec(BaseModel):
     plan_spotlight: SpotlightSpec | None = None
 
 
-# The default workspace = the original three headline indicators (chronic absenteeism /
-# grad / college-going): first paint before Claude ever acts is the current app. Only the
-# FIRST THREE of INDICATOR_METRICS seed it — WorkspaceSpec is exactly 3 slots, and #47's
-# CAASPP ELA/Math entries are additional *selectable* indicators (they're in the derived
-# fetch_slot_metrics whitelist), not extra default slots. Claude swaps them in per school —
-# which is how an ES/MS school (where grad/college don't apply) gets to CAASPP outcomes.
-DEFAULT_WORKSPACE_SPEC = WorkspaceSpec(
-    slots=[SlotSpec(metric_id=mid) for mid, _, _ in INDICATOR_METRICS[:3]],
-)
+# The default workspace is LEVEL-AWARE, and the server owns which metrics apply to which
+# level (the rule lives next to dim_metric.applies_to_levels, not duplicated in the frontend).
+# grad_rate/college_going are HS-only, so an ES/MS default of chronic/grad/college would render
+# two "not reported for this level" errors on first paint — ES/MS instead lead with the CAASPP
+# ELA/Math outcomes (#47 loaded them for exactly this). Claude can still override any slot.
+DEFAULT_INDICATORS_BY_LEVEL = {
+    "HS": ["chronic_absenteeism_rate", "grad_rate_acgr", "college_going_rate"],
+    "MS": ["chronic_absenteeism_rate", "ela_met_standard_pct", "math_met_standard_pct"],
+    "ES": ["chronic_absenteeism_rate", "ela_met_standard_pct", "math_met_standard_pct"],
+}
+# UI header level (High/Middle/Primary) -> applies_to_levels code. The header's "Primary" is
+# dim_school's "Elementary" is applies_to_levels' "ES".
+UI_LEVEL_TO_CODE = {"High": "HS", "Middle": "MS", "Primary": "ES"}
+
+
+def default_workspace_spec(level_code: str) -> WorkspaceSpec:
+    """The seed workspace for a school at this level (applies_to_levels code: ES/MS/HS)."""
+    ids = DEFAULT_INDICATORS_BY_LEVEL.get(level_code, DEFAULT_INDICATORS_BY_LEVEL["HS"])
+    return WorkspaceSpec(slots=[SlotSpec(metric_id=m) for m in ids])
+
+
+# Back-compat alias: the HS default is the historical "three headline indicators" panel.
+DEFAULT_WORKSPACE_SPEC = default_workspace_spec("HS")
+
+
+@router.get("/workspace-defaults")
+def workspace_defaults_ep() -> dict:
+    """The seed workspace spec per UI header level — the frontend fetches this once so the
+    'which metrics per level' curation has ONE home (here). Client keeps a fallback."""
+    return {ui: default_workspace_spec(code).model_dump() for ui, code in UI_LEVEL_TO_CODE.items()}
 
 
 def fetch_slot_metrics(db: Session) -> dict[str, dict]:

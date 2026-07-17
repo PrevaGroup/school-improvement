@@ -33,6 +33,7 @@ EXPECTED: dict[str, set[str]] = {
     "/api/marts/attendance-diagnostic": {"GET"},
     "/api/marts/subgroup-metrics": {"GET"},
     "/api/marts/districts": {"GET"},
+    "/api/marts/workspace-defaults": {"GET"},
     # school-detail retired 2026-07-16: the panel reads POST /api/marts/workspace now
     # (agentic-workspace-and-sessions.md phase 4), and nothing else ever consumed it.
     # --- serving: peer endpoints (likeschools is engine-only; these serve its tables) ---
