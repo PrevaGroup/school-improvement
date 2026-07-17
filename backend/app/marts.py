@@ -536,6 +536,11 @@ INDICATOR_METRICS = [
     ("chronic_absenteeism_rate", "Chronic absenteeism", "lower_better"),
     ("grad_rate_acgr", "Graduation rate", "higher_better"),
     ("college_going_rate", "College-going rate", "higher_better"),
+    # CAASPP Smarter Balanced, % Standard Met or Exceeded (all-grades rollup) — loaded
+    # 2026-07-16 for 2023-24 + 2024-25. ES/MS schools finally get outcome indicators here;
+    # the three above are HS-heavy (grad/college) or climate-side (absenteeism).
+    ("ela_met_standard_pct", "ELA standard met (CAASPP)", "higher_better"),
+    ("math_met_standard_pct", "Math standard met (CAASPP)", "higher_better"),
 ]
 
 
