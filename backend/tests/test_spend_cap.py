@@ -5,11 +5,22 @@ when the accounting layer is broken it refuses rather than pours. No DB and no m
 the SQL layer is faked at exactly the seam app/usage.py reads through, so what's pinned is
 the pricing math, the cap decisions, and the fail-closed behavior.
 """
+import inspect
+
 import pytest
 from fastapi import HTTPException
 
 from app import usage
-from app.usage import check_spend_caps, estimate_cost_usd
+from app.usage import check_spend_caps, estimate_cost_usd, record_chat_usage
+
+
+def test_usage_is_metered_anonymously_no_email_stored():
+    """Privacy posture (2026-07-17): usage is metered against the opaque principal_sub only.
+    The write must never reference an identifiable column, and record_chat_usage must not even
+    accept an email — a regression here would reintroduce identity into the data at rest."""
+    assert "principal_email" not in str(usage._UPSERT_SQL)
+    assert "email" not in str(usage._UPSERT_SQL).lower()
+    assert "email" not in inspect.signature(record_chat_usage).parameters
 
 
 # --------------------------------------------------------------------------- #

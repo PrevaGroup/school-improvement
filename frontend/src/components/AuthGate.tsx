@@ -22,7 +22,7 @@ type Phase =
   | { s: "checking" }
   | { s: "signed-out"; error?: string }
   | { s: "rejected"; email: string; detail: string }
-  | { s: "in"; email: string };
+  | { s: "in" }; // no email carried — the app does not display the caller's identity
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>({ s: "checking" });
@@ -36,8 +36,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
       setPhase({ s: "checking" });
       try {
-        const me = await api.get<{ email: string }>("/me");
-        setPhase({ s: "in", email: me.email });
+        await api.get("/me"); // invite probe — a 200 is the whole signal; body carries no identity
+        setPhase({ s: "in" });
       } catch (e) {
         if (e instanceof ApiError && e.status === 403) {
           setPhase({
@@ -95,9 +95,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
           </li>
         </ul>
         <p className="muted auth-note">
-          This is a closed system, restricted to a handful of approved organizations. Your
-          email is used to authenticate you and meter usage — it is never shared or used for
-          anything else.
+          This is a closed system, restricted to a handful of approved organizations. Your email
+          is used only to confirm you&rsquo;re invited — it is not stored with your activity or
+          shown in the app, and usage is metered anonymously. It is never shared.
         </p>
         {/* Email-first sign-in (Home Realm Discovery): people know their email, not their
             employer's identity provider. The routing table decides Google vs Microsoft;
@@ -156,7 +156,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return (
     <>
       <div className="auth-strip">
-        <span className="muted">{phase.email}</span>
+        <span className="muted">Signed in</span>
         <button onClick={() => void signOut()}>Sign out</button>
       </div>
       {children}
