@@ -95,6 +95,25 @@ def test_global_cap_429s_even_a_fresh_user(monkeypatch):
     assert "daily chat budget" in e.value.detail
 
 
+def test_summed_token_columns_arrive_as_decimal_and_still_price(monkeypatch):
+    """REGRESSION (prod chat 503, 2026-07-16→17): Postgres SUM() of bigint returns `numeric`,
+    which pg8000 hands us as `decimal.Decimal`. `Decimal * float(price)` raised TypeError inside
+    estimate_cost_usd, so check_spend_caps failed closed and every message 503'd.
+
+    The other tests here return Python ints (the fake DB can't reproduce a driver type — the
+    same reason the 42P18 slipped through), so this one feeds Decimals at the exact seam. A
+    priced-correctly result (this $5 day trips the $2 user cap → 429, NOT 503) proves the fix."""
+    from decimal import Decimal
+
+    monkeypatch.setattr(usage.settings, "chat_daily_user_usd", 2.00)
+    monkeypatch.setattr(usage.settings, "chat_daily_global_usd", 20.00)
+    # 1M Haiku output tokens = $5.00, expressed as the driver returns a SUM: Decimal.
+    row = ("claude-haiku-4-5", Decimal("0"), Decimal("1000000"), Decimal("0"), Decimal("0"))
+    with pytest.raises(HTTPException) as e:
+        check_spend_caps(_FakeDB([row], [row]), "uid-1")
+    assert e.value.status_code == 429  # priced fine over the cap — NOT a 503 from a TypeError
+
+
 def test_broken_accounting_refuses_rather_than_pours(monkeypatch):
     """FAILS CLOSED — the load-bearing property. A cap we cannot evaluate is a cap that
     isn't there, and this cap is what makes public exposure affordable. Same asymmetry rule

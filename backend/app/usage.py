@@ -90,7 +90,13 @@ def _spend_today_usd(db: Session, sub: str | None) -> float:
         rows = db.execute(_SPEND_SQL_GLOBAL, {"day": _today_utc()}).all()
     else:
         rows = db.execute(_SPEND_SQL_USER, {"day": _today_utc(), "sub": sub}).all()
-    return sum(estimate_cost_usd(m, i, o, cr, cw) for m, i, o, cr, cw in rows)
+    # SUM() over the BigInteger token columns comes back as Postgres `numeric`, which pg8000
+    # hands us as `decimal.Decimal` — and `Decimal * float` (the price) raises TypeError, so
+    # every chat 503'd (fails closed). Coerce to int at this DB boundary, keeping
+    # estimate_cost_usd's plain-int contract. Same blind spot as the 42P18 split above: the
+    # fake-DB unit tests return Python ints and can't see a driver type — the Decimal-row
+    # regression test in tests/test_spend_cap.py does.
+    return sum(estimate_cost_usd(m, int(i), int(o), int(cr), int(cw)) for m, i, o, cr, cw in rows)
 
 
 def check_spend_caps(db: Session, principal_sub: str) -> None:
