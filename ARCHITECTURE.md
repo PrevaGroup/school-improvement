@@ -278,8 +278,8 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 ## Status
 
 - **Live:** Cloud SQL Postgres, full aggregate **star schema (21 tables)** + **RLS** (tenant
-  isolation proven), credentials in Secret Manager. **8 public metrics loaded** (~960k
-  `fact_metric` rows). The **marts layer** ([`app/marts.py`](backend/app/marts.py)) and a
+  isolation proven), credentials in Secret Manager. **10 public metrics loaded** (~1.5M
+  `fact_metric` rows, incl. CAASPP ELA/Math 2023-24 + 2024-25). The **marts layer** ([`app/marts.py`](backend/app/marts.py)) and a
   **single-school attendance-diagnostic UI** — need-vs-plan, a "schools like you" peer engine,
   and a grounded chat — are **built and deployed to Cloud Run** (see the demo caveat below).
 - **⚠️ The deployed Cloud Run service is a temporary demo, not the production architecture

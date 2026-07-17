@@ -59,7 +59,7 @@ database. Build status (2026-07):
 | Area | Status | Notes |
 |---|---|---|
 | Layer schemas (`star.` / `augment.` / `marts.`) | **Planned** | All tables currently live in the default `public` schema; DDL below is namespaced for the target. |
-| `fact_metric` + conformed `dim_*` (metric, student_group, period, instrument, peer_group, school) + crosswalk | **Built** | 8 public metrics loaded (~960k rows). |
+| `fact_metric` + conformed `dim_*` (metric, student_group, period, instrument, peer_group, school) + crosswalk | **Built** | 10 public metrics loaded (~1.5M rows, incl. CAASPP ELA/Math). |
 | Identity on NCES `school_id` (§1.2, §4.4) | **Built** | Re-keyed CDS→NCES via `0002_nces_rekey`; CDS kept as `state_school_id` / `state_district_id`. |
 | Tenancy + RLS: `dim_tenant` / `tenant_scope` / `tenant_membership`, `FORCE` RLS (§7) | **Built** | Consortium / `shared` read-cascade only partially implemented. |
 | `ref_benchmark` + benchmark/derived `fact_metric` columns (§4.9) | **Planned** | Columns exist; not yet populated (benchmarking step unbuilt). |
