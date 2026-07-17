@@ -5,7 +5,7 @@ import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
 import { DEFAULT_WORKSPACE_SPEC, applyChatWorkspace } from "./workspace";
 import {
-  byRecency, createSession, forkSession, latestForSchool, loadStore, relTime, saveStore,
+  byRecency, createSession, forkSession, loadStore, reconcileSchoolChange, relTime, saveStore,
   titleFor, upsert,
 } from "./sessions";
 import type { Session } from "./sessions";
@@ -122,9 +122,9 @@ export default function App() {
   const currentId = current?.school_id;
 
   // Reconcile the active session with the selected school. Runs BEFORE the fetch effect
-  // below (definition order), so an adopted spec is what gets fetched. Three outcomes:
-  // already-matching session (no-op) · most recent session for this school (adopt its spec
-  // + transcript) · none (create — or FORK, when a chat set_school parked a source session).
+  // below (definition order), so an adopted spec is what gets fetched. The decision (adopt /
+  // repoint-empty / create / fork, and dropping orphaned empty scratch sessions) lives in the
+  // pure reconcileSchoolChange — see sessions.ts for the rules.
   useEffect(() => {
     if (!current) return;
     const cur = sessionsRef.current;
@@ -132,21 +132,16 @@ export default function App() {
     if (act && act.school_id === current.school_id) return;
     const fork = forkFromRef.current;
     forkFromRef.current = null;
-    const meta = {
+    const r = reconcileSchoolChange(cur, activeRef.current, {
       school_id: current.school_id, school_name: current.school_name,
       district_id: districtId, level,
-    };
-    let next: Session;
-    if (fork) {
-      next = forkSession(fork, meta);
-    } else {
-      const found = latestForSchool(cur, current.school_id);
-      next = found ? { ...found, updated_at: Date.now() } : createSession(meta);
-    }
-    setSessions((prev) => upsert(prev, next, next.id));
-    setActiveId(next.id);
-    setWspec(next.workspace);
-    wspecRef.current = next.workspace; // sibling fetch effect runs in this same commit
+    }, fork);
+    setSessions(r.sessions);
+    sessionsRef.current = r.sessions;
+    setActiveId(r.activeId);
+    activeRef.current = r.activeId;
+    setWspec(r.spec);
+    wspecRef.current = r.spec; // sibling fetch effect runs in this same commit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
 
@@ -188,10 +183,12 @@ export default function App() {
     });
   }, [wspec]);
 
-  // Chat transcript lands in the active session (title refines off the first question,
-  // unless Claude renamed it — a custom title is never clobbered by the derivation).
-  function onMessages(turns: ChatTurn[]) {
-    const id = activeRef.current;
+  // Chat transcript lands in the session the TURN belongs to — `sid` from the Chat that ran
+  // it, NOT whatever is active now. This is what stops an answer arriving after the user has
+  // switched sessions from landing in the wrong one. (title refines off the first question,
+  // unless Claude renamed it — a custom title is never clobbered by the derivation.)
+  function onMessages(sid: string | null, turns: ChatTurn[]) {
+    const id = sid ?? activeRef.current;
     if (!id) return;
     setSessions((prev) => {
       const s = prev.find((x) => x.id === id);
@@ -238,11 +235,27 @@ export default function App() {
     fetchWorkspace(current.school_id, s.workspace);
   }
 
-  // Apply a chat turn's workspace mutations. A set_school turn FORKS into a session for
-  // the new school (transcript forward, spec reset — the reconcile effect builds it);
-  // anything else merges the server-built payloads straight into the loaded panels —
-  // no refetch, the model and the screen saw the same data.
-  function onWorkspace(w: ChatWorkspace) {
+  // Apply a chat turn's workspace mutations. `sid` is the session the turn belongs to. If the
+  // user has since switched away, we still PERSIST the turn's spec/title to its own session,
+  // but we do NOT disturb the screen (no slot changes, no school switch) — those belong to the
+  // conversation that is no longer on-screen. Only when the turn's session is still active do
+  // the live-screen effects run.
+  function onWorkspace(sid: string | null, w: ChatWorkspace) {
+    const id = sid ?? activeRef.current;
+    if (id && id !== activeRef.current) {
+      setSessions((prev) => {
+        const s = prev.find((x) => x.id === id);
+        if (!s) return prev;
+        let upd: Session = { ...s, updated_at: Date.now() };
+        if (w.session_title) upd = { ...upd, title: w.session_title, custom_title: true };
+        // Only a same-school slot/spotlight spec belongs to THIS session. A set_school turn's
+        // spec is the OTHER school's default — dropping it here avoids corrupting this session;
+        // the school switch itself is intentionally not applied to a backgrounded conversation.
+        if (w.spec && !w.school) upd = { ...upd, workspace: w.spec };
+        return upsert(prev, upd, id);
+      });
+      return;
+    }
     if (w.session_title) {
       // rename_session: retitle the session the turn ran in (before any fork below).
       const title = w.session_title;

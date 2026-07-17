@@ -19,14 +19,15 @@ interface Props {
   // What the workspace currently shows — sent with every turn so the model's system prompt
   // describes the true screen ("don't regurgitate the screen" needs ground truth).
   wspec: WorkspaceSpec;
-  // A turn's workspace mutations, server-built payloads included — App applies them.
-  onWorkspace: (w: ChatWorkspace) => void;
+  // A turn's workspace mutations, server-built payloads included — App applies them. The
+  // sessionId is passed back so results land in THIS turn's session, not whatever is active.
+  onWorkspace: (sessionId: string | null, w: ChatWorkspace) => void;
   // The active session: its id joins traces server-side (eval-trace-system.md §2), its
   // transcript seeds this pane, and every turn is reported back up into it. App remounts
   // this component (key={sessionId}) on session switch, so state init here is per-session.
   sessionId: string | null;
   initialMessages: ChatTurn[];
-  onMessages: (turns: ChatTurn[]) => void;
+  onMessages: (sessionId: string | null, turns: ChatTurn[]) => void;
 }
 
 export function Chat({ school, level, wspec, onWorkspace, sessionId, initialMessages, onMessages }: Props) {
@@ -50,31 +51,35 @@ export function Chat({ school, level, wspec, onWorkspace, sessionId, initialMess
     : [`Compare Long Beach ${level} schools on attendance`];
 
   async function ask(text: string) {
+    // Pin the session this turn belongs to NOW — the answer must land here even if the user
+    // switches sessions while the request is in flight (this component is keyed by the id, so
+    // it stays fixed for the turn regardless of what becomes active).
+    const sid = sessionId;
     const next: Msg[] = [...msgs, { role: "user", content: text }];
     setMsgs(next);
     setInput("");
     setBusy(true);
     const turns = (ms: Msg[]) => ms.map((m) => ({ role: m.role, content: m.content }));
-    onMessages(turns(next)); // persist the question before the round trip, not after it
+    onMessages(sid, turns(next)); // persist the question before the round trip, not after it
     try {
       const d = await api.post<ChatResponse>("/chat", {
         messages: turns(next),
         level,
-        session_id: sessionId,
+        session_id: sid,
         school_id: school ? school.school_id : null,
         workspace: wspec,
       });
       const done: Msg[] = [...next, { role: "assistant", content: d.reply, tools: d.tools_used }];
       setMsgs(done);
-      onMessages(turns(done));
-      // Ordering matters on a set_school turn: the transcript above must land in the
-      // CURRENT session before this forks the conversation into the new school's session.
-      if (d.workspace) onWorkspace(d.workspace);
+      onMessages(sid, turns(done));
+      // Ordering matters on a set_school turn: the transcript above must land in this turn's
+      // session before onWorkspace forks the conversation into the new school's session.
+      if (d.workspace) onWorkspace(sid, d.workspace);
     } catch (e) {
       const detail = e instanceof ApiError ? `${e.status}` : (e as Error).message;
       const done: Msg[] = [...next, { role: "assistant", content: "Error: " + detail }];
       setMsgs(done);
-      onMessages(turns(done));
+      onMessages(sid, turns(done));
     } finally {
       setBusy(false);
     }
