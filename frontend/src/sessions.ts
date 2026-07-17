@@ -96,8 +96,22 @@ export function latestForSchool(sessions: Session[], school_id: string): Session
   return best;
 }
 
+// DETERMINISTIC order: updated_at desc, then created_at, then id. The extra tie-breaks matter
+// — Date.now() can repeat within a millisecond, and an unstable sort makes the rail visibly
+// jitter (and reorder) between renders. Selecting a session must NOT reorder the rail (that's
+// what read as a double-highlight); only real activity (a chat turn, a workspace change) bumps
+// updated_at, so browsing sessions leaves the order put.
 export function byRecency(sessions: Session[]): Session[] {
-  return sessions.slice().sort((a, b) => b.updated_at - a.updated_at);
+  return sessions
+    .slice()
+    .sort((a, b) => b.updated_at - a.updated_at || b.created_at - a.created_at || (a.id < b.id ? 1 : -1));
+}
+
+// Belt-and-braces against duplicate ids left in localStorage by earlier builds — two entries
+// with the same id would both match `activeId` and both highlight. Keeps the first occurrence.
+export function dedupeById(sessions: Session[]): Session[] {
+  const seen = new Set<string>();
+  return sessions.filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
 }
 
 // Immutable update + prune. Keeps the store bounded: MAX_SESSIONS by updated_at, but the
@@ -149,12 +163,13 @@ export function reconcileSchoolChange(
   }
   const existing = latestForSchool(sessions, target.school_id);
   if (existing) {
-    const adopted = { ...existing, updated_at: Date.now() };
-    let next = upsert(sessions, adopted, adopted.id);
-    if (act && act.id !== adopted.id && isEmptySession(act)) {
+    // Adopt WITHOUT bumping updated_at — switching to a school you've looked at before is a
+    // view, not activity, so it must not reorder the rail.
+    let next = sessions;
+    if (act && act.id !== existing.id && isEmptySession(act)) {
       next = next.filter((s) => s.id !== act.id); // discard the empty scratch we're leaving
     }
-    return { sessions: next, activeId: adopted.id, spec: adopted.workspace };
+    return { sessions: next, activeId: existing.id, spec: existing.workspace };
   }
   if (act && isEmptySession(act)) {
     const repointed: Session = {
@@ -194,10 +209,13 @@ export function loadStore(): SessionStore {
     if (!raw) return empty;
     const parsed = JSON.parse(raw) as SessionStore;
     if (parsed?.v !== 1 || !Array.isArray(parsed.sessions)) return empty;
-    // Drop anything malformed rather than let one bad session brick the app.
-    const sessions = parsed.sessions.filter(
-      (s) => s && s.v === 1 && typeof s.id === "string" && typeof s.school_id === "string"
-        && s.workspace && Array.isArray(s.workspace.slots) && Array.isArray(s.messages),
+    // Drop anything malformed rather than let one bad session brick the app, and dedupe by id
+    // (earlier builds could leave duplicates, which show as two highlighted rail rows).
+    const sessions = dedupeById(
+      parsed.sessions.filter(
+        (s) => s && s.v === 1 && typeof s.id === "string" && typeof s.school_id === "string"
+          && s.workspace && Array.isArray(s.workspace.slots) && Array.isArray(s.messages),
+      ),
     );
     const active_id = sessions.some((s) => s.id === parsed.active_id) ? parsed.active_id : null;
     return { v: 1, active_id, sessions };
