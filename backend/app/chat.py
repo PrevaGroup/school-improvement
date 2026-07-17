@@ -23,6 +23,7 @@ from .db import get_db_public
 from .security import get_current_principal
 from .traces import TraceRecorder, sha256_hex
 from .usage import check_spend_caps, record_chat_usage
+from .vocab import METRICS
 from .marts import (
     fetch_attendance_plans,
     fetch_like_schools,
@@ -40,9 +41,17 @@ DISTRICT_ID = "0622500"  # Long Beach Unified (NCES LEAID)
 # UI level -> dim_school.school_level (the header offers High/Middle/Primary)
 LEVEL_TO_SCHOOL_LEVEL = {"High": "High", "Middle": "Middle", "Primary": "Elementary"}
 
+# The metric vocabulary as the model sees it — built from core's vocab so a metric added
+# there (and loaded into fact_metric) becomes chat-visible with no edit here. This replaces
+# hardcoded id lists in the tool descriptions, which had already gone stale once (they
+# omitted CAASPP ELA/Math when it landed, leaving chat blind to loaded data).
+_METRIC_MENU = "; ".join(f"{m['metric_id']} = {m['display_name']}" for m in METRICS)
+_METRIC_PARAM_DESC = ("conformed metric id (default chronic_absenteeism_rate). "
+                      f"Available: {_METRIC_MENU}.")
+
 
 def build_system(ui_level: str) -> str:
-    return f"""You help education staff understand and compare California {ui_level} schools — Long Beach Unified plus other loaded districts (e.g. Ventura Unified): how they plan to improve student attendance (chronic absenteeism), and how each compares to the demographically-similar "schools like it" statewide.
+    return f"""You help education staff understand and compare California {ui_level} schools — Long Beach Unified plus other loaded districts (e.g. Ventura Unified): how they plan to improve student attendance (chronic absenteeism), how they perform on state metrics (chronic absenteeism, suspension, graduation, college-going, CAASPP ELA/Math academic outcomes), and how each compares to the demographically-similar "schools like it" statewide.
 
 The user selected the {ui_level} level — keep every answer at the {ui_level} level. Long Beach is the default focus, but you can answer about any loaded district's schools when named (e.g. "Ventura High") — the tools resolve a named school in whatever district it belongs to.
 
@@ -50,8 +59,8 @@ Always call a tool for real data; never invent schools, numbers, budgets, plan t
 - query_school_attendance_plans — ATTENDANCE goals + funded strategies (budgets, funding sources, verbatim plan text + page cites) for these schools, optionally one school. Use for attendance-specific need/response questions.
 - query_school_plan — the FULL SPSA for one school: EVERY goal (ELA, math, EL, culture/climate, college & career, accountability measures) with funded actions, budgets, funding sources and page cites. Use for any question about what the plan says/funds/omits beyond attendance, or to summarize the plan. The workspace only shows a collapsed goal list, so this is how you answer plan detail.
 - find_similar_schools — the demographically-matched peer schools (statewide, same level) for a school. Answers "who is X like?".
-- compare_to_peers — a school's actual metric value (default: chronic absenteeism) vs its peer-group distribution, with `peer_performance_percentile` where HIGHER always means doing better than peers.
-- query_subgroup_metrics — a school's metric DISAGGREGATED BY STUDENT SUBGROUP (race/ethnicity, gender, English learners, students with disabilities, socioeconomically disadvantaged, foster, homeless). Use this for any "by subgroup", equity, or "which groups are behind" question; each subgroup carries its `gap_vs_all`.
+- compare_to_peers — a school's actual metric value (default: chronic absenteeism; any conformed metric, incl. ela_met_standard_pct / math_met_standard_pct for CAASPP academics) vs its peer-group distribution, with `peer_performance_percentile` where HIGHER always means doing better than peers.
+- query_subgroup_metrics — a school's metric DISAGGREGATED BY STUDENT SUBGROUP (race/ethnicity, gender, English learners, students with disabilities, socioeconomically disadvantaged, foster, homeless). Use this for any "by subgroup", equity, or "which groups are behind" question — including ELA/Math outcomes by subgroup; each subgroup carries its `gap_vs_all`.
 
 Ground every claim in tool output. When comparing performance, lead with the peer-relative finding via `peer_performance_percentile` (e.g. "worse than ~70% of similar schools"), then cite concrete strategies/budgets/quotes.
 
@@ -66,7 +75,7 @@ DATA HONESTY — absence of data is NOT absence of the thing. This is critical: 
 - Metrics (chronic absenteeism, peer percentile) are densely covered — state them confidently. Plan detail is sparse — be explicit only when a claim depends on a plan you don't have.
 - Never infer that a school lacks a policy, goal, action, or outcome from missing data.
 
-If asked about something outside attendance plans or peer comparison, say this prototype covers those for the loaded California districts."""
+If asked about something outside school plans, state metrics (attendance, discipline, graduation, college-going, CAASPP ELA/Math), or peer comparison, say this prototype covers those for the loaded California districts."""
 
 
 TOOLS = [
@@ -106,15 +115,15 @@ TOOLS = [
         "description": (
             "How a school's metric compares to its demographic peer group: the "
             "school's actual value, the peer distribution (min/p25/median/p75/max), and "
-            "peer_performance_percentile (higher = better than peers). Default metric is "
-            "chronic_absenteeism_rate; others: suspension_rate, grad_rate_acgr, "
-            "college_going_rate, enrollment, stability_rate."
+            "peer_performance_percentile (higher = better than peers). Works for any "
+            "conformed metric — attendance, discipline, graduation, college-going, and "
+            "academic outcomes (CAASPP ELA/Math % standard met)."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "school_name": {"type": "string", "description": "the school, by (partial) name."},
-                "metric_id": {"type": "string", "description": "conformed metric id (default chronic_absenteeism_rate)."},
+                "metric_id": {"type": "string", "description": _METRIC_PARAM_DESC},
             },
             "required": ["school_name"],
         },
@@ -146,15 +155,14 @@ TOOLS = [
             "disadvantaged, foster, homeless, migrant. Returns each subgroup's value, its "
             "gap vs. All Students, and value_status (a suppressed value is privacy-withheld for "
             "small n — UNKNOWN, not 0). Use this for 'attendance for X by subgroup', 'which "
-            "groups are behind', or any equity/disaggregation question. Default metric is "
-            "chronic_absenteeism_rate; others: suspension_rate, expulsion_rate, grad_rate_acgr, "
-            "college_going_rate, stability_rate, enrollment."
+            "groups are behind', or any equity/disaggregation question — including academic "
+            "outcomes (CAASPP ELA/Math % standard met) by subgroup."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "school_name": {"type": "string", "description": "the school, by (partial) name, e.g. 'Reid'."},
-                "metric_id": {"type": "string", "description": "conformed metric id (default chronic_absenteeism_rate)."},
+                "metric_id": {"type": "string", "description": _METRIC_PARAM_DESC},
             },
             "required": ["school_name"],
         },
