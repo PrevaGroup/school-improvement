@@ -81,9 +81,13 @@ def health() -> dict:
 def me(principal: dict = Depends(get_current_principal)) -> dict:
     """The invite probe. The SPA's AuthGate calls this once after sign-in, BEFORE loading the
     app: 200 proves the token verifies end-to-end AND the caller is on the invite list; 403
-    becomes a clear "not invited" screen instead of a page of scattered fetch errors. Returns
-    only what the gate displays — never the raw claims."""
-    return {"email": principal.get("email")}
+    becomes a clear "not invited" screen instead of a page of scattered fetch errors.
+
+    Returns NOTHING identifying — the 200 itself is the whole signal. The app does not display
+    or store the caller's identity (privacy posture 2026-07-17: usage is metered anonymously
+    against the opaque `sub`, traces are pseudonymous). `principal` is still verified here; we
+    just don't hand the email back to be shown."""
+    return {"ok": True}
 
 
 @app.get(f"{API}/schools")

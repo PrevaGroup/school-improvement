@@ -684,8 +684,7 @@ def chat(
         if any(spent.values()):
             record_chat_usage(
                 db,
-                principal_sub=sub,
-                principal_email=principal.get("email"),
+                principal_sub=sub,  # opaque rate-limit key — no email stored (privacy posture)
                 model=settings.chat_model,
                 **spent,
             )

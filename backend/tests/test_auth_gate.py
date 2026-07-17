@@ -53,15 +53,19 @@ def test_unconfigured_audience_is_a_loud_500_not_a_quiet_401():
     assert "auth not configured" in r.json()["detail"]
 
 
-def test_me_returns_the_email_for_an_invited_principal():
-    """The SPA's invite probe: 200 + the display email, nothing else from the claims."""
+def test_me_returns_no_identity_only_an_ok_signal():
+    """The SPA's invite probe: 200 is the whole signal. Privacy posture (2026-07-17) — the app
+    does not display or store identity, so /me hands back NOTHING identifying: no email, no sub,
+    no claim leakage. The principal is still verified (that's what gives the 200)."""
     app.dependency_overrides[get_current_principal] = lambda: {
         "email": "tester@prevagroup.com", "sub": "uid-1", "email_verified": True,
     }
     try:
         r = client.get("/api/me")
         assert r.status_code == 200
-        assert r.json() == {"email": "tester@prevagroup.com"}  # exact — no claim leakage
+        body = r.json()
+        assert body == {"ok": True}
+        assert "tester@prevagroup.com" not in r.text and "uid-1" not in r.text
     finally:
         app.dependency_overrides.clear()
 

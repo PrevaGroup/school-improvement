@@ -129,13 +129,17 @@ def check_spend_caps(db: Session, principal_sub: str) -> None:
         )
 
 
+# Usage is metered against the OPAQUE `principal_sub` only — no email is stored. The sub is a
+# rate-limit/cost key, not an identity we retain or display (migration 0006 drops the email
+# column). This is what lets the product claim "we don't store or show your identity; usage is
+# metered anonymously." Keep it that way — do NOT reintroduce an identifiable column here.
 _UPSERT_SQL = text(
     """
     INSERT INTO usage_chat_daily (principal_sub, usage_date, model,
                                   input_tokens, output_tokens,
                                   cache_read_input_tokens, cache_creation_input_tokens,
-                                  message_count, principal_email)
-    VALUES (:sub, :day, :model, :inp, :out, :cr, :cw, 1, :email)
+                                  message_count)
+    VALUES (:sub, :day, :model, :inp, :out, :cr, :cw, 1)
     ON CONFLICT (principal_sub, usage_date, model) DO UPDATE SET
         input_tokens = usage_chat_daily.input_tokens + EXCLUDED.input_tokens,
         output_tokens = usage_chat_daily.output_tokens + EXCLUDED.output_tokens,
@@ -143,9 +147,7 @@ _UPSERT_SQL = text(
                                   + EXCLUDED.cache_read_input_tokens,
         cache_creation_input_tokens = usage_chat_daily.cache_creation_input_tokens
                                       + EXCLUDED.cache_creation_input_tokens,
-        message_count = usage_chat_daily.message_count + 1,
-        principal_email = COALESCE(EXCLUDED.principal_email,
-                                   usage_chat_daily.principal_email)
+        message_count = usage_chat_daily.message_count + 1
     """
 )
 
@@ -154,15 +156,15 @@ def record_chat_usage(
     db: Session,
     *,
     principal_sub: str,
-    principal_email: str | None,
     model: str,
     input_tokens: int,
     output_tokens: int,
     cache_read_input_tokens: int = 0,
     cache_creation_input_tokens: int = 0,
 ) -> None:
-    """UPSERT one message's summed usage. Call AFTER the loop — including on failure paths:
-    tokens spent on completed iterations are spent whether or not the last one succeeded.
+    """UPSERT one message's summed usage against the opaque principal_sub (no email stored).
+    Call AFTER the loop — including on failure paths: tokens spent on completed iterations are
+    spent whether or not the last one succeeded.
 
     Never raises: a failed WRITE must not turn an already-delivered answer into a 500. The
     lost row under-counts by one message, which the caps' headroom absorbs; the failure is
@@ -175,7 +177,6 @@ def record_chat_usage(
                 "sub": principal_sub, "day": _today_utc(), "model": model,
                 "inp": input_tokens, "out": output_tokens,
                 "cr": cache_read_input_tokens, "cw": cache_creation_input_tokens,
-                "email": principal_email,
             },
         )
         db.commit()
