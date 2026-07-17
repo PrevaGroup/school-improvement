@@ -199,12 +199,12 @@ export default function App() {
     });
   }
 
-  // Rail click: adopt the session wholesale — pickers, school, spec, transcript.
-  function activateSession(s: Session) {
-    if (s.id === activeId) return;
-    const touched = { ...s, updated_at: Date.now() };
-    setSessions((prev) => upsert(prev, touched, s.id));
+  // Put a session on screen: adopt its school, spec, and transcript. Does NOT bump updated_at —
+  // viewing a session is not activity, so the rail order stays put (a bump here is what made
+  // selecting a session jump it to the top and read as a double-highlight).
+  function adoptSession(s: Session) {
     setActiveId(s.id);
+    activeRef.current = s.id;
     setWspec(s.workspace);
     wspecRef.current = s.workspace;
     if (s.district_id !== districtId || s.level !== level) {
@@ -216,8 +216,39 @@ export default function App() {
       if (row) setSel(row);
       else pendingSelRef.current = s.school_id;
     } else {
-      // Same school, different session (a fresh look) — same selection, so refetch here.
+      // Same school already selected — no selection change to trigger a fetch, so refetch here.
       fetchWorkspace(s.school_id, s.workspace);
+    }
+  }
+
+  // Rail click.
+  function activateSession(s: Session) {
+    if (s.id === activeId) return;
+    adoptSession(s);
+  }
+
+  // Rail ✕: drop a session. Deleting the active one moves to the most recent remaining, or —
+  // if none are left — starts a fresh session for the school currently on screen.
+  function deleteSession(id: string) {
+    const remaining = byRecency(sessionsRef.current.filter((s) => s.id !== id));
+    setSessions(remaining);
+    sessionsRef.current = remaining;
+    if (id !== activeRef.current) return; // deleted a background session — screen unaffected
+    const next = remaining[0];
+    if (next) {
+      adoptSession(next);
+    } else if (current) {
+      const fresh = createSession({
+        school_id: current.school_id, school_name: current.school_name,
+        district_id: districtId, level,
+      });
+      setSessions([fresh]);
+      sessionsRef.current = [fresh];
+      adoptSession(fresh);
+    } else {
+      setActiveId(null);
+      activeRef.current = null;
+      setWs(null);
     }
   }
 
@@ -320,6 +351,16 @@ export default function App() {
               onClick={() => activateSession(s)}
               title={s.title}
             >
+              <button
+                className="sess-del"
+                title="Delete this session"
+                onClick={(e) => {
+                  e.stopPropagation(); // don't also activate the row we're deleting
+                  deleteSession(s.id);
+                }}
+              >
+                ×
+              </button>
               <div className="sess-title">{s.title}</div>
               <div className="sess-meta">
                 {s.school_name} · {relTime(s.updated_at)}

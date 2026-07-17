@@ -4,6 +4,7 @@ import {
   MAX_SESSIONS,
   byRecency,
   createSession,
+  dedupeById,
   forkSession,
   isEmptySession,
   latestForSchool,
@@ -169,5 +170,38 @@ describe("isEmptySession", () => {
   it("is empty with no messages, non-empty once a turn lands", () => {
     expect(isEmptySession(sess({}))).toBe(true);
     expect(isEmptySession(sess({ messages: [{ role: "user", content: "x" }] }))).toBe(false);
+  });
+});
+
+describe("rail stability", () => {
+  it("byRecency is deterministic even when updated_at ties (no jitter between renders)", () => {
+    // Same updated_at (Date.now() repeats within a ms) — must still sort identically each call.
+    const a = sess({ id: "a", updated_at: 100, created_at: 3 });
+    const b = sess({ id: "b", updated_at: 100, created_at: 1 });
+    const c = sess({ id: "c", updated_at: 100, created_at: 2 });
+    const first = byRecency([a, b, c]).map((s) => s.id);
+    const second = byRecency([c, a, b]).map((s) => s.id); // different input order
+    expect(first).toEqual(second); // order independent of input order
+  });
+
+  it("adopting an existing session on school change does NOT reorder the rail", () => {
+    // Selecting a school you've seen before is a view, not activity — updated_at must not move.
+    const other = sess({ id: "a", school_id: "S1", updated_at: 500, messages: [{ role: "user", content: "hi" }] });
+    const target = sess({ id: "b", school_id: "S2", school_name: "Jordan High", updated_at: 100,
+      messages: [{ role: "user", content: "q" }] });
+    const r = reconcileSchoolChange([other, target], "a", {
+      school_id: "S2", school_name: "Jordan High", district_id: "0622500", level: "High",
+    });
+    expect(r.activeId).toBe("b");
+    expect(r.sessions.find((s) => s.id === "b")!.updated_at).toBe(100); // unchanged → stays put
+  });
+
+  it("dedupeById collapses duplicate ids (bad-localStorage double-highlight), keeping the first", () => {
+    const first = sess({ id: "dup", school_name: "First" });
+    const dup = sess({ id: "dup", school_name: "Second" });
+    const other = sess({ id: "x" });
+    const out = dedupeById([first, dup, other]);
+    expect(out).toHaveLength(2);
+    expect(out.find((s) => s.id === "dup")!.school_name).toBe("First");
   });
 });
