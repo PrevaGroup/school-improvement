@@ -20,11 +20,18 @@ describe("routeForEmail", () => {
     });
   });
 
-  it("tells an uninvited domain it isn't invited — before any popup", () => {
-    const r = routeForEmail("someone@gmail.com");
+  it("tells a truly uninvited domain it isn't invited — before any popup", () => {
+    const r = routeForEmail("someone@yahoo.com");
     expect(r).toHaveProperty("error");
-    expect((r as { error: string }).error).toContain("gmail.com");
+    expect((r as { error: string }).error).toContain("yahoo.com");
     expect((r as { error: string }).error).toContain("invite list");
+  });
+
+  it("routes personal Google addresses to Google (the BACKEND allowlist is the real gate)", () => {
+    // gmail routes to the Google popup so a listed test address (ALLOWED_EMAILS) can sign in;
+    // an un-allowlisted gmail still gets a 403 'not invited' from the server after the popup.
+    expect(routeForEmail("me@gmail.com")).toEqual({ provider: "google.com", email: "me@gmail.com" });
+    expect(routeForEmail("me@googlemail.com")).toEqual({ provider: "google.com", email: "me@googlemail.com" });
   });
 
   it("rejects lookalike domains exactly like the server does", () => {

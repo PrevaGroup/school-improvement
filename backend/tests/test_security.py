@@ -41,6 +41,7 @@ def isolate_env(monkeypatch):
     # Empty map -> the ALLOWED_EMAIL_DOMAINS fallback applies (every domain requires
     # google.com). Provider-binding tests set this explicitly instead.
     monkeypatch.setattr(security.settings, "allowed_domain_providers", {})
+    monkeypatch.setattr(security.settings, "allowed_emails", set())  # per-email invite hatch off by default
     monkeypatch.setattr(security.settings, "session_max_age_days", 7.0)
 
 
@@ -206,6 +207,31 @@ def test_any_gmail_is_rejected(verified):
         _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
     assert e.value.status_code == 403
     assert "invite list" in e.value.detail
+
+
+def test_allowed_emails_hatch_admits_an_exact_address(verified, monkeypatch):
+    """ALLOWED_EMAILS lets an EXACT address in (e.g. a personal gmail for testing), bypassing the
+    domain/provider binding — the deliberate hole. Still an exact match: a different gmail is out."""
+    monkeypatch.setattr(security.settings, "allowed_emails", {"tester@gmail.com"})
+    verified(_claims(email="Tester@Gmail.com"))  # case-insensitive match against the allowlist
+    principal = _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert principal["email"].lower() == "tester@gmail.com"  # got in (claims keep original case)
+
+    verified(_claims(email="someoneelse@gmail.com"))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+
+
+def test_allowed_emails_hatch_still_requires_email_verified(verified, monkeypatch):
+    """The hatch NEVER bypasses email_verified — that is the one control that can't be optional,
+    or an allowlisted address could be claimed by anyone who registers it unverified."""
+    monkeypatch.setattr(security.settings, "allowed_emails", {"tester@gmail.com"})
+    verified(_claims(email="tester@gmail.com", verified=False))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+    assert "not verified" in e.value.detail
 
 
 def test_unverified_email_is_rejected_even_on_an_allowed_domain(verified):

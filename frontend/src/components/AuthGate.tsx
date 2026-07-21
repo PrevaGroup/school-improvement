@@ -156,10 +156,31 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return (
     <>
       <div className="auth-strip">
+        <AdminBadge />
         <span className="muted">Signed in</span>
         <button onClick={() => void signOut()}>Sign out</button>
       </div>
       {children}
     </>
   );
+}
+
+// Shows an "Admin" tag when the signed-in caller is an administrator (server-decided via the
+// Workspace group / config allowlists). This is a UI HINT only — every admin action is gated
+// server-side by require_admin. It reveals only the current user's OWN status, nothing about
+// anyone else, so it doesn't reintroduce identity tracking.
+function AdminBadge() {
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api
+      .get<{ is_admin: boolean }>("/admin/status")
+      .then((r) => live && setIsAdmin(!!r.is_admin))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!isAdmin) return null;
+  return <span className="admin-badge">Admin</span>;
 }

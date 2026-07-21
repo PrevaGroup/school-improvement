@@ -163,4 +163,5 @@
 .auth-btn:hover { filter: brightness(1.05); }
 .auth-err { color: var(--red); font-size: 13px; max-width: 420px; }
 .auth-strip { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 4px 14px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.admin-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #fff; background: var(--green); padding: 1px 7px; border-radius: 999px; }
 .auth-strip button { font: inherit; font-size: 12px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; color: var(--muted); }

@@ -17,6 +17,12 @@ export const DOMAIN_PROVIDERS: Record<string, string> = {
   //                                          // registration + Identity Platform provider land.
 };
 
+// Personal Google accounts sign in through google.com. Routing these lets a listed test
+// address (backend ALLOWED_EMAILS) reach the Google popup — the BACKEND is still the gate
+// (an un-allowlisted gmail gets a token, then a 403 "not invited"). Routing only, never
+// authorization; keep it that way.
+const PERSONAL_GOOGLE_DOMAINS = new Set(["gmail.com", "googlemail.com"]);
+
 export type SignInRoute = { provider: string; email: string } | { error: string };
 
 /** Decide the sign-in route for a typed email. Pure — the unit under test. */
@@ -27,7 +33,7 @@ export function routeForEmail(raw: string): SignInRoute {
     return { error: "Enter your full work email address." };
   }
   const domain = email.slice(at + 1);
-  const provider = DOMAIN_PROVIDERS[domain];
+  const provider = DOMAIN_PROVIDERS[domain] ?? (PERSONAL_GOOGLE_DOMAINS.has(domain) ? "google.com" : undefined);
   if (!provider) {
     // Mirrors the backend's own wording for an uninvited domain. Saying it here saves an
     // uninvited visitor a pointless provider round-trip; the server still says no if they
