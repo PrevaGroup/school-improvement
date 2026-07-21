@@ -359,24 +359,25 @@ def test_slots_1_to_3_always_show_all_students(patch_marts, calls):
     assert calls["fetch_slot"]["args"][1].student_group_id == "all"
 
 
-def test_subgroup_slice_requires_a_specific_subgroup(patch_marts, calls):
+def test_subgroup_box_requires_a_specific_subgroup(patch_marts, calls):
     patch_marts(slot={"ok": True})
     out = chat._run_tool("set_workspace_slot",
-                         {"slot": "subgroup_slice", "metric_id": "chronic_absenteeism_rate"},
+                         {"slot": "subgroup_1", "metric_id": "chronic_absenteeism_rate"},
                          DB, "High", ctx=_ctx())
     assert "ONE specific subgroup" in _err(out)
     assert "fetch_slot" not in calls
 
 
-def test_subgroup_slice_sets_the_slice_not_a_slot(patch_marts):
+def test_subgroup_box_sets_the_indexed_box_not_a_slot(patch_marts):
     patch_marts(slot={"ok": True})
     ctx = _ctx()
     chat._run_tool("set_workspace_slot",
-                   {"slot": "subgroup_slice", "metric_id": "chronic_absenteeism_rate",
+                   {"slot": "subgroup_2", "metric_id": "chronic_absenteeism_rate",
                     "student_group_id": "el"},
                    DB, "High", ctx=ctx)
-    assert ctx.spec.subgroup_slice.student_group_id == "el"
-    assert "subgroup_slice" in ctx.payloads
+    assert ctx.spec.subgroup_slots[1].student_group_id == "el"   # subgroup_2 -> index 1
+    assert ctx.spec.subgroup_slots[0] is None and ctx.spec.subgroup_slots[2] is None
+    assert "subgroup_2" in ctx.payloads
     assert [s.student_group_id for s in ctx.spec.slots] == ["all", "all", "all"]
 
 
@@ -392,7 +393,7 @@ def test_slot_number_string_is_coerced(patch_marts, slot, expected_key):
 def test_bad_slot_value_is_a_corrective_error(patch_marts, calls):
     patch_marts(slot={"ok": True})
     out = chat._run_tool("set_workspace_slot", {"slot": 4, "metric_id": "m"}, DB, "High", ctx=_ctx())
-    assert "slot must be 1, 2, 3, or 'subgroup_slice'" in _err(out)
+    assert "slot must be 1, 2, 3, or subgroup_1 / subgroup_2 / subgroup_3" in _err(out)
     assert "fetch_slot" not in calls
 
 
@@ -459,7 +460,7 @@ def test_set_school_switches_ctx_and_returns_the_default_workspace(patch_marts, 
     the spec resets to the defaults, and the payloads carry the three default slots. The
     plan is NOT inlined (include_plan=False) — the tool result stays small."""
     ws = {"school_id": "NEW", "spec": {}, "slots": [{"a": 1}, {"b": 2}, {"c": 3}],
-          "subgroup_slice": None, "spotlight": None}
+          "subgroup_slots": [None, None, None], "spotlight": None}
     patch_marts(resolve=_school(school_id="NEW", name="Jordan High"), workspace=ws)
     ctx = _ctx("OLD")
     out = chat._run_tool("set_school", {"school_name": "Jordan"}, DB, "High", ctx=ctx)
@@ -475,7 +476,7 @@ def test_set_school_switches_ctx_and_returns_the_default_workspace(patch_marts, 
 def test_set_school_resets_a_previous_spotlight(patch_marts):
     """A pin belongs to the school it was made for — switching schools clears it."""
     ws = {"school_id": "NEW", "spec": {}, "slots": [{}, {}, {}],
-          "subgroup_slice": None, "spotlight": None}
+          "subgroup_slots": [None, None, None], "spotlight": None}
     patch_marts(resolve=_school(school_id="NEW"), workspace=ws)
     ctx = _ctx("OLD")
     ctx.spotlight = {"items": [{"goal_index": 0}]}

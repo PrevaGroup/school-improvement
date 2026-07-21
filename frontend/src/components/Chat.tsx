@@ -88,7 +88,7 @@ export function Chat({ school, level, wspec, onWorkspace, sessionId, initialMess
   return (
     <>
       <div className="chat-hd">
-        Ask Claude<span className="muted"> · grounded in the data</span>
+        Ask questions to understand benchmarks of success and failure.
       </div>
       <div className="msgs" ref={msgsRef}>
         {msgs.length === 0 ? (

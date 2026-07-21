@@ -100,6 +100,7 @@
   .tip .steps li.on { font-weight: 700; color: var(--ink); }
   .inds { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 6px; }
   .ind { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 12px 10px; }
+  .ind-empty { border-style: dashed; display: flex; align-items: center; font-size: 11.5px; line-height: 1.4; }
   .ind-hd { margin-bottom: 4px; }
   .ind-name { display: block; font-size: 12px; font-weight: 600; color: var(--ink); }
   .ind-name .d { color: var(--muted); font-weight: 400; font-size: 10px; }

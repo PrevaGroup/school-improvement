@@ -39,7 +39,8 @@ export interface SpotlightSpec {
 
 export interface WorkspaceSpec {
   slots: [SlotSpec, SlotSpec, SlotSpec];
-  subgroup_slice: SlotSpec | null;
+  // Three parallel subgroup-slice boxes (like the indicator slots), each null until filled.
+  subgroup_slots: [SlotSpec | null, SlotSpec | null, SlotSpec | null];
   plan_spotlight: SpotlightSpec | null;
 }
 
@@ -84,7 +85,7 @@ export interface WorkspaceData {
   school_id: string;
   spec: WorkspaceSpec;
   slots: SlotPayload[];
-  subgroup_slice: SlotPayload | null;
+  subgroup_slots: (SlotPayload | null)[];
   spotlight: Spotlight | null;
   plan?: SchoolPlan;
 }

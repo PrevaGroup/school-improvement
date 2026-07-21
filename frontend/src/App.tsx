@@ -330,7 +330,7 @@ export default function App() {
                 ...prev,
                 spec: w.spec ?? prev.spec,
                 slots: [0, 1, 2].map((i) => w.payloads[`slot_${i + 1}`] ?? prev.slots[i]),
-                subgroup_slice: null,
+                subgroup_slots: [null, null, null],
                 spotlight: null,
               }
             : prev,

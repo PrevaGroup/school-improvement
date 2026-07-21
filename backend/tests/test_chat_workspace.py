@@ -154,7 +154,7 @@ def test_on_screen_spec_is_rendered_into_the_system_prompt(monkeypatch, quiet):
                                    {"metric_id": "college_going_rate"}]}})
     system = _fake_anthropic.last_create["system"]
     assert "Slot 2: grad_rate_acgr · 2022-23 · all" in system
-    assert "Subgroup slice: (empty" in system
+    assert "Subgroup box 1: (empty)" in system
 
 
 def test_no_workspace_request_keeps_the_prompt_and_trace_ui_unchanged(monkeypatch, quiet):
@@ -203,7 +203,7 @@ def test_set_school_repoints_later_slot_calls_in_the_same_turn(monkeypatch, quie
     monkeypatch.setattr(chat, "fetch_workspace",
                         lambda db, sid, spec, include_plan=True:
                         {"school_id": sid, "spec": spec.model_dump(),
-                         "slots": [{}, {}, {}], "subgroup_slice": None, "spotlight": None})
+                         "slots": [{}, {}, {}], "subgroup_slots": [None, None, None], "spotlight": None})
     monkeypatch.setattr(chat, "_resolve_school",
                         lambda db, name, lvl: {"school_id": "JORDAN", "school_name": "Jordan High",
                                                "district_id": "0622500"})
