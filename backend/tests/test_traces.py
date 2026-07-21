@@ -395,3 +395,29 @@ def test_exhausting_the_tool_loop_is_max_iters_not_ok(
     r = spy_recorders[0]
     assert r.status == "max_iters"
     assert r.iterations == chat.MAX_TOOL_ITERS + 1
+
+
+def test_source_is_eval_only_for_the_configured_eval_principal(
+        monkeypatch, spy_recorders, quiet_endpoint):
+    """Eval-runner traffic is stamped source='eval' — decided from the authenticated principal,
+    never a request field (unspoofable) — so mining never feeds eval output back into cases.
+    Everyone else stays 'prod'."""
+    monkeypatch.setattr(chat.settings, "eval_principal_email", "eval-runner@prevagroup.com")
+
+    def call_as(email: str):
+        _fake_anthropic(monkeypatch, [_Resp("end_turn", [_Text("ok")])])
+        req = chat.ChatRequest(messages=[{"role": "user", "content": "hi"}])
+        chat.chat(req, BackgroundTasks(), db=object(), principal={"sub": "s", "email": email})
+        return spy_recorders[-1]
+
+    assert call_as("Eval-Runner@Prevagroup.com").source == "eval"   # exact, case-insensitive
+    assert call_as("teacher@prevagroup.com").source == "prod"        # any other verified user
+
+
+def test_response_carries_the_trace_id_for_correlation(
+        monkeypatch, spy_recorders, quiet_endpoint):
+    """The runner correlates its answer to the turn's trace via this id (opaque UUID, no
+    identity) — the same id the future feedback endpoint will key on."""
+    _fake_anthropic(monkeypatch, [_Resp("end_turn", [_Text("hello")])])
+    out = _call({"messages": [{"role": "user", "content": "hi"}]}, BackgroundTasks())
+    assert out["trace_id"] and out["trace_id"] == spy_recorders[0].trace_id

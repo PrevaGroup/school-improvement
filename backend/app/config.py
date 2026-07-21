@@ -194,6 +194,14 @@ class Settings(BaseSettings):
     # before relying on the org-identity guarantee in production.
     allowed_emails: Annotated[set[str], NoDecode] = set()
 
+    # The eval runner (evals.run_evals) authenticates as this exact address. When the verified
+    # caller's email matches, chat stamps the turn `source="eval"` so eval traffic is separable
+    # from real use in the trace store — a SERVER-side decision keyed on the authenticated
+    # principal, never a client-supplied field, so it can't be spoofed. Unset (default) → every
+    # turn is `source="prod"`, today's behavior. The address still needs its own invite
+    # (allowed_emails) to sign in at all.
+    eval_principal_email: str = ""
+
     @field_validator("admin_emails", "admin_domains", "allowed_emails", mode="before")
     @classmethod
     def _split_lower_set(cls, v):
