@@ -43,6 +43,21 @@ def _fetch_row(fs, src: str) -> dict:
     )
 
 
+def dedup_by_plan_id(rows: list[dict]) -> list[dict]:
+    """Collapse rows sharing a plan_id (last wins), preserving first-seen order.
+
+    `plan_id` is deterministic, so two files that resolve to the same plan — two PDFs for one
+    school, or two district-scope LCAPs in a year — carry identical plan_ids under different
+    filenames. Postgres rejects an ON CONFLICT DO UPDATE that touches the same row twice
+    ("cannot affect row a second time"), which would abort the ENTIRE upsert window, not just
+    the duplicate. Same guard `_shared._flush_facts` applies to fact rows.
+    """
+    deduped: dict[str, dict] = {}
+    for r in rows:
+        deduped[r["plan_id"]] = r
+    return list(deduped.values())
+
+
 def list_json(prefix: str):
     fs, _ = fsspec.core.url_to_fs(prefix)
     scheme = prefix.split("://", 1)[0] if "://" in prefix else None
@@ -92,13 +107,18 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"  would upsert {r['plan_id']} (school {r['school_id']})", file=sys.stderr)
         return 1 if errors else 0
 
+    deduped = dedup_by_plan_id(rows)
+    if len(deduped) < len(rows):
+        print(f"[extractions] {len(rows) - len(deduped)} duplicate plan_id(s) collapsed (last wins)",
+              file=sys.stderr, flush=True)
+
     with _engine().begin() as conn:
-        stmt = pg_insert(PlanExtraction).values(rows)
+        stmt = pg_insert(PlanExtraction).values(deduped)
         conn.execute(stmt.on_conflict_do_update(
             index_elements=["plan_id"],
             set_={c: stmt.excluded[c] for c in ("school_id", "plan_year", "plan_type", "extracted_at", "document")},
         ))
-    print(f"[extractions] upserted {len(rows)} plan_extraction rows")
+    print(f"[extractions] upserted {len(deduped)} plan_extraction rows")
     for f, e in errors:
         print(f"  error {f}: {e}")
     return 1 if errors else 0

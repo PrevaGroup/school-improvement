@@ -31,7 +31,7 @@ _PDF_TYPES = {"application/pdf", "application/x-pdf", "application/octet-stream"
 @router.post("/extract", response_model=ExtractedPlan)
 async def extract_plan(
     file: UploadFile = File(..., description="the source SPSA / LCAP / CSI PDF"),
-    district_id: str = Form("0622710", description="federal NCES LEAID (7-digit); default Long Beach Unified"),
+    district_id: str = Form("0622500", description="federal NCES LEAID (7-digit); default Long Beach Unified"),
     school_id: str | None = Form(None, description="federal NCES school id (12-digit), if known"),
     plan_year: str | None = Form(None, description="school-year hint, e.g. 2024-25"),
     gs_uri: str | None = Form(None, description="gs:// URI to record as the canonical source"),

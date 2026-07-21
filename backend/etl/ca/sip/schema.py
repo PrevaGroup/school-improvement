@@ -142,7 +142,7 @@ class ExtractedPlan(BaseModel):
     plan_id: str = Field(..., description="deterministic; see build_plan_id()")
     # Identity keys on the *federal NCES* ids; state-native codes ride alongside as attributes.
     school_id: Optional[str] = Field(None, description="NCES school id (12-digit ncessch); null for district-level LCAP")
-    district_id: str = Field(..., description="federal NCES LEAID (7-digit), e.g. '0622710'")
+    district_id: str = Field(..., description="federal NCES LEAID (7-digit), e.g. '0622500'")
     state_school_id: Optional[str] = Field(None, description="state-native school code (CA 14-digit CDS)")
     state_district_id: Optional[str] = Field(None, description="state-native district code (CA 7-digit CDS district)")
     plan_type: PlanType

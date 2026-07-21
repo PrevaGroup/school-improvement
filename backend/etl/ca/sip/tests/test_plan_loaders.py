@@ -71,6 +71,25 @@ def test_list_json_sorted(plans_dir):
     assert set(names) == {"plan_1.json", "plan_2.json", "plan_3.json", "plan_bad.json"}
 
 
+def test_dedup_by_plan_id_collapses_last_wins():
+    # Two files resolving to the same deterministic plan_id must collapse to one row (last
+    # wins) — otherwise the single-statement ON CONFLICT upsert would touch a row twice and
+    # Postgres aborts the whole window.
+    rows = [
+        {"plan_id": "p1", "school_id": "a", "document": {"v": 1}},
+        {"plan_id": "p2", "school_id": "b", "document": {"v": 1}},
+        {"plan_id": "p1", "school_id": "a", "document": {"v": 2}},  # dup plan_id, newer
+    ]
+    out = lpe.dedup_by_plan_id(rows)
+    assert [r["plan_id"] for r in out] == ["p1", "p2"]      # first-seen order preserved
+    assert next(r for r in out if r["plan_id"] == "p1")["document"] == {"v": 2}  # last wins
+
+
+def test_dedup_by_plan_id_noop_when_unique():
+    rows = [{"plan_id": "p1"}, {"plan_id": "p2"}, {"plan_id": "p3"}]
+    assert lpe.dedup_by_plan_id(rows) == rows
+
+
 def test_main_dry_run_is_resilient(plans_dir, capsys):
     # 3 good + 1 malformed. The concurrent read loop must parse the 3, report the 1
     # error, and exit non-zero — regardless of completion order.
