@@ -511,8 +511,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--out", type=Path, default=None, help="output JSON path (default: <basename>.json in cwd)")
     ap.add_argument(
         "--district-id",
-        default="0622710",
-        help="federal NCES LEAID (7-digit). Default is Long Beach Unified (0622710).",
+        default="0622500",
+        help="federal NCES LEAID (7-digit). Default is Long Beach Unified (0622500).",
     )
     ap.add_argument("--school-id", default=None, help="federal NCES school id (12-digit), if known")
     ap.add_argument("--plan-year", default=None, help="school-year hint, e.g. 2024-25")
