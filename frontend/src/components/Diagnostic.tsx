@@ -91,7 +91,7 @@ function SpotlightStrip({ spot }: { spot: Spotlight }) {
               <div className="meta">
                 {a.budgeted_amount != null ? fmtUSD(a.budgeted_amount) : "no funding listed"}
                 {a.funding_source_raw ? " · " + a.funding_source_raw : ""}
-                {a.provenance ? " · p" + a.provenance.page : ""}
+                {a.provenance && a.provenance.page != null ? " · p" + a.provenance.page : ""}
               </div>
             </div>
           ))}
@@ -205,7 +205,7 @@ export function Diagnostic({ s, peers, ws }: Props) {
                       <div className="meta">
                         {a.budgeted_amount != null ? fmtUSD(a.budgeted_amount) : "no funding listed"}
                         {a.funding_source_raw ? " · " + a.funding_source_raw : ""}
-                        {a.provenance ? " · p" + a.provenance.page : ""}
+                        {a.provenance && a.provenance.page != null ? " · p" + a.provenance.page : ""}
                       </div>
                       {a.provenance &&
                       a.provenance.quote &&
@@ -277,7 +277,7 @@ export function Diagnostic({ s, peers, ws }: Props) {
                       <td className="r">
                         {p.chronic_absenteeism_rate == null
                           ? "—"
-                          : p.chronic_absenteeism_rate + "%"}
+                          : fmt1(p.chronic_absenteeism_rate) + "%"}
                       </td>
                     </tr>
                   ))}

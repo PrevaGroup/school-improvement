@@ -51,6 +51,10 @@ export function Chat({ school, level, wspec, onWorkspace, sessionId, initialMess
     : [`Compare Long Beach ${level} schools on attendance`];
 
   async function ask(text: string) {
+    // Re-entrancy guard: a chip click (below) has no !busy check of its own, so without this a
+    // second turn could fire while one is in flight — and its `next` would be built from a stale
+    // `msgs` closure, dropping the pending message. The form already guards; this covers both.
+    if (busy) return;
     // Pin the session this turn belongs to NOW — the answer must land here even if the user
     // switches sessions while the request is in flight (this component is keyed by the id, so
     // it stays fixed for the turn regardless of what becomes active).
@@ -117,7 +121,12 @@ export function Chat({ school, level, wspec, onWorkspace, sessionId, initialMess
       </div>
       <div className="chips">
         {chips.map((c, i) => (
-          <div className="chip" key={i} onClick={() => ask(c)}>
+          <div
+            className="chip"
+            key={i}
+            style={busy ? { opacity: 0.5, cursor: "default" } : undefined}
+            onClick={() => { if (!busy) ask(c); }}
+          >
             {c}
           </div>
         ))}
