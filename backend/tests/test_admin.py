@@ -35,6 +35,23 @@ def _member(monkeypatch, value):
     return calls
 
 
+def test_admin_email_allowlist(monkeypatch):
+    """ADMIN_EMAILS makes an exact address admin without any group lookup (test/break-glass)."""
+    monkeypatch.setattr(security.settings, "admin_emails", {"me@gmail.com"})
+    calls = _member(monkeypatch, RuntimeError("group should not be consulted"))
+    assert is_admin({"email": "ME@Gmail.com"}) is True  # case-insensitive
+    assert calls["n"] == 0
+    assert is_admin({"email": "other@gmail.com"}) is False  # exact match only (falls to group)
+
+
+def test_admin_domain_allowlist(monkeypatch):
+    """ADMIN_DOMAINS makes every verified address at a domain an admin."""
+    monkeypatch.setattr(security.settings, "admin_domains", {"prevagroup.com"})
+    _member(monkeypatch, False)
+    assert is_admin({"email": "anyone@prevagroup.com"}) is True
+    assert is_admin({"email": "someone@gmail.com"}) is False
+
+
 def test_group_member_is_admin(monkeypatch):
     _member(monkeypatch, True)
     assert is_admin({"email": "tim@prevagroup.com"}) is True

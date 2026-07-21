@@ -179,6 +179,38 @@ class Settings(BaseSettings):
     # runtime service account granted group-read (see backend/DEPLOY.md).
     admin_group: str = ""
 
+    # Additional admin sources, UNIONed with the group (app/security.py is_admin):
+    #   ADMIN_EMAILS  — exact addresses, e.g. "me@gmail.com" (for a test/break-glass admin).
+    #   ADMIN_DOMAINS — whole domains, e.g. "prevagroup.com" (every verified preva user = admin).
+    # Being an admin does NOT grant sign-in — the invite gate is separate (below).
+    admin_emails: Annotated[set[str], NoDecode] = set()
+    admin_domains: Annotated[set[str], NoDecode] = set()
+
+    # Per-EMAIL invite hatch, UNIONed with the domain->provider allowlist (_assert_invited).
+    # An exact match here is admitted (still requiring `email_verified`) and SKIPS the
+    # domain/provider binding — that is deliberately a hole in "access must ride a revocable
+    # org identity", so it is per-email (never per-domain) to keep the blast radius to exactly
+    # the listed address. Its reason for existing is testing (e.g. a personal gmail); remove
+    # before relying on the org-identity guarantee in production.
+    allowed_emails: Annotated[set[str], NoDecode] = set()
+
+    @field_validator("admin_emails", "admin_domains", "allowed_emails", mode="before")
+    @classmethod
+    def _split_lower_set(cls, v):
+        """Comma-separated (or JSON list) -> lowercased set. Same NoDecode/comma reasoning as
+        `_split_domains`; lowercased so the security.py comparisons can't be case-tricked."""
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return set()
+            if s.startswith("["):
+                import json
+                return {str(x).strip().lower() for x in json.loads(s) if str(x).strip()}
+            return {x.strip().lower() for x in s.split(",") if x.strip()}
+        if isinstance(v, (list, set, tuple)):
+            return {str(x).strip().lower() for x in v if str(x).strip()}
+        return v
+
     @property
     def identity_platform_audience(self) -> str | None:
         return self.google_oauth_audience or self.gcp_project

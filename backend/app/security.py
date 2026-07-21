@@ -202,6 +202,13 @@ def _assert_invited(claims: dict) -> None:
             status.HTTP_403_FORBIDDEN, f"the email {email} is not verified"
         )
 
+    # Per-email invite hatch (config.allowed_emails): an EXACT, still-verified address is
+    # admitted and SKIPS the domain/provider binding below. This is the deliberate testing
+    # hole (e.g. a personal gmail) — it does NOT bypass `email_verified` (never that), and it
+    # is exact-match only, so it can't widen to a domain.
+    if email in settings.allowed_emails:
+        return
+
     # Fails closed: an unset map admits nobody. See config.allowed_domain_providers.
     required_provider = settings.domain_providers.get(email.rsplit("@", 1)[1])
     if required_provider is None:
@@ -333,8 +340,15 @@ def is_admin(principal: dict) -> bool:
     if principal.get("dev_mode"):
         return True  # the local DEV_MODE principal is admin (non-prod only; mirrors tenancy bypass)
     email = str(principal.get("email") or "").strip().lower()
+    if "@" not in email:
+        return False
+    # Cheap, deterministic sources first (config allowlists), then the live group check.
+    if email in settings.admin_emails:
+        return True
+    if email.rsplit("@", 1)[1] in settings.admin_domains:
+        return True
     group = (settings.admin_group or "").strip().lower()
-    if "@" not in email or not group:
+    if not group:
         return False
     now = time.time()
     hit = _admin_cache.get(email)

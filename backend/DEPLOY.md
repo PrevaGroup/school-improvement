@@ -97,6 +97,20 @@ False for everyone (logged as a warning), which is safe — nobody is wrongly el
    Groups Reader admin role.) A wrong/absent grant just keeps everyone non-admin — verify via
    the `admin group check failed …` warning in the logs.
 
+**Extra admin sources** (UNIONed with the group): `ADMIN_EMAILS` (exact addresses) and
+`ADMIN_DOMAINS` (whole domains, e.g. `prevagroup.com` = every verified preva user is admin).
+These need no Cloud Identity setup — a match is admin immediately.
+
+**Testing admin with a personal account** — a `@gmail.com` normally can't sign in (the invite
+gate is domain-bound), so two env vars are needed together:
+- `ALLOWED_EMAILS=you@gmail.com` — lets that EXACT address through the invite gate (still
+  requires `email_verified`; skips the domain/provider binding — a deliberate hole, per-email
+  only). ⚠️ This bypasses "access must ride a revocable org identity"; it is a TEST hatch —
+  remove it before relying on that guarantee.
+- `ADMIN_EMAILS=you@gmail.com` — makes that address an admin.
+Both go in the single `--set-env-vars` flag. The frontend already routes `gmail.com` to the
+Google popup, so the address can sign in; the backend allowlist is the real gate.
+
 > ⚠️ **The `--allow-unauthenticated` flag is not a no-op on redeploys — it MANAGES the IAM
 > binding.** The gate opened for real on 2026-07-16 (`allUsers` granted `run.invoker`;
 > the app's sign-in + allowlist is the boundary). Redeploying with
