@@ -145,6 +145,33 @@ export interface Peer {
   has_plan: boolean;
 }
 
+// Admin eval dashboard (GET /api/evals/*, admin-gated). `available:false` = the trace store
+// isn't populated yet (migration / ingest not run) — the UI shows an honest empty state.
+export interface EvalSummary {
+  available: boolean;
+  window?: number;
+  traces?: number;
+  ok_rate?: number | null;
+  by_status?: Record<string, number>;
+  by_source?: Record<string, number>;
+  by_model?: Record<string, number>;
+  cost_usd?: number;
+  tokens?: number;
+  latency_p50_ms?: number | null;
+  latency_max_ms?: number | null;
+}
+export interface EvalTraceRow {
+  trace_id: string;
+  ts: string | null;
+  question: string | null;
+  status: string | null;
+  latency_ms: number | null;
+  model: string | null;
+  cost_usd_est: number | null;
+  iterations: number | null;
+  git_sha: string | null;
+}
+
 export interface District { district_id: string; district_name: string }
 export type Level = "High" | "Middle" | "Primary";
 export interface ChatTurn { role: "user" | "assistant"; content: string }

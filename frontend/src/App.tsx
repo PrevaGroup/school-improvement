@@ -3,6 +3,7 @@ import { api } from "./api";
 import { fmtNum, fmtPct } from "./format";
 import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
+import { EvalDashboard } from "./components/EvalDashboard";
 import { applyChatWorkspace, defaultSpecForLevel } from "./workspace";
 import {
   byRecency, createSession, forkSession, loadStore, reconcileSchoolChange, relTime, saveStore,
@@ -55,6 +56,9 @@ export default function App() {
   // session is the source of truth the rest of this state is a view of (design § Sessions).
   const [sessions, setSessions] = useState<Session[]>(BOOT.sessions);
   const [activeId, setActiveId] = useState<string | null>(BOOT.active_id);
+  // Admin-only eval dashboard: is_admin gates the entry point; `view` swaps it in.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [view, setView] = useState<"workspace" | "evals">("workspace");
 
   // The Claude-controlled workspace: `wspec` is what should be on screen (the active
   // session's spec), `ws` is the server-built data for it.
@@ -96,6 +100,10 @@ export default function App() {
   }, [sessions, activeId]);
 
   useEffect(() => {
+    api
+      .get<{ is_admin: boolean }>("/admin/status")
+      .then((d) => setIsAdmin(!!d.is_admin))
+      .catch(() => {});
     api
       .get<{ districts: District[] }>("/marts/districts")
       .then((d) => setDistricts(d.districts || []))
@@ -351,12 +359,19 @@ export default function App() {
     setWs((prev) => applyChatWorkspace(prev, w));
   }
 
+  if (view === "evals" && isAdmin) {
+    return <EvalDashboard onBack={() => setView("workspace")} />;
+  }
+
   return (
     <div className="cols">
       <div className="rail">
         <button className="new-sess" onClick={newSession} disabled={!current}>
           + New session
         </button>
+        {isAdmin ? (
+          <button className="rail-admin" onClick={() => setView("evals")}>◧ Evals</button>
+        ) : null}
         <div className="rail-list">
           {byRecency(sessions).map((s) => (
             <div

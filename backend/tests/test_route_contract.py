@@ -49,6 +49,9 @@ EXPECTED: dict[str, set[str]] = {
     "/api/plans/load": {"POST"},
     # --- serving: chat ---
     "/api/chat": {"POST"},
+    # --- serving: read-only admin eval view over the trace store ---
+    "/api/evals/summary": {"GET"},
+    "/api/evals/traces": {"GET"},
 }
 
 

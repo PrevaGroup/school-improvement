@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from .auth_proxy import router as auth_proxy_router
 from .chat import router as chat_router
 from .db import get_db
+from .evals_view import router as evals_view_router
 from .marts import router as marts_router
 from .models import DimSchool, FactMetric
 from .plans import router as plans_router
@@ -54,6 +55,7 @@ _REQUIRE_SIGN_IN = [Depends(get_current_principal)]
 app.include_router(plans_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 app.include_router(marts_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 app.include_router(chat_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
+app.include_router(evals_view_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 # Firebase's reserved /__/* namespace, reverse-proxied so sign-in runs on OUR domain
 # (custom authDomain — see app/auth_proxy.py). Deliberately UNGATED: it serves the sign-in
 # flow to users who don't have a token yet — same access class as /health and the SPA shell.

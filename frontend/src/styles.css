@@ -30,6 +30,8 @@
   .new-sess { margin: 10px 10px 6px; padding: 7px 10px; font: inherit; font-size: 12px; font-weight: 600; border: 1px dashed var(--line); border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
   .new-sess:hover:enabled { border-color: var(--muted); color: var(--ink); }
   .new-sess:disabled { opacity: .5; cursor: default; }
+  .rail-admin { margin: 0 10px 6px; padding: 6px 10px; font: inherit; font-size: 12px; font-weight: 600; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--green); cursor: pointer; text-align: left; }
+  .rail-admin:hover { background: var(--bg); }
   .rail-list { flex: 1; overflow-y: auto; padding: 4px 10px 10px; }
   .sess { position: relative; padding: 8px 26px 8px 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; margin-bottom: 2px; }
   .sess:hover { background: var(--bg); }
@@ -148,6 +150,40 @@
   @media (prefers-color-scheme: dark) {
     :root { --bg:#1a1917; --panel:#242320; --ink:#ecebe6; --muted:#a29d92; --line:#34322c; }
   }
+
+/* --- admin eval dashboard --- */
+.ev-wrap { max-width: 1080px; margin: 0 auto; padding: 22px 22px 48px; overflow-y: auto; height: 100%; }
+.ev-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.ev-back { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); cursor: pointer; }
+.ev-back:hover { border-color: var(--muted); color: var(--ink); }
+.ev-title { margin: 0; font-size: 20px; }
+.ev-sub { color: var(--muted); font-size: 12px; }
+.ev-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.ev-tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.ev-tl { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
+.ev-tv { font-size: 26px; font-weight: 700; line-height: 1.1; margin-top: 5px; font-variant-numeric: tabular-nums; }
+.ev-ts { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.ev-breakdowns { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.ev-bd { padding: 14px 16px; margin: 0; }
+.ev-bdl { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
+.ev-bdrow { display: grid; grid-template-columns: 5.5rem 1fr 2rem; gap: 8px; align-items: center; font-size: 12px; padding: 2px 0; }
+.ev-bdk { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-bdbar { height: 6px; background: var(--bg); border-radius: 999px; overflow: hidden; }
+.ev-bdbar > i { display: block; height: 100%; background: var(--muted); border-radius: 999px; }
+.ev-bdn { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ev-tbl td, .ev-tbl th { font-size: 12.5px; }
+.ev-when { color: var(--muted); white-space: nowrap; }
+.ev-q { max-width: 30rem; }
+.ev-pill { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; text-transform: lowercase; }
+.ev-ok { color: #fff; background: var(--green); }
+.ev-err { color: #fff; background: var(--red); }
+.ev-warn { color: #fff; background: var(--amber); }
+.ev-mut { color: var(--muted); background: var(--bg); border: 1px solid var(--line); }
+.ev-bdk.ev-ok, .ev-bdk.ev-err, .ev-bdk.ev-warn { color: var(--ink); background: none; padding: 0; }
+.ev-foot { font-size: 11px; margin-top: 10px; line-height: 1.5; }
+.ev-emptycard { padding: 22px 20px; }
+.ev-emptycard h3 { margin: 0 0 6px; }
+.ev-cmd { margin-top: 12px; font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: inline-block; }
 
 /* --- auth gate (added with sign-in; uses the same palette variables) --- */
 .auth-screen { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; }
