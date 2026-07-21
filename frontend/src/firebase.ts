@@ -3,7 +3,10 @@ import {
   GoogleAuthProvider,
   OAuthProvider,
   getAuth,
+  isSignInWithEmailLink,
   onAuthStateChanged,
+  sendSignInLinkToEmail,
+  signInWithEmailLink,
   signInWithPopup,
   signOut as fbSignOut,
   type User,
@@ -55,6 +58,42 @@ export function signInWithProvider(providerId: string, loginHint?: string): Prom
 
 export function signOut(): Promise<void> {
   return fbSignOut(auth);
+}
+
+// --- Passwordless email magic-link (any email; the click proves ownership) ------------- //
+// The confirmation step for "any email can be added": Identity Platform emails a one-time
+// link to the EXACT address; clicking it verifies the mailbox (`email_verified: true`) and
+// signs the user in. Authorization is still the backend `ALLOWED_EMAILS` gate — owning the
+// mailbox is necessary, not sufficient. Requires the Email-Link provider enabled in the
+// Identity Platform console (see backend/DEPLOY.md).
+const EMAIL_KEY = "sip.emailForSignIn";
+
+/** Send a sign-in link to `email`. The link returns to this same origin (an authorized
+ *  domain), where completeEmailLinkSignIn() finishes it. We stash the email so the common
+ *  case (link opened in the same browser) needs no re-typing. */
+export function sendEmailSignInLink(email: string): Promise<void> {
+  window.localStorage.setItem(EMAIL_KEY, email);
+  return sendSignInLinkToEmail(auth, email, {
+    url: window.location.origin + "/",
+    handleCodeInApp: true,
+  });
+}
+
+/** If the current URL is a completed magic link, finish sign-in. Returns true if it handled
+ *  one (and cleans the oobCode params off the URL), false otherwise. Never throws to the
+ *  caller for a non-link URL. */
+export async function completeEmailLinkSignIn(): Promise<boolean> {
+  if (!isSignInWithEmailLink(auth, window.location.href)) return false;
+  let email = window.localStorage.getItem(EMAIL_KEY);
+  if (!email) {
+    // Link opened on a different device/browser than it was requested from — confirm the
+    // address (Identity Platform requires the same email that the link was issued for).
+    email = window.prompt("Confirm the email this sign-in link was sent to") || "";
+  }
+  await signInWithEmailLink(auth, email, window.location.href);
+  window.localStorage.removeItem(EMAIL_KEY);
+  window.history.replaceState({}, "", window.location.origin + "/"); // drop oobCode from the URL
+  return true;
 }
 
 /** Subscribe to auth state. Returns the unsubscribe fn. `null` = signed out. */
