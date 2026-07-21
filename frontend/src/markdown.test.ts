@@ -29,6 +29,37 @@ describe("renderMarkdown — raw HTML never survives", () => {
   });
 });
 
+describe("renderMarkdown — dangerous link/image URL schemes are neutralised", () => {
+  // The other half of the sink: marked's `sanitize` option is gone (v5), so it does NOT
+  // scheme-filter hrefs. A Markdown-native link/image in a quoted PDF is not a raw-HTML token,
+  // so the `html` escape never touches it — walkTokens must. `href="#"` is the inert result.
+  it.each([
+    ["javascript: link", "[click me](javascript:alert(document.cookie))"],
+    ["JavaScript: mixed case", "[x](JavaScript:alert(1))"],
+    ["tab-obfuscated scheme", "[x](java\tscript:alert(1))"],
+    ["data: link", "[d](data:text/html;base64,PHNjcmlwdD4=)"],
+    ["javascript: image", "![img](javascript:alert(1))"],
+    ["vbscript: link", "[x](vbscript:msgbox(1))"],
+  ])("neutralises %s", (_label, hostile) => {
+    const out = renderMarkdown(hostile);
+    expect(out).not.toMatch(/href="javascript:/i);
+    expect(out).not.toMatch(/href="data:/i);
+    expect(out).not.toMatch(/href="vbscript:/i);
+    expect(out).not.toMatch(/src="javascript:/i);
+    // Any URL that survived must be the inert placeholder or a safe scheme.
+    const hrefs = [...out.matchAll(/(?:href|src)="([^"]*)"/gi)].map((m) => m[1]);
+    for (const h of hrefs) {
+      expect(h === "#" || /^(https?:|mailto:|tel:)/i.test(h) || !/^[a-z][a-z0-9+.-]*:/i.test(h)).toBe(true);
+    }
+  });
+
+  it("leaves safe schemes and relative URLs intact", () => {
+    expect(renderMarkdown("[CDE](https://cde.ca.gov)")).toContain('href="https://cde.ca.gov"');
+    expect(renderMarkdown("[mail](mailto:a@b.org)")).toContain('href="mailto:a@b.org"');
+    expect(renderMarkdown("[rel](/schools/1)")).toContain('href="/schools/1"');
+  });
+});
+
 describe("renderMarkdown — formatting still works (the point of the pane)", () => {
   it("renders bold and inline code", () => {
     const out = renderMarkdown("**bold** and `code`");
