@@ -79,7 +79,7 @@ export function EvalDashboard({ onBack }: { onBack: () => void }) {
           </div>
 
           <div className="card">
-            <h3 className="h3-row"><span>Recent turns</span></h3>
+            <h3 className="h3-row"><span>Recent traces</span></h3>
             <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
               <table className="tbl ev-tbl">
                 <thead>
