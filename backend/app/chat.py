@@ -613,10 +613,16 @@ def chat(
     ui: dict = {"level": ui_level}
     if req.workspace is not None:
         ui["workspace"] = req.workspace.model_dump()
+    # `source="eval"` when the verified caller IS the configured eval runner — decided here from
+    # the authenticated principal, not from any request field, so eval traffic can't be spoofed
+    # into (or out of) the prod stream. Unset config → always "prod".
+    caller_email = str(principal.get("email") or "").strip().lower()
+    trace_source = ("eval" if caller_email and caller_email == settings.eval_principal_email.strip().lower()
+                    else "prod")
     recorder = TraceRecorder(
         provider="anthropic", model=settings.chat_model,
         principal_sub=sub, session_id=req.session_id,
-        ui=ui,
+        ui=ui, source=trace_source,
         versions={"prompt_hash": sha256_hex(system), "tool_catalog_hash": TOOL_CATALOG_HASH},
     )
     question = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
@@ -652,7 +658,7 @@ def chat(
                 reply = "(the assistant declined to answer that.)"
                 recorder.turn_end(reply=reply, status="refusal")
                 background_tasks.add_task(recorder.flush)
-                out = {"reply": reply, "tools_used": tools_used}
+                out = {"reply": reply, "tools_used": tools_used, "trace_id": recorder.trace_id}
                 if ctx.mutated:  # slots already changed before the refusal — the UI must know
                     out["workspace"] = ctx.to_response()
                 return out
@@ -698,7 +704,8 @@ def chat(
     reply = "".join(b.text for b in (resp.content if resp else []) if b.type == "text").strip()
     recorder.turn_end(reply=reply, status="max_iters" if hit_max_iters else "ok")
     background_tasks.add_task(recorder.flush)
-    out = {"reply": reply or "(no answer produced)", "tools_used": sorted(set(tools_used))}
+    out = {"reply": reply or "(no answer produced)", "tools_used": sorted(set(tools_used)),
+           "trace_id": recorder.trace_id}
     if ctx.mutated:
         # The turn's workspace mutations, with the SAME server-built payloads the model saw —
         # the UI applies these directly (one round trip, no refetch, nothing model-authored).

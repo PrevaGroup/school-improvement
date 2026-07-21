@@ -122,10 +122,11 @@ def test_workspace_mutations_ride_the_response(monkeypatch, quiet):
 
 def test_response_is_unchanged_when_no_workspace_tool_runs(monkeypatch, quiet):
     """Strictly additive: without a workspace mutation the response has NO workspace key —
-    the pre-workspace frontend keeps parsing exactly what it always got."""
+    the pre-workspace frontend keeps parsing exactly what it always got. (`trace_id` is the
+    always-present base field, additive and ignored by older clients.)"""
     _fake_anthropic(monkeypatch, [_Resp("end_turn", [_Text("hello")])])
     out = _call({"messages": [{"role": "user", "content": "hi"}]})
-    assert set(out) == {"reply", "tools_used"}
+    assert set(out) == {"reply", "tools_used", "trace_id"}
 
 
 def test_failed_slot_attempt_leaves_no_workspace_in_the_response(monkeypatch, quiet):
