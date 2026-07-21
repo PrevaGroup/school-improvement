@@ -180,6 +180,7 @@
 .ev-warn { color: #fff; background: var(--amber); }
 .ev-mut { color: var(--muted); background: var(--bg); border: 1px solid var(--line); }
 .ev-bdk.ev-ok, .ev-bdk.ev-err, .ev-bdk.ev-warn { color: var(--ink); background: none; padding: 0; }
+.ev-tbl tr.sel td { background: var(--bg); }
 .ev-foot { font-size: 11px; margin-top: 10px; line-height: 1.5; }
 .ev-emptycard { padding: 22px 20px; }
 .ev-emptycard h3 { margin: 0 0 6px; }
