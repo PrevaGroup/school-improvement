@@ -52,6 +52,10 @@ EXPECTED: dict[str, set[str]] = {
     # --- serving: read-only admin eval view over the trace store ---
     "/api/evals/summary": {"GET"},
     "/api/evals/traces": {"GET"},
+    # --- serving: the loop's later stages (cases -> runs -> per-case results) ---
+    "/api/evals/cases": {"GET"},
+    "/api/evals/runs": {"GET"},
+    "/api/evals/runs/{run_id}/results": {"GET"},
 }
 
 

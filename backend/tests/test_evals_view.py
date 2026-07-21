@@ -4,7 +4,11 @@ Pins the shape the UI reads and the tolerance the trace store needs: half-popula
 (missing totals, null latency, unknown status) must never throw, and identity is never in
 the output.
 """
-from app.evals_view import summarize_traces
+import datetime as _dt
+
+from app.evals_view import shape_case, shape_result, shape_run, summarize_traces
+
+_TS = _dt.datetime(2026, 7, 21, tzinfo=_dt.timezone.utc)
 
 
 def _r(status="ok", source="prod", latency=1000, model="claude-haiku-4-5",
@@ -55,3 +59,36 @@ def test_tolerates_missing_totals_and_unknown_status():
 def test_source_split_separates_prod_from_eval():
     rows = [_r(source="prod"), _r(source="eval"), _r(source="eval")]
     assert summarize_traces(rows)["by_source"] == {"prod": 1, "eval": 2}
+
+
+# --- row shapers for the cases / runs / results tabs -------------------------------------- #
+
+
+def test_shape_case_pulls_level_and_graders():
+    c = shape_case({"eval_case_id": "seed-1", "question": "q", "ui": {"level": "High"},
+                    "expected": {"graders": ["numeric_provenance"], "params": {}},
+                    "source": "seed", "status": "active", "tags": ["honesty"], "created_at": _TS})
+    assert c["level"] == "High" and c["graders"] == ["numeric_provenance"]
+    assert c["tags"] == ["honesty"] and c["created_at"].startswith("2026-07-21")
+
+
+def test_shape_case_tolerates_missing_ui_and_expected():
+    c = shape_case({"eval_case_id": "x", "question": "q", "status": "candidate",
+                    "source": "mined:t"})
+    assert c["level"] is None and c["graders"] == [] and c["tags"] == []
+
+
+def test_shape_run_flattens_aggregates():
+    s = shape_run({"eval_run_id": "run1", "ts": _TS, "set_name": "golden", "target": "live",
+                   "model": "claude-haiku-4-5", "cost_usd": 0.4, "baseline_run_id": None,
+                   "aggregates": {"n": 10, "passed": 8, "failed": 2, "error": 0, "pass_rate": 0.8}})
+    assert (s["pass_rate"], s["n"], s["passed"], s["cost_usd"]) == (0.8, 10, 8, 0.4)
+    assert s["ts"].startswith("2026-07-21")
+
+
+def test_shape_result_keeps_verdict_scores_and_trace():
+    s = shape_result({"eval_case_id": "c1", "question": "q", "verdict": "fail",
+                      "scores": {"numeric_provenance": {"verdict": "fail"}},
+                      "judge_rationale": None, "trace_id": "t1"})
+    assert s["verdict"] == "fail" and s["trace_id"] == "t1"
+    assert "numeric_provenance" in s["scores"]
