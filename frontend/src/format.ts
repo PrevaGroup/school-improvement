@@ -6,6 +6,13 @@
 
 export const fmtUSD = (n: number | null | undefined) =>
   n == null ? "—" : "$" + Math.round(n).toLocaleString();
+
+// Small-money variant for AI-usage costs, which are fractions of a dollar per turn. fmtUSD
+// rounds to whole dollars (right for school budgets, its origin), which collapses a real
+// $0.02 turn cost to "$0". Show 2–4 decimals so a sub-dollar cost reads honestly.
+export const fmtCostUSD = (n: number | null | undefined) =>
+  n == null ? "—"
+    : "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 export const fmtPct = (n: number | null | undefined) => (n == null ? "—" : Math.round(n) + "%");
 export const fmtNum = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString());
 export const fmt1 = (n: number | null | undefined) => (n == null ? "—" : Number(n).toFixed(1));

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { fmtNum, fmtUSD } from "../format";
+import { fmtNum, fmtCostUSD } from "../format";
 import type { EvalSummary, EvalTraceRow } from "../types";
 
 // Read-only admin view over the eval trace store (GET /api/evals/*). Shows what real use
@@ -66,7 +66,7 @@ export function EvalDashboard({ onBack }: { onBack: () => void }) {
           <div className="ev-tiles">
             <Tile label="traces" value={fmtNum(summary.traces ?? 0)} sub={`last ${summary.window}`} />
             <Tile label="ok rate" value={summary.ok_rate == null ? "—" : summary.ok_rate + "%"} />
-            <Tile label="cost (est.)" value={fmtUSD(summary.cost_usd ?? 0)} />
+            <Tile label="cost (est.)" value={fmtCostUSD(summary.cost_usd ?? 0)} />
             <Tile label="p50 latency" value={summary.latency_p50_ms == null ? "—" : (summary.latency_p50_ms / 1000).toFixed(1) + "s"}
                   sub={summary.latency_max_ms ? "max " + (summary.latency_max_ms / 1000).toFixed(1) + "s" : undefined} />
             <Tile label="tokens" value={fmtNum(summary.tokens ?? 0)} />
@@ -96,7 +96,7 @@ export function EvalDashboard({ onBack }: { onBack: () => void }) {
                       <td><span className={"ev-pill " + statusClass(t.status)}>{t.status || "—"}</span></td>
                       <td className="mono d">{t.model || "—"}</td>
                       <td className="r mono">{t.latency_ms == null ? "—" : (t.latency_ms / 1000).toFixed(1) + "s"}</td>
-                      <td className="r mono">{t.cost_usd_est == null ? "—" : fmtUSD(t.cost_usd_est)}</td>
+                      <td className="r mono">{t.cost_usd_est == null ? "—" : fmtCostUSD(t.cost_usd_est)}</td>
                       <td className="r mono">{t.iterations ?? "—"}</td>
                       <td className="mono d">{t.git_sha ? t.git_sha.slice(0, 7) : "—"}</td>
                     </tr>
