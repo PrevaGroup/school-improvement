@@ -25,9 +25,11 @@ loaders, on Cloud SQL.
 
 ## Status
 
-- **Live on Cloud Run** — an IAM-gated **school diagnostic workspace**: five peer-benchmarked
-  indicators (chronic absenteeism, graduation rate, college-going, CAASPP ELA/Math), the school's full SPSA, its
-  demographically-matched peers, and a **grounded chat** with five tools over all of it.
+- **Live at [sip.prevagroup.com](https://sip.prevagroup.com)** — a signed-in **school diagnostic
+  workspace**: peer-benchmarked indicators (chronic absenteeism, graduation, college-going, CAASPP
+  ELA/Math), a subgroup slice, the school's full SPSA, its demographically-matched peers, and a
+  **grounded chat** that also drives the charts. Access is **Identity Platform sign-in + a domain
+  allowlist** (not Cloud Run IAM); Anthropic spend is **capped in-app**.
 - Cloud SQL Postgres with the full aggregate **star schema** (21 tables) + **row-level
   security** (tenant isolation proven), credentials in **Google Secret Manager**.
 - **10 public metrics loaded** (chronic absenteeism, suspension, expulsion, graduation,
@@ -38,22 +40,20 @@ loaders, on Cloud SQL.
 - **"Schools like you" peer engine** (Mahalanobis kNN on *inputs* — poverty, EL, disability,
   size, locale — never outcomes) and the **marts layer** are built and serving.
 
-> **⚠️ The deployed service is a temporary demo, not the production architecture.** It is gated
-> by **Cloud Run IAM** (not Identity Platform), serves a **no-build React UI from the app itself** (no Vite
-> build step), and reads the **public `plan_extraction`** marts rather than the private
-> tenant `/plans` path this repo also specifies. Serving the UI from the app is the one part
-> that *stays* — see the go-live plan below.
+> **The service went live 2026-07-16** — `--allow-unauthenticated` on `sip.prevagroup.com`,
+> gated by **Identity Platform sign-in + a domain allowlist**, serving the **built Vite SPA**
+> from the same container (multi-stage Docker: node builds `frontend/dist`, FastAPI serves API +
+> SPA at one origin). It reads the **public `plan_extraction`** marts; the private-tenant
+> `/plans` path this repo also specifies is built but is not the served path yet.
 
-**Planned — next up is going public.** [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) sequences
-the cutover from "IAM-gated, only I can open it" to "invited people sign in at a real domain":
-Identity Platform sign-in + provisioning · a React + Vite + TypeScript SPA in `frontend/`, **built into the
-same container and served by FastAPI at one origin** · a custom domain via Cloud Run domain
-mapping · an in-app Claude spend cap.
+**Shipped 2026-07-16.** [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) (now a historical record)
+sequenced the cutover from "IAM-gated, only I can open it" to "invited people sign in at a real
+domain": Identity Platform sign-in · the React + Vite + TypeScript SPA in `frontend/`, built into
+the same container and served by FastAPI at one origin · a custom domain via Cloud Run domain
+mapping · an in-app Claude spend cap. All of that is live. (The IAM gate opened **last**, after
+its two jobs — access and the Anthropic-spend cap — had in-app replacements.)
 
-Its load-bearing constraint: **the IAM gate opens last.** IAM is currently both the access gate
-*and* the only cap on Anthropic spend, so its replacements land first.
-
-Also planned: the private-tenant `/plans` serving path · extraction-time metric tagging to
+**Still planned:** the private-tenant `/plans` serving path · extraction-time metric tagging to
 replace the keyword relevance filter ([design note](docs/design/plan-relevance-tagging.md)).
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full picture and remaining tasks.
