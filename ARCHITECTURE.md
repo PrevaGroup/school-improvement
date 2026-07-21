@@ -6,12 +6,12 @@ data (its improvement plans, and later its private metrics) is isolated by Postg
 row-level security. This document is the map: how the pieces fit, where they live in the
 repo, and what's left to build.
 
-**Stack:** Cloud SQL (Postgres) · Cloud Run (FastAPI) · Cloud Storage + Claude for raw-data /
-plan ingest — *live*. **Planned:** a React + Vite + TypeScript SPA **served by FastAPI from
-the same Cloud Run service** *(the demo serves a no-build React UI from the app itself)* ·
-**Identity Platform** sign-in *(the demo is gated by Cloud Run IAM)*. Naming decoder, because Google's console will not say any of the older names: the product is **Identity Platform** (formerly "Google Cloud Identity Platform"/GCIP — that acronym appears nowhere in the console), its console URL slug is `customer-identity`, its API is `identitytoolkit.googleapis.com`, and it issues **Firebase** ID tokens. Four names, one thing · the
-domain via **Cloud Run domain mapping**, with DNS on **Google-hosted nameservers** (managed
-via the Squarespace panel).
+**Stack (all live as of the 2026-07-16 go-live):** Cloud SQL (Postgres) · Cloud Run (FastAPI) ·
+Cloud Storage + Claude for raw-data / plan ingest · a React + Vite + TypeScript SPA **served by
+FastAPI from the same Cloud Run service** (built into the container) · **Identity Platform**
+sign-in gating every `/api` route. Naming decoder, because Google's console will not say any of the older names: the product is **Identity Platform** (formerly "Google Cloud Identity Platform"/GCIP — that acronym appears nowhere in the console), its console URL slug is `customer-identity`, its API is `identitytoolkit.googleapis.com`, and it issues **Firebase** ID tokens. Four names, one thing · the
+domain via **Cloud Run domain mapping** (`sip.prevagroup.com`), with DNS on **Google-hosted
+nameservers** (managed via the Squarespace panel).
 
 **Not used — deliberately:** third-party static hosting, edge proxies/WAFs, edge workers, and
 tunnels. An earlier plan put the frontend on a separate static host; serving the built SPA from
@@ -234,12 +234,12 @@ class is structurally absent here.
 > middleware, and no edge-dependent logic in the app.** Hardening is a deliberate infra
 > change if we ever want it — never a scaffold feature.
 
-> **Temporary demo, not prod.** What is currently deployed is the MVP demo described in
-> [Status](#status): **IAM-gated** (not Identity Platform), a **self-served no-build React UI**, reading the
-> **public `plan_extraction`** marts — deliberately *not* the Identity Platform + private-tenant `/plans`
-> architecture this document specifies. It's for showing the diagnostic, and is expected to be
-> replaced at the real prod cutover. [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) is the
-> sequenced plan for that cutover.
+> **What's deployed now (go-live 2026-07-16).** The service is `--allow-unauthenticated` on
+> `sip.prevagroup.com`, gated by **Identity Platform sign-in + a domain allowlist**, serving the
+> **built Vite SPA** from the same container. The one piece still short of the full architecture
+> this document specifies: it reads the **public `plan_extraction`** marts, **not** the
+> private-tenant `/plans` path (that path is built but not yet the served one).
+> [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) is now a historical record of the cutover.
 
 ---
 
@@ -263,7 +263,7 @@ from and reconciled against the code; a second copy here earns nothing and rots.
 | [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) | **The internet-exposure cutover** — sequenced tasks, what's dropped, why the gate opens last |
 | [`docs/TARGET_SCHEMA.md`](docs/TARGET_SCHEMA.md) | The data-model spec — five layers, tenancy + RLS, missingness, instruments |
 | [`docs/DATA_CATALOG.md`](docs/DATA_CATALOG.md) | Raw CA data sources and how they were obtained |
-| **Frontend** *(planned — see the go-live plan)* | |
+| **Frontend** *(shipped 2026-07-16)* | |
 | `frontend/` | React + Vite + TypeScript SPA. Built into the container; served by FastAPI at one origin. Calls `/api/*` via relative paths only |
 | `Dockerfile` (repo root) | Multi-stage: node builds `frontend/dist` → python stage serves API + SPA |
 | **Backend** | |
@@ -277,29 +277,34 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 
 ## Status
 
-- **Live:** Cloud SQL Postgres, full aggregate **star schema (21 tables)** + **RLS** (tenant
-  isolation proven), credentials in Secret Manager. **10 public metrics loaded** (~1.5M
-  `fact_metric` rows, incl. CAASPP ELA/Math 2023-24 + 2024-25). The **marts layer** ([`app/marts.py`](backend/app/marts.py)) and a
-  **single-school attendance-diagnostic UI** — need-vs-plan, a "schools like you" peer engine,
-  and a grounded chat — are **built and deployed to Cloud Run** (see the demo caveat below).
-- **⚠️ The deployed Cloud Run service is a temporary demo, not the production architecture
-  above.** It is gated by **Cloud Run IAM** (`run.invoker`) instead of Identity Platform sign-in; serves a
-  **no-build React UI from the app itself** (no Vite); reads the **public `plan_extraction`**
-  table via the batch `extract → GCS JSON → load_plan_extractions` path, **not** the private
-  `/plans` tenant path; and runs at `--min-instances 0`. It exists to show the diagnostic, not
-  to be the production cutover.
-- **Not done:** Identity Platform sign-in + user provisioning, the private-tenant `/plans` serving path, and
-  the real frontend (React + Vite + TypeScript in `frontend/`).
-- **Next: go public.** [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) sequences the cutover from
-  "IAM-gated, only Tim can open it" to "invited people sign in with Identity Platform at a real domain."
-  Its load-bearing constraint: **the IAM gate opens last**, after the `DEV_MODE` lockout and
-  the in-app Claude spend cap — because IAM is currently what provides both.
+- **Live (go-live ran 2026-07-16):** the service is `--allow-unauthenticated` on
+  **`sip.prevagroup.com`**, gated by **Identity Platform sign-in + a domain allowlist**
+  (`security.py`), serving the **built Vite SPA** from the same container. Anthropic spend is
+  **capped in-app** (`usage_chat_daily`), and `DEV_MODE` is structurally unreachable in prod.
+  Behind it: Cloud SQL Postgres, full aggregate **star schema (21 tables)** + **RLS** (tenant
+  isolation proven), credentials in Secret Manager; **10 public metrics loaded** (~1.5M
+  `fact_metric` rows, incl. CAASPP ELA/Math 2023-24 + 2024-25); the **marts layer**
+  ([`app/marts.py`](backend/app/marts.py)) and the Claude-controlled **school-diagnostic
+  workspace** — need-vs-plan, a "schools like you" peer engine, a grounded chat that also drives
+  the charts.
+- **Caveat that remains:** it reads the **public `plan_extraction`** table (batch
+  `extract → GCS JSON → load_plan_extractions`), **not** the private `/plans` tenant path this
+  repo also specifies; and it runs at `--min-instances 0` (a documented loose end, not the
+  `min-instances 1` the go-live plan targeted).
+- **Still not done:** the private-tenant `/plans` serving path; per-user tenant provisioning
+  (the deployed public-data path uses the domain allowlist + `DOMAIN_TENANT_MAP`, so it needs no
+  per-user claim).
+- **Go-live is history, not plan.** [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) is now a
+  historical record of the cutover from "IAM-gated, only Tim can open it" to "invited people
+  sign in with Identity Platform at a real domain." Its load-bearing constraint held: **the IAM
+  gate opened last**, after the `DEV_MODE` lockout and the in-app spend cap replaced its two
+  jobs.
 
 ## Remaining architecture tasks
 
-> **Go-live (making this reachable on the internet) is planned in detail in
-> [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md).** The auth / deploy / frontend items below
-> are summarised from it; that document has the ordering and the reasoning.
+> **Go-live ran 2026-07-16** — the auth / deploy / frontend items below are mostly done, kept
+> here as the record. [`docs/GO_LIVE_PLAN.md`](docs/GO_LIVE_PLAN.md) is now historical;
+> [`backend/DEPLOY.md`](backend/DEPLOY.md) describes the current live posture and the loose ends.
 
 **Auth / provisioning**
 - [x] **Split authentication from tenancy** in `security.py` — `get_current_principal` (verify
@@ -308,31 +313,30 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
 - [x] **`DEV_MODE` is structurally unreachable in prod** — the `X-Dev-Tenant` path is gated on
       the environment (`K_SERVICE` / `INSTANCE_CONNECTION_NAME`), not the flag, plus an
       import-time assert in `main.py`. *(#8.)*
-- [ ] **Enable Identity Platform** — `identitytoolkit.googleapis.com` is **not enabled on the
-      project** (checked 2026-07-15); Identity Platform does not exist yet. Then the Firebase JS SDK in the
-      SPA (sign-in, token refresh, 401 → redirect) + the custom domain in Identity Platform **authorized
-      domains**. **This is the critical path to letting anyone in** — it gates testers, not
-      code, so start it first and run it in parallel with everything else.
+- [x] **Enable Identity Platform + wire the SPA sign-in** — enabled on the project; the Firebase
+      JS SDK in the SPA does sign-in / token refresh / 401 → redirect, and `sip.prevagroup.com` is
+      an authorized domain. This was the critical path to letting anyone in. *(Go-live 2026-07-16.)*
+      The deployed access boundary is **Identity Platform sign-in + a domain allowlist**
+      (`ALLOWED_DOMAIN_PROVIDERS`), not per-user claims.
 - [ ] Stand up Identity Platform user provisioning — create users and set the `tenant_id` custom claim
-      (`firebase-admin` / Identity Platform Admin API). Until then, use `DOMAIN_TENANT_MAP`.
-      *(Public-data testers need **no** claim — that's the point of the split above.)*
+      (`firebase-admin` / Identity Platform Admin API). Not needed for the public-data path (domain
+      allowlist + `DOMAIN_TENANT_MAP` cover it); a loose end for the private-tenant `/plans` path.
 - [ ] Seed `dim_tenant` with the real districts; create a second tenant for isolation testing.
 
 **Deploy**
 - [x] `gcloud run deploy` the backend; `anthropic-api-key` secret; runtime SA `secretAccessor`
       + `cloudsql.client`. *(Live 2026-07-14, IAM-gated.)*
-- [ ] **Move Claude spend control into the app** — a per-principal daily cap on `/api/chat`
-      keyed on the verified Identity Platform subject. The IAM gate is what caps spend today; opening the
-      gate removes it, and there is no edge rate limiter to inherit.
-      Prerequisite for opening the gate.
-- [ ] Deploy Identity Platform-enforced but still `--no-allow-unauthenticated`; verify 401-without-token;
-      **only then** `--allow-unauthenticated` + `--min-instances 1`.
-      *(`gcloud beta` is installed as of 2026-07-15, so the domain mapping below is unblocked.)*
-- [ ] Create the domain mapping; add the CNAME (`ghs.googlehosted.com`) in DNS via the
-      Squarespace panel; verify domain ownership
-      in Search Console first (hard prerequisite); allow hours for the cert.
+- [x] **Move Claude spend control into the app** — a per-principal daily cap on `/api/chat`
+      (`usage_chat_daily` + `check_spend_caps`, keyed on the verified subject), plus a global/day
+      cap. This replaced the IAM gate's spend-capping job so the gate could open. *(Shipped; a
+      later fix corrected a `Decimal * float` bug in the cost read.)*
+- [x] Deploy Identity Platform-enforced but still `--no-allow-unauthenticated`; verify
+      401-without-token; **only then** `--allow-unauthenticated`. Done at go-live — though the
+      live service runs `--min-instances 0`, not the `1` the plan targeted (a documented loose end).
+- [x] Create the domain mapping (`sip.prevagroup.com`) + the CNAME / domain verification / cert.
+      *(Go-live 2026-07-16.)*
 - [ ] Re-run the tenant-isolation test end-to-end against the deployed API (log in as two
-      districts, confirm neither sees the other's plans).
+      districts, confirm neither sees the other's plans) — gated on the private `/plans` path.
 
 **SIP pipeline**
 - [ ] Run the extractor against a real Long Beach SPSA and eyeball the JSON vs. `schema.py`.
