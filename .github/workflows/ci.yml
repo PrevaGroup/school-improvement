@@ -22,7 +22,10 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          # MUST track the runtime the image ships (the root Dockerfile's `python:3.11-slim`).
+          # CI is the gate, so it has to validate on the Python that actually runs in prod — a
+          # 3.12+/3.13-only construct passing here and failing at Cloud Build would defeat it.
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: |
             backend/requirements.txt
