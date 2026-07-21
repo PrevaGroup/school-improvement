@@ -172,6 +172,47 @@ export interface EvalTraceRow {
   git_sha: string | null;
 }
 
+// The loop's later stages (GET /api/evals/cases, /runs, /runs/{id}/results — admin-gated).
+export interface EvalGraderScore {
+  name?: string;
+  tier?: string;
+  verdict?: string; // pass | fail | na
+  score?: number | null;
+  detail?: string;
+}
+export interface EvalCaseRow {
+  eval_case_id: string;
+  question: string | null;
+  level: string | null;
+  status: string | null; // candidate | active | retired
+  source: string | null; // seed | mined:<trace_id>
+  tags: string[];
+  graders: string[];
+  created_at: string | null;
+}
+export interface EvalRunRow {
+  eval_run_id: string;
+  ts: string | null;
+  set_name: string | null;
+  target: string | null;
+  model: string | null;
+  pass_rate: number | null;
+  n: number | null;
+  passed: number | null;
+  failed: number | null;
+  error: number | null;
+  cost_usd: number | null;
+  baseline_run_id: string | null;
+}
+export interface EvalResultRow {
+  eval_case_id: string;
+  question: string | null;
+  verdict: string | null; // pass | fail | error
+  scores: Record<string, EvalGraderScore>;
+  judge_rationale: string | null;
+  trace_id: string | null;
+}
+
 export interface District { district_id: string; district_name: string }
 export type Level = "High" | "Middle" | "Primary";
 export interface ChatTurn { role: "user" | "assistant"; content: string }
