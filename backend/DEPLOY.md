@@ -225,6 +225,32 @@ The older `ALLOWED_EMAIL_DOMAINS=prevagroup.com,...` still works and maps every 
 domain to `google.com` — correct for the preva-only era, so a redeploy from old shell
 history stays safe. Prefer the map for anything new.
 
+### Inviting any individual — magic link + `ALLOWED_EMAILS`
+
+For people who aren't in a member org (investors, individual testers), sign-in is a
+**passwordless email link**, and access is two independent gates — both required:
+
+1. **`ALLOWED_EMAILS`** (env var, in the one `--set-env-vars` flag) — *authorization*. The exact
+   address must be listed. e.g. `ALLOWED_EMAILS=investor@acme.com,someone@gmail.com`.
+2. **The magic link** — *ownership*. They type their email on the sign-in screen; Identity
+   Platform emails a one-time link to that exact address; clicking it verifies the mailbox
+   (`email_verified: true`) and signs them in. Owning the mailbox is necessary, not sufficient —
+   an un-listed address gets the link, clicks it, and still lands on the "not invited" screen.
+
+Member-org domains (`prevagroup.com`) are unaffected — they still go to their own IdP, and a
+magic link **cannot** sidestep that (a `password`-provider token for a member domain is 403'd;
+enforced in `security.py`, pinned by `test_security.py`).
+
+**One-time console step (required for the link to send):** enable the passwordless provider.
+Identity Platform console → **Providers** → **Email/Password** → toggle **Email link
+(passwordless sign-in)** on → Save. `sip.prevagroup.com` must be an **authorized domain**
+(already is — the Google provider needs it too). Until this is on, the flow is built but the
+email never sends.
+
+> **Abuse note:** anyone can *request* a link to any address (that's inherent to passwordless),
+> but only `ALLOWED_EMAILS` / member-domain identities get **in**. Identity Platform rate-limits
+> link sends; fine at demo volume.
+
 ### Adding an Entra org (Phase B checklist, in order)
 
 1. Azure: multi-tenant **app registration** (free account) — redirect URI

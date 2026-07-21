@@ -223,6 +223,26 @@ def test_allowed_emails_hatch_admits_an_exact_address(verified, monkeypatch):
     assert e.value.status_code == 403
 
 
+def test_magic_link_token_admits_an_allowlisted_email(verified, monkeypatch):
+    """A passwordless email-link sign-in arrives as sign_in_provider 'password' with
+    email_verified true (the click verified the mailbox). For an ALLOWED_EMAILS address the
+    provider binding is bypassed, so it's admitted — this is the 'any email + owns it' path."""
+    monkeypatch.setattr(security.settings, "allowed_emails", {"investor@acme.com"})
+    verified(_claims(email="investor@acme.com", provider="password"))
+    principal = _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert principal["email"] == "investor@acme.com"
+
+
+def test_magic_link_cannot_sidestep_a_member_org_provider(verified):
+    """A member-org domain is provider-bound: a prevagroup address must ride Google Workspace,
+    not a self-serve magic link. A 'password' token for prevagroup.com is refused — access
+    still rides the revocable org identity."""
+    verified(_claims(email="staff@prevagroup.com", provider="password"))
+    with pytest.raises(HTTPException) as e:
+        _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
+    assert e.value.status_code == 403
+
+
 def test_allowed_emails_hatch_still_requires_email_verified(verified, monkeypatch):
     """The hatch NEVER bypasses email_verified — that is the one control that can't be optional,
     or an allowlisted address could be claimed by anyone who registers it unverified."""

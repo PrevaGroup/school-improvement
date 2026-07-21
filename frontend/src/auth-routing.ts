@@ -17,13 +17,16 @@ export const DOMAIN_PROVIDERS: Record<string, string> = {
   //                                          // registration + Identity Platform provider land.
 };
 
-// Personal Google accounts sign in through google.com. Routing these lets a listed test
-// address (backend ALLOWED_EMAILS) reach the Google popup — the BACKEND is still the gate
-// (an un-allowlisted gmail gets a token, then a 403 "not invited"). Routing only, never
-// authorization; keep it that way.
-const PERSONAL_GOOGLE_DOMAINS = new Set(["gmail.com", "googlemail.com"]);
-
-export type SignInRoute = { provider: string; email: string } | { error: string };
+// Two sign-in methods:
+//   - "sso"        → an org's own IdP popup (provider set), for domains in DOMAIN_PROVIDERS.
+//     Access rides a revocable org identity — the intended path for member organizations.
+//   - "emaillink" → a passwordless magic link to that exact address, for ANY other email.
+//     The click proves mailbox ownership; the backend ALLOWED_EMAILS gate is still what
+//     authorizes them. Routing only, never authorization — the server re-derives everything.
+export type SignInRoute =
+  | { method: "sso"; provider: string; email: string }
+  | { method: "emaillink"; email: string }
+  | { error: string };
 
 /** Decide the sign-in route for a typed email. Pure — the unit under test. */
 export function routeForEmail(raw: string): SignInRoute {
@@ -33,12 +36,9 @@ export function routeForEmail(raw: string): SignInRoute {
     return { error: "Enter your full work email address." };
   }
   const domain = email.slice(at + 1);
-  const provider = DOMAIN_PROVIDERS[domain] ?? (PERSONAL_GOOGLE_DOMAINS.has(domain) ? "google.com" : undefined);
-  if (!provider) {
-    // Mirrors the backend's own wording for an uninvited domain. Saying it here saves an
-    // uninvited visitor a pointless provider round-trip; the server still says no if they
-    // find a way to sign in anyway.
-    return { error: `${domain} isn't on the invite list for this application.` };
-  }
-  return { provider, email };
+  const provider = DOMAIN_PROVIDERS[domain];
+  if (provider) return { method: "sso", provider, email };
+  // Everyone else gets a magic link to their exact address — no domain is turned away at the
+  // door; the backend allowlist decides who actually gets in after the click.
+  return { method: "emaillink", email };
 }
