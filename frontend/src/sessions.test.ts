@@ -26,7 +26,7 @@ describe("session creation and forking", () => {
     expect(s.workspace.slots.map((x) => x.metric_id)).toEqual([
       "chronic_absenteeism_rate", "grad_rate_acgr", "college_going_rate",
     ]);
-    expect(s.workspace.subgroup_slice).toBeNull();
+    expect(s.workspace.subgroup_slots).toEqual([null, null, null]);
     expect(s.messages).toEqual([]);
     expect(s.school_id).toBe("S1");
   });
@@ -40,11 +40,11 @@ describe("session creation and forking", () => {
 
   it("forking copies the transcript forward but resets the workspace", () => {
     const from = sess({ messages: [{ role: "user", content: "why is attendance low?" }] });
-    from.workspace.subgroup_slice = { metric_id: "suspension_rate", school_year: null, student_group_id: "el" };
+    from.workspace.subgroup_slots[0] = { metric_id: "suspension_rate", school_year: null, student_group_id: "el" };
     const fork = forkSession(from, { ...SCHOOL, school_id: "S2", school_name: "Jordan High" });
     expect(fork.messages).toEqual(from.messages); // one continuous conversation...
     expect(fork.messages).not.toBe(from.messages); // ...but an independent copy
-    expect(fork.workspace.subgroup_slice).toBeNull(); // fresh lens on the new school
+    expect(fork.workspace.subgroup_slots).toEqual([null, null, null]); // fresh lens on the new school
     expect(fork.school_id).toBe("S2");
   });
 });

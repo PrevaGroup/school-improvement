@@ -657,9 +657,19 @@ class SpotlightSpec(BaseModel):
     items: list[SpotlightItem]
 
 
+N_SUBGROUP_SLOTS = 3  # the subgroup-slice section mirrors the three indicator boxes
+
+
+def _empty_subgroup_slots() -> list:
+    return [None] * N_SUBGROUP_SLOTS
+
+
 class WorkspaceSpec(BaseModel):
     slots: list[SlotSpec] = Field(min_length=3, max_length=3)
-    subgroup_slice: SlotSpec | None = None
+    # Three parallel subgroup-slice boxes (like the indicator slots), each None until filled.
+    subgroup_slots: list[SlotSpec | None] = Field(
+        default_factory=_empty_subgroup_slots, min_length=N_SUBGROUP_SLOTS, max_length=N_SUBGROUP_SLOTS,
+    )
     plan_spotlight: SpotlightSpec | None = None
 
 
@@ -832,10 +842,10 @@ def fetch_workspace(db: Session, school_id: str, spec: WorkspaceSpec, include_pl
     ).scalar()
     refs = _slot_refs(db)
     slots = [fetch_slot(db, school_id, s, school_level, refs) for s in spec.slots]
-    slice_out = (
-        fetch_slot(db, school_id, spec.subgroup_slice, school_level, refs)
-        if spec.subgroup_slice else None
-    )
+    subgroup_out = [
+        fetch_slot(db, school_id, s, school_level, refs) if s else None
+        for s in spec.subgroup_slots
+    ]
     plan = None
     spotlight = None
     if include_plan or spec.plan_spotlight:
@@ -849,7 +859,7 @@ def fetch_workspace(db: Session, school_id: str, spec: WorkspaceSpec, include_pl
         "school_id": school_id,
         "spec": spec.model_dump(),
         "slots": slots,
-        "subgroup_slice": slice_out,
+        "subgroup_slots": subgroup_out,
         "spotlight": spotlight,
     }
     if include_plan:

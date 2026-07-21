@@ -22,7 +22,7 @@ const FALLBACK_INDICATORS_BY_LEVEL: Record<Level, string[]> = {
 function specOf(ids: string[]): WorkspaceSpec {
   return {
     slots: ids.map((m) => ({ metric_id: m, school_year: null, student_group_id: "all" })) as [SlotSpec, SlotSpec, SlotSpec],
-    subgroup_slice: null,
+    subgroup_slots: [null, null, null],
     plan_spotlight: null,
   };
 }
@@ -51,11 +51,16 @@ export function applyChatWorkspace(prev: WorkspaceData | null, w: ChatWorkspace)
     const p = w.payloads[`slot_${i + 1}`];
     if (p) slots[i] = p;
   }
+  const subgroup_slots = (prev.subgroup_slots ?? [null, null, null]).slice();
+  for (let i = 0; i < 3; i++) {
+    const p = w.payloads[`subgroup_${i + 1}`];
+    if (p) subgroup_slots[i] = p;
+  }
   return {
     ...prev,
     spec: w.spec ?? prev.spec,
     slots,
-    subgroup_slice: w.payloads["subgroup_slice"] ?? prev.subgroup_slice,
+    subgroup_slots,
     spotlight: w.spotlight ?? prev.spotlight,
   };
 }

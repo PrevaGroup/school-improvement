@@ -111,7 +111,6 @@ export function Diagnostic({ s, peers, ws }: Props) {
         <h3 className="h3-row">
           <span>School Indicators</span>
           <StepsInfo active="Scan indicators" />
-          <span className="hint">Claude controls these — ask it to change the metric, year, or subgroup →</span>
         </h3>
         {ws === null ? (
           <div className="muted dots">loading indicators</div>
@@ -130,23 +129,30 @@ export function Diagnostic({ s, peers, ws }: Props) {
           <span className="info" tabIndex={0}>
             i
             <span className="tip">
-              The same fixed chart, cut to ONE student group — the school&rsquo;s subgroup value
-              against the same subgroup across its peer band. Compare years or groups by asking
-              Claude to flip the slice. Suppressed values are unknown, never zero; a thin band is
-              captioned, not hidden.
+              Three boxes, each the same fixed chart cut to ONE student group — the school&rsquo;s
+              subgroup value against the same subgroup across its peer band. Fill several to
+              compare subgroups (or years) side by side. Suppressed values are unknown, never
+              zero; a thin band is captioned, not hidden.
             </span>
           </span>
         </h3>
         {ws === null ? (
           <div className="muted dots">loading</div>
-        ) : ws.subgroup_slice ? (
-          <div className="inds">
-            <Slot p={ws.subgroup_slice} />
-          </div>
         ) : (
-          <div className="muted">
-            Empty — ask Claude to slice an indicator by a student group, e.g.{" "}
-            <i>&ldquo;show chronic absenteeism for English learners&rdquo;</i>.
+          <div className="inds">
+            {[0, 1, 2].map((i) => {
+              const p = ws.subgroup_slots?.[i] ?? null;
+              return p ? (
+                <Slot p={p} key={i} />
+              ) : (
+                <div className="ind ind-empty" key={i}>
+                  <div className="muted">
+                    Add content to slice an indicator by a student group, e.g.{" "}
+                    <i>&ldquo;show chronic absenteeism for English learners&rdquo;</i>.
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

@@ -16,7 +16,7 @@ function data(): WorkspaceData {
     school_id: "S1",
     spec: DEFAULT_WORKSPACE_SPEC,
     slots: [slot("A"), slot("B"), slot("C")],
-    subgroup_slice: null,
+    subgroup_slots: [null, null, null],
     spotlight: null,
     plan: { has_plan: true, plan_status: "on_file", plan_year: "2024-25", goals: [] },
   };
@@ -32,19 +32,21 @@ describe("applyChatWorkspace — merge, never fabricate", () => {
     expect(next.slots.map((s) => s.display_name)).toEqual(["A", "NEW", "C"]);
   });
 
-  it("fills the subgroup slice without touching the indicator slots", () => {
-    const next = applyChatWorkspace(data(), turn({ payloads: { subgroup_slice: slot("EL") } }))!;
-    expect(next.subgroup_slice?.display_name).toBe("EL");
+  it("fills one subgroup box without touching the indicator slots or the other boxes", () => {
+    const next = applyChatWorkspace(data(), turn({ payloads: { subgroup_2: slot("EL") } }))!;
+    expect(next.subgroup_slots[1]?.display_name).toBe("EL");
+    expect(next.subgroup_slots[0]).toBeNull();
+    expect(next.subgroup_slots[2]).toBeNull();
     expect(next.slots.map((s) => s.display_name)).toEqual(["A", "B", "C"]);
   });
 
   it("adopts the turn's spec so the next request describes the true screen", () => {
-    const spec = {
+    const spec: typeof DEFAULT_WORKSPACE_SPEC = {
       ...DEFAULT_WORKSPACE_SPEC,
-      subgroup_slice: { metric_id: "suspension_rate", school_year: null, student_group_id: "el" },
+      subgroup_slots: [{ metric_id: "suspension_rate", school_year: null, student_group_id: "el" }, null, null],
     };
-    const next = applyChatWorkspace(data(), turn({ spec, payloads: { subgroup_slice: slot("EL") } }))!;
-    expect(next.spec.subgroup_slice?.student_group_id).toBe("el");
+    const next = applyChatWorkspace(data(), turn({ spec, payloads: { subgroup_1: slot("EL") } }))!;
+    expect(next.spec.subgroup_slots[0]?.student_group_id).toBe("el");
   });
 
   it("keeps the plan and spotlight when only a slot changed", () => {
@@ -73,7 +75,7 @@ describe("DEFAULT_WORKSPACE_SPEC mirrors the backend HS default", () => {
       "chronic_absenteeism_rate", "grad_rate_acgr", "college_going_rate",
     ]);
     expect(DEFAULT_WORKSPACE_SPEC.slots.every((s) => s.school_year === null && s.student_group_id === "all")).toBe(true);
-    expect(DEFAULT_WORKSPACE_SPEC.subgroup_slice).toBeNull();
+    expect(DEFAULT_WORKSPACE_SPEC.subgroup_slots).toEqual([null, null, null]);
     expect(DEFAULT_WORKSPACE_SPEC.plan_spotlight).toBeNull();
   });
 });
@@ -96,7 +98,7 @@ describe("defaultSpecForLevel — level-aware, server-preferred", () => {
         { metric_id: "suspension_rate", school_year: null, student_group_id: "all" },
         { metric_id: "stability_rate", school_year: null, student_group_id: "all" },
         { metric_id: "chronic_absenteeism_rate", school_year: null, student_group_id: "all" },
-      ], subgroup_slice: null, plan_spotlight: null },
+      ], subgroup_slots: [null, null, null], plan_spotlight: null },
     };
     expect(defaultSpecForLevel("Middle", server).slots[0].metric_id).toBe("suspension_rate");
     // A level the server didn't send still falls back to the client map.

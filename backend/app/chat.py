@@ -76,9 +76,9 @@ def build_system(ui_level: str, workspace: WorkspaceSpec | None = None) -> str:
     # screen ACTUALLY shows, and so the model doesn't re-set a slot to its current spec.
     # Ids verbatim (no DB here — build_system stays pure; its hash is traced).
     lines = [f"- Slot {i + 1}: {_describe_slot(s)}" for i, s in enumerate(workspace.slots)]
-    lines.append("- Subgroup slice: "
-                 + (_describe_slot(workspace.subgroup_slice) if workspace.subgroup_slice
-                    else "(empty — offer to fill it when a subgroup question comes up)"))
+    for i, s in enumerate(workspace.subgroup_slots):
+        lines.append(f"- Subgroup box {i + 1}: "
+                     + (_describe_slot(s) if s else "(empty)"))
     pins = len(workspace.plan_spotlight.items) if workspace.plan_spotlight else 0
     lines.append(f"- Plan spotlight: {pins} pinned item(s)" if pins else "- Plan spotlight: (none)")
     return (base
@@ -98,7 +98,7 @@ Always call a tool for real data; never invent schools, numbers, budgets, plan t
 - find_similar_schools — the demographically-matched peer schools (statewide, same level) for a school. Answers "who is X like?".
 - compare_to_peers — a school's actual metric value (default: chronic absenteeism; any conformed metric, incl. ela_met_standard_pct / math_met_standard_pct for CAASPP academics) vs its peer-group distribution, with `peer_performance_percentile` where HIGHER always means doing better than peers.
 - query_subgroup_metrics — a school's metric DISAGGREGATED BY STUDENT SUBGROUP (race/ethnicity, gender, English learners, students with disabilities, socioeconomically disadvantaged, foster, homeless). Use this for any "by subgroup", equity, or "which groups are behind" question — including ELA/Math outcomes by subgroup; each subgroup carries its `gap_vs_all`.
-- set_workspace_slot — CHANGE WHAT THE WORKSPACE CHARTS SHOW: put a metric/year/subgroup into indicator slot 1, 2, or 3 (always All Students) or into the "subgroup_slice" (one specific subgroup). Use this whenever the user asks to see, show, chart, or compare an indicator, a different year, or a subgroup — change the chart, then give a one-line takeaway instead of reciting the numbers (the chart carries them).
+- set_workspace_slot — CHANGE WHAT THE WORKSPACE CHARTS SHOW: put a metric/year into indicator slot 1, 2, or 3 (always All Students), or a metric/year/subgroup into one of the three subgroup boxes (subgroup_1, subgroup_2, subgroup_3) — fill several to compare subgroups side by side. Use this whenever the user asks to see, show, chart, or compare an indicator, a different year, or a subgroup — change the chart, then give a one-line takeaway instead of reciting the numbers (the chart carries them).
 - spotlight_plan_items — PIN the plan goals/actions most relevant to what the workspace shows, each with a one-line reason. Reference goals by the `goal_index`/`action_index` fields from query_school_plan output — read the plan first, then pin.
 - set_school — switch the whole workspace to a different school (it opens with the default indicators). Use when the user says "let's look at <school>" — for a one-off comparison question, prefer the query tools instead.
 - rename_session — give the session (the entry in the left rail) a short, specific title. Call it ONCE, after the first exchange makes the line of inquiry clear (e.g. "Wilson — EL absenteeism gap"), or when the user asks.
@@ -217,17 +217,19 @@ TOOLS = [
         "name": "set_workspace_slot",
         "description": (
             "Change what one workspace chart shows for the SELECTED school. Slots 1-3 are the "
-            "indicator charts (always All Students); 'subgroup_slice' is the fourth chart and "
-            "takes ONE specific student subgroup. The chart shape never changes — you choose "
-            "the metric, the school year, and (for the slice) the subgroup. Returns the "
+            "indicator charts (always All Students). 'subgroup_1', 'subgroup_2', 'subgroup_3' "
+            "are the three subgroup-slice boxes below them — each takes ONE specific student "
+            "subgroup, so you can fill several to compare subgroups side by side (e.g. put EL "
+            "in subgroup_1, SWD in subgroup_2). The chart shape never changes — you choose the "
+            "metric, the school year, and (for a subgroup box) the subgroup. Returns the "
             "chart-ready data: the school's value vs. its demographic peer band. Use whenever "
             "the user asks to see/show/chart/compare an indicator, year, or subgroup."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "slot": {"enum": [1, 2, 3, "subgroup_slice"],
-                         "description": "which chart to set: 1, 2, 3, or 'subgroup_slice'."},
+                "slot": {"enum": [1, 2, 3, "subgroup_1", "subgroup_2", "subgroup_3"],
+                         "description": "which chart to set: 1/2/3 (indicators) or subgroup_1/2/3."},
                 "metric_id": {"type": "string", "description": (
                     # Dynamic menu (#50) so a newly-loaded metric is offered here with no edit;
                     # slots chart PERCENT metrics only (the fixed 0-100 scale), which the server
@@ -236,7 +238,7 @@ TOOLS = [
                 "school_year": {"type": "string", "description": (
                     "optional, '2023-24' format; omit for the latest available year.")},
                 "student_group_id": {"type": "string", "description": (
-                    "REQUIRED for subgroup_slice (ignored for slots 1-3, which always show "
+                    "REQUIRED for a subgroup box (ignored for slots 1-3, which always show "
                     "'all'): e.g. el, swd, sed, foster, homeless, migrant, race_black, "
                     "race_hispanic, race_white, race_asian, gender_f, gender_m.")},
             },
@@ -385,7 +387,7 @@ class ToolCtx:
     def __init__(self, school_id: str | None = None, workspace: WorkspaceSpec | None = None):
         self.school_id = school_id
         self.spec = workspace                 # becomes a DEFAULT copy on first mutation
-        self.payloads: dict[str, dict] = {}   # "slot_1".."slot_3" / "subgroup_slice" -> chart payload
+        self.payloads: dict[str, dict] = {}   # "slot_1".."slot_3" / "subgroup_1".."subgroup_3" -> chart payload
         self.spotlight: dict | None = None    # resolved spotlight items
         self.school: dict | None = None       # set when set_school ran
         self.session_title: str | None = None  # set when rename_session ran
@@ -500,12 +502,16 @@ def _run_workspace_tool(name: str, ti: dict, db: Session, school_level: str, ctx
         slot = ti.get("slot")
         if isinstance(slot, str) and slot.strip() in ("1", "2", "3"):
             slot = int(slot)
-        if slot not in (1, 2, 3, "subgroup_slice"):
-            return {"error": "slot must be 1, 2, 3, or 'subgroup_slice'"}
+        # A subgroup box is "subgroup_1|2|3" -> a 0-based index into subgroup_slots.
+        sub_idx = None
+        if isinstance(slot, str) and slot.strip() in ("subgroup_1", "subgroup_2", "subgroup_3"):
+            sub_idx = int(slot.strip()[-1]) - 1
+        if slot not in (1, 2, 3) and sub_idx is None:
+            return {"error": "slot must be 1, 2, 3, or subgroup_1 / subgroup_2 / subgroup_3"}
         group = (ti.get("student_group_id") or "all").strip() or "all"
-        if slot == "subgroup_slice":
+        if sub_idx is not None:
             if group == "all":
-                return {"error": ("the subgroup slice shows ONE specific subgroup — pass "
+                return {"error": ("a subgroup box shows ONE specific subgroup — pass "
                                   "student_group_id (e.g. 'el', 'swd', 'sed', 'race_hispanic'); "
                                   "slots 1-3 are the All-Students charts")}
         else:
@@ -516,9 +522,9 @@ def _run_workspace_tool(name: str, ti: dict, db: Session, school_level: str, ctx
         out = fetch_slot(db, ctx.school_id, spec, school_level)
         if "error" not in out:
             ws = ctx.ensure_spec(_level_default(school_level))
-            if slot == "subgroup_slice":
-                ws.subgroup_slice = spec
-                ctx.payloads["subgroup_slice"] = out
+            if sub_idx is not None:
+                ws.subgroup_slots[sub_idx] = spec
+                ctx.payloads[f"subgroup_{sub_idx + 1}"] = out
             else:
                 ws.slots[slot - 1] = spec
                 ctx.payloads[f"slot_{slot}"] = out
