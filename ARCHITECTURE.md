@@ -179,7 +179,7 @@ The frontend is outside this: it's a separate build artifact in the same contain
 module, and it reaches the backend over HTTP like any other client.
 
 **Why not cut by feature?** It was tried, and the code refuses. Giving `likeschools` its own
-peer endpoints means `serving`'s attendance diagnostic and school-detail panel — both of which
+peer endpoints means `serving`'s attendance diagnostic and the workspace panel — both of which
 need `fetch_peer_benchmark` — have to import it. That's a cross-module import, i.e. the rule
 gone on day one, and the alternative (a second copy of the percentile logic) is worse. Cutting
 producer/consumer keeps the table as the only seam. The cost: `likeschools` is not a vertical
@@ -287,6 +287,14 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
   ([`app/marts.py`](backend/app/marts.py)) and the Claude-controlled **school-diagnostic
   workspace** — need-vs-plan, a "schools like you" peer engine, a grounded chat that also drives
   the charts.
+- **Two subsystems added since go-live** (detail in their design notes, not duplicated here):
+  the **agentic workspace + client-side sessions** — chat controls a validated chart spec and a
+  plan spotlight, sessions live in the browser
+  ([design](docs/design/agentic-workspace-and-sessions.md)); and the **trace / eval system** —
+  every chat turn emits a **pseudonymous** trace (salted-hash principal, never email) to GCS,
+  which the `evals` module ingests ([design](docs/design/eval-trace-system.md)). Identity is
+  handled to match: usage is metered against the opaque `sub` only (no email stored), and
+  administrators are resolved live from a Workspace group (`security.is_admin`).
 - **Caveat that remains:** it reads the **public `plan_extraction`** table (batch
   `extract → GCS JSON → load_plan_extractions`), **not** the private `/plans` tenant path this
   repo also specifies; and it runs at `--min-instances 0` (a documented loose end, not the
@@ -358,15 +366,20 @@ Repo: **github.com/PrevaGroup/school-improvement** (branch `main`).
       **last**, which returns a JSON 404 for unmatched `/api` rather than the HTML shell.
 - [x] Multi-stage Dockerfile at the repo root; deploy is `--source .`; `.gcloudignore` +
       `.dockerignore` added.
-- [ ] Vega-Lite chart contract + **deterministic validator** (reject remote `url` data,
-      whitelist fields, cap 5k rows, reject-don't-repair) — its own module, not inside
-      `chat.py`.
+- [x] **Charts are Claude-controlled but not Claude-*generated*** — this superseded the
+      planned Vega-Lite spec contract. The agentic workspace
+      ([design](docs/design/agentic-workspace-and-sessions.md)) fixes the chart **shape** and
+      lets chat set only a validated **spec** (which metric / year / subgroup per slot, plus a
+      subgroup slice and plan spotlight); the server renders from DB rows. Same "validated spec,
+      reject-don't-repair" safety, without any model-authored chart code — so no separate
+      chart-validator module is needed.
 
 ---
 
 ## Cost at MVP scale (rough, USD/mo)
 
-Reflects the go-live target (`min-instances 1`, no edge compute).
+Reflects the go-live *target* (`min-instances 1`, no edge compute). The live service currently
+runs `--min-instances 0` (a documented loose end), so Cloud Run cost trends toward the low end.
 
 | Item | Cost |
 |---|---|
