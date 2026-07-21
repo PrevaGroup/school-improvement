@@ -63,6 +63,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "etl.ca.sip": "sip",
     "app.marts": "serving",
     "app.chat": "serving",
+    "app.evals_view": "serving",  # read-only admin view over the evals `trace` table (SQL, no import)
     "app.traces": "serving",  # trace EMISSION (GCS, no tables) — eval-trace-system.md phase 1
     "likeschools": "likeschools",
     "public_metrics": "public_metrics",
