@@ -142,6 +142,12 @@ def test_run_graders_fails_overall_on_a_gating_failure():
     assert out["scores"]["numeric_provenance"]["verdict"] == "fail"
 
 
+def test_run_graders_surfaces_an_unknown_grader_instead_of_skipping_it():
+    out = run_graders(_b(reply="x"), {"graders": ["not_a_grader", "numeric_provenance"]})
+    assert out["scores"]["not_a_grader"]["verdict"] == "na"
+    assert "unknown grader" in out["scores"]["not_a_grader"]["detail"]
+
+
 def test_run_graders_passes_when_all_pass_and_reports_error_status():
     b = _b(reply="Wilson's rate is 23%.",
            tool_calls=[{"name": "compare_to_peers", "output": {"target_value": 0.23}}])

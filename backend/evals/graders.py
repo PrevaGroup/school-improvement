@@ -330,6 +330,11 @@ def run_graders(bundle: Bundle, expected: dict, *, judge: Callable[[str], str] |
             results.append(usefulness_judge(bundle, params, judge=judge))
         elif name in GRADERS:
             results.append(GRADERS[name](bundle, params))
+        else:
+            # A name that isn't a real grader (a typo, or a tool name pasted in) used to vanish
+            # silently, under-grading the case. Surface it as an `na` result so it's visible in
+            # the breakdown instead of disappearing.
+            results.append(GraderResult(name, "?", "na", detail="unknown grader — not run"))
     if bundle.status in {"error", "max_iters"}:
         verdict = "error" if bundle.status == "error" else "fail"
     elif any(r.verdict == "fail" and (r.tier in GATING or r.name == "usefulness_judge")
