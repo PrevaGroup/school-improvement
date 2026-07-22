@@ -80,8 +80,8 @@ def _recent_rows(db: Session, limit: int, *, source: str = "prod") -> list[dict]
     if source and source != "all":
         where, params["source"] = "WHERE source = :source ", source
     rows = db.execute(
-        text("SELECT trace_id, ts, status, source, latency_ms, model, question, totals, versions "
-             f"FROM trace {where}ORDER BY ts DESC LIMIT :n"),
+        text("SELECT trace_id, session_id, ts, status, source, latency_ms, model, question, "
+             f"totals, versions FROM trace {where}ORDER BY ts DESC LIMIT :n"),
         params,
     ).mappings().all()
     return [dict(r) for r in rows]
@@ -119,6 +119,7 @@ def evals_traces(
         t = r.get("totals") or {}
         out.append({
             "trace_id": r["trace_id"],
+            "session_id": r.get("session_id"),
             "ts": r["ts"].isoformat() if r.get("ts") else None,
             "question": r.get("question"),
             "status": r.get("status"),

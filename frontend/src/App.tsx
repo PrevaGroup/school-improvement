@@ -3,15 +3,17 @@ import { api } from "./api";
 import { fmtNum, fmtPct } from "./format";
 import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
-import { EvalDashboard } from "./components/EvalDashboard";
+import { EvalPanel, type Main } from "./components/EvalDashboard";
 import { applyChatWorkspace, defaultSpecForLevel } from "./workspace";
+import { groupBySession } from "./traceSessions";
 import {
   byRecency, createSession, forkSession, loadStore, reconcileSchoolChange, relTime, saveStore,
   titleFor, upsert,
 } from "./sessions";
 import type { Session } from "./sessions";
 import type {
-  ChatTurn, ChatWorkspace, District, DiagnosticSchool, Level, Peer, WorkspaceData, WorkspaceSpec,
+  ChatTurn, ChatWorkspace, District, DiagnosticSchool, EvalRunRow, EvalTraceRow, Level, Peer,
+  WorkspaceData, WorkspaceSpec,
 } from "./types";
 
 const DEMO_DISTRICT = "0622500"; // Long Beach Unified (NCES LEAID) — the demo default
@@ -56,9 +58,12 @@ export default function App() {
   // session is the source of truth the rest of this state is a view of (design § Sessions).
   const [sessions, setSessions] = useState<Session[]>(BOOT.sessions);
   const [activeId, setActiveId] = useState<string | null>(BOOT.active_id);
-  // Admin-only eval dashboard: is_admin gates the entry point; `view` swaps it in.
+  // The left rail is one persistent navigator: `main` chooses what fills the panel to its right —
+  // the workspace, or (admins only) an eval view. `isAdmin` gates the eval sections + their data.
   const [isAdmin, setIsAdmin] = useState(false);
-  const [view, setView] = useState<"workspace" | "evals">("workspace");
+  const [main, setMain] = useState<Main>({ kind: "workspace" });
+  const [adminTraces, setAdminTraces] = useState<EvalTraceRow[]>([]);
+  const [adminRuns, setAdminRuns] = useState<EvalRunRow[]>([]);
 
   // The Claude-controlled workspace: `wspec` is what should be on screen (the active
   // session's spec), `ws` is the server-built data for it.
@@ -114,6 +119,16 @@ export default function App() {
       .then((d) => { wsDefaultsRef.current = d; })
       .catch(() => {}); // client fallback covers it
   }, []);
+
+  // Admin rail data: the trace feed (grouped into sessions client-side) and the eval runs.
+  // Fetched once admin is confirmed; passed to EvalPanel so its detail views need no refetch.
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get<{ traces: EvalTraceRow[] }>("/evals/traces?limit=200")
+      .then((d) => setAdminTraces(d.traces || [])).catch(() => {});
+    api.get<{ runs: EvalRunRow[] }>("/evals/runs")
+      .then((d) => setAdminRuns(d.runs || [])).catch(() => {});
+  }, [isAdmin]);
 
   // Every selection resolves to a scoped backend query — no "fetch everything, filter
   // client-side". See ../CLAUDE.md: the browser never receives data outside the current scope.
@@ -359,45 +374,89 @@ export default function App() {
     setWs((prev) => applyChatWorkspace(prev, w));
   }
 
-  if (view === "evals" && isAdmin) {
-    return <EvalDashboard onBack={() => setView("workspace")} />;
-  }
+  const traceGroups = groupBySession(adminTraces);
 
   return (
-    <div className="cols">
+    <div className={"cols" + (main.kind !== "workspace" ? " panel" : "")}>
       <div className="rail">
-        <button className="new-sess" onClick={newSession} disabled={!current}>
+        <button
+          className="new-sess"
+          onClick={() => { setMain({ kind: "workspace" }); newSession(); }}
+          disabled={!current}
+        >
           + New session
         </button>
-        {isAdmin ? (
-          <button className="rail-admin" onClick={() => setView("evals")}>◧ Evals</button>
-        ) : null}
-        <div className="rail-list">
-          {byRecency(sessions).map((s) => (
-            <div
-              key={s.id}
-              className={"sess" + (s.id === activeId ? " on" : "")}
-              onClick={() => activateSession(s)}
-              title={s.title}
-            >
-              <button
-                className="sess-del"
-                title="Delete this session"
-                onClick={(e) => {
-                  e.stopPropagation(); // don't also activate the row we're deleting
-                  deleteSession(s.id);
-                }}
+        <div className="rail-scroll">
+          <div className="rail-list">
+            {byRecency(sessions).map((s) => (
+              <div
+                key={s.id}
+                className={"sess" + (s.id === activeId && main.kind === "workspace" ? " on" : "")}
+                onClick={() => { setMain({ kind: "workspace" }); activateSession(s); }}
+                title={s.title}
               >
-                ×
-              </button>
-              <div className="sess-title">{s.title}</div>
-              <div className="sess-meta">
-                {s.school_name} · {relTime(s.updated_at)}
+                <button
+                  className="sess-del"
+                  title="Delete this session"
+                  onClick={(e) => {
+                    e.stopPropagation(); // don't also activate the row we're deleting
+                    deleteSession(s.id);
+                  }}
+                >
+                  ×
+                </button>
+                <div className="sess-title">{s.title}</div>
+                <div className="sess-meta">
+                  {s.school_name} · {relTime(s.updated_at)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {isAdmin ? (
+            <div className="rail-eval">
+              <div className="rail-div" />
+              <button className={"rail-h" + (main.kind === "traces" ? " on" : "")}
+                      onClick={() => setMain({ kind: "traces" })}>traces</button>
+              <div className="rail-sublist">
+                {traceGroups.map((g) => (
+                  <div key={g.session} title={g.label || g.session}
+                       className={"rail-sub" + (main.kind === "traces" && main.session === g.session ? " on" : "")}
+                       onClick={() => setMain({ kind: "traces", session: g.session })}>
+                    <div className="rail-sub-t">{g.label || g.session}</div>
+                    <div className="rail-sub-m">{g.count} turn{g.count === 1 ? "" : "s"}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rail-div" />
+              <button className={"rail-h" + (main.kind === "cases" ? " on" : "")}
+                      onClick={() => setMain({ kind: "cases" })}>evals</button>
+
+              <div className="rail-div" />
+              <button className={"rail-h" + (main.kind === "results" ? " on" : "")}
+                      onClick={() => setMain({ kind: "results" })}>results</button>
+              <div className="rail-sublist">
+                {adminRuns.map((r) => (
+                  <div key={r.eval_run_id}
+                       className={"rail-sub" + (main.kind === "results" && main.runId === r.eval_run_id ? " on" : "")}
+                       onClick={() => setMain({ kind: "results", runId: r.eval_run_id })}>
+                    <div className="rail-sub-t">
+                      {(r.set_name || "run")} · {r.pass_rate == null ? "—" : (r.pass_rate * 100).toFixed(0) + "%"}
+                    </div>
+                    <div className="rail-sub-m">{r.ts ? relTime(new Date(r.ts).getTime()) : "—"}</div>
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
+          ) : null}
         </div>
       </div>
+
+      {main.kind !== "workspace" ? (
+        <EvalPanel main={main} traces={adminTraces} runs={adminRuns} onSelect={setMain} />
+      ) : (
+      <>
       <div className="diag">
         <div className="school-hd">
           <select
@@ -478,6 +537,8 @@ export default function App() {
           onMessages={onMessages}
         />
       </div>
+      </>
+      )}
     </div>
   );
 }
