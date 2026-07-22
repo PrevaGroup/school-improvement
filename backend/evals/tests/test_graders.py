@@ -59,6 +59,35 @@ def test_numeric_provenance_ignores_years_and_small_counts():
     assert numeric_provenance(b, {}).verdict == "na"
 
 
+def test_numeric_provenance_grounds_a_rounded_percentage():
+    b = _b(reply="About 75% are socioeconomically disadvantaged.",
+           tool_calls=[{"name": "x", "output": {"pct_sed": 75.8}}])
+    assert numeric_provenance(b, {}).verdict == "pass"          # 75 vs 75.8 is a rounding
+
+
+def test_numeric_provenance_grounds_an_abbreviated_dollar_amount():
+    b = _b(reply="The plan funds a counselor at $187.8K.",
+           tool_calls=[{"name": "x", "output": {"budgeted_amount": 187176}}])
+    assert numeric_provenance(b, {}).verdict == "pass"          # 187.8K -> 187800 ~ 187176
+
+
+def test_numeric_provenance_grounds_sums_of_budgets():
+    tc = [{"name": "x", "output": {"actions": [
+        {"budgeted_amount": 187176}, {"budgeted_amount": 99774},
+        {"budgeted_amount": 16242}, {"budgeted_amount": 16242}]}}]
+    # $32,484 = the two aides; $319,434 = the grand total — both derived, both grounded now.
+    b = _b(reply="Two aides total $32,484; all funded actions come to $319,434.", tool_calls=tc)
+    assert numeric_provenance(b, {}).verdict == "pass"
+
+
+def test_numeric_provenance_detail_names_the_nearest_value():
+    b = _b(reply="The plan budgets $250,000 for this.",
+           tool_calls=[{"name": "x", "output": {"budgeted_amount": 187176}}])
+    r = numeric_provenance(b, {})
+    assert r.verdict == "fail"
+    assert "250000" in r.detail and "nearest tool value 187176" in r.detail
+
+
 def test_plan_status_compliance_catches_the_defamation_pattern():
     tc = [{"name": "query_school_plan", "output": {"plan_status": "not_on_file"}}]
     assert plan_status_compliance(_b(reply="Jordan has no plan.", tool_calls=tc), {}).verdict == "fail"
