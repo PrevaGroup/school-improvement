@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { fmtNum, fmtCostUSD } from "../format";
+import { fmtNum, fmtCostUSD, fmtDateTime } from "../format";
 import { NO_SESSION } from "../traceSessions";
 import type {
-  EvalSummary, EvalTraceRow, EvalCaseRow, EvalRunRow, EvalResultRow,
+  EvalSummary, EvalTraceRow, EvalCaseRow, EvalRunRow, EvalResultRow, EvalTraceDetail, EvalTraceEvent,
+  EvalGraderCatalogEntry, EvalGraderScore, EvalGraderStat,
 } from "../types";
 
 // The admin eval views, rendered in the main panel. The left rail (App.tsx) is the navigator —
@@ -50,6 +51,12 @@ function ago(iso: string | null): string {
   return `${Math.round(s / 86400)}d`;
 }
 
+// The set a run executed. "golden" is the design's name for the fast PR-gating subset; we show
+// it as "PR Gate" (clearer), and map legacy golden runs to the same label.
+export function setLabel(s: string | null | undefined): string {
+  return s === "golden" || s === "pr-gate" ? "PR Gate" : (s || "run");
+}
+
 function PanelHead({ title, sub }: { title: string; sub?: string }) {
   return (
     <div className="ev-phead">
@@ -90,7 +97,9 @@ function Breakdown({ title, counts, statusColor }:
   );
 }
 
-function TracesTable({ rows }: { rows: EvalTraceRow[] }) {
+function TracesTable({ rows, selected, onSelect }: {
+  rows: EvalTraceRow[]; selected?: string | null; onSelect?: (id: string) => void;
+}) {
   return (
     <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
       <table className="tbl ev-tbl">
@@ -102,7 +111,10 @@ function TracesTable({ rows }: { rows: EvalTraceRow[] }) {
         </thead>
         <tbody>
           {rows.map((t) => (
-            <tr key={t.trace_id}>
+            <tr key={t.trace_id}
+                className={selected === t.trace_id ? "sel" : ""}
+                style={onSelect ? { cursor: "pointer" } : undefined}
+                onClick={onSelect ? () => onSelect(t.trace_id) : undefined}>
               <td className="mono ev-when">{ago(t.ts)}</td>
               <td className="ev-q">{t.question || <span className="muted">—</span>}</td>
               <td><span className={"ev-pill " + statusClass(t.status)}>{t.status || "—"}</span></td>
@@ -119,11 +131,72 @@ function TracesTable({ rows }: { rows: EvalTraceRow[] }) {
   );
 }
 
+// One turn, expanded: the question, each tool call with its full output, and the final answer —
+// fetched from the GCS object via GET /evals/traces/{id}. Degrades to the header if it aged out.
+function TraceDetail({ traceId }: { traceId: string }) {
+  const [d, setD] = useState<EvalTraceDetail | null>(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    setD(null); setErr(false);
+    api.get<{ trace?: EvalTraceDetail; available: boolean }>(`/evals/traces/${encodeURIComponent(traceId)}`)
+      .then((r) => (r.available && r.trace ? setD(r.trace) : setErr(true)))
+      .catch(() => setErr(true));
+  }, [traceId]);
+
+  if (err) return <div className="card muted">Couldn’t load this trace — the raw object may have aged out of the 90-day window.</div>;
+  if (!d) return <Loading />;
+  const tot = d.totals || {};
+  return (
+    <div className="card ev-detail">
+      <div className="ev-detail-meta mono">
+        {d.model || "—"} · <span className={"ev-pill " + statusClass(d.status)}>{d.status || "—"}</span>
+        {" · "}{d.level || "—"} · in {fmtNum(tot.input_tokens ?? 0)} / out {fmtNum(tot.output_tokens ?? 0)}
+        {" · "}{fmtCostUSD(tot.cost_usd_est ?? 0)}
+        {d.versions?.git_sha ? " · git " + d.versions.git_sha.slice(0, 7) : ""}
+      </div>
+      {d.events.length === 0
+        ? <div className="muted">No event detail — the raw trace object is unavailable.</div>
+        : d.events.map((e, i) => <EventRow key={i} e={e} />)}
+    </div>
+  );
+}
+
+function EventRow({ e }: { e: EvalTraceEvent }) {
+  if (e.type === "turn_start") {
+    return <div className="ev-ev ev-ev-q"><span className="ev-ev-lab">Q</span><span className="ev-ev-body">{e.question}</span></div>;
+  }
+  if (e.type === "model_call") {
+    return (
+      <div className="ev-ev ev-ev-model mono">
+        model call #{e.iteration} → {e.stop} · {e.usage?.output_tokens ?? 0} out · {e.latency_ms ?? "—"}ms
+      </div>
+    );
+  }
+  if (e.type === "tool_call") {
+    return (
+      <div className="ev-ev ev-ev-tool">
+        <div className="ev-ev-th mono">
+          <span className="ev-ev-lab">↳</span>
+          <b>{e.name}</b>({JSON.stringify(e.input)})
+          {e.error ? <span className="ev-pill ev-err" style={{ marginLeft: 6 }}>error</span> : null}
+        </div>
+        <pre className="ev-ev-out">{JSON.stringify(e.output, null, 2)}</pre>
+      </div>
+    );
+  }
+  if (e.type === "turn_end") {
+    return <div className="ev-ev ev-ev-a"><span className="ev-ev-lab">A</span><span className="ev-ev-body">{e.reply}</span></div>;
+  }
+  return null;
+}
+
 // --- traces overview (the capture stage) ---------------------------------------------------- //
 
 function TracesOverview({ traces }: { traces: EvalTraceRow[] }) {
   const [summary, setSummary] = useState<EvalSummary | null>(null);
   const [err, setErr] = useState(false);
+  const [sel, setSel] = useState<string | null>(null);
 
   useEffect(() => {
     api.get<EvalSummary>("/evals/summary").then(setSummary).catch(() => setErr(true));
@@ -162,12 +235,14 @@ function TracesOverview({ traces }: { traces: EvalTraceRow[] }) {
           </div>
           <div className="card">
             <h3 className="h3-row"><span>Recent traces</span></h3>
-            <TracesTable rows={traces.slice(0, 50)} />
+            <TracesTable rows={traces.slice(0, 50)} selected={sel}
+                         onSelect={(id) => setSel(sel === id ? null : id)} />
             <div className="muted ev-foot">
-              Real use only (source=prod). Pseudonymous — no identity is stored or shown. Pick a
-              session in the rail to see just its turns.
+              Real use only (source=prod). Pseudonymous — no identity is stored or shown. Click a
+              row to read the full turn; pick a session in the rail to see just its turns.
             </div>
           </div>
+          {sel ? <TraceDetail traceId={sel} /> : null}
         </>
       )}
     </>
@@ -175,33 +250,71 @@ function TracesOverview({ traces }: { traces: EvalTraceRow[] }) {
 }
 
 function TracesForSession({ session, traces }: { session: string; traces: EvalTraceRow[] }) {
+  const [sel, setSel] = useState<string | null>(null);
   const rows = traces.filter((t) => (t.session_id || NO_SESSION) === session);
-  const label = rows.find((t) => t.question)?.question || session;
+  const latest = rows.reduce<string | null>((m, t) => (t.ts && (!m || t.ts > m) ? t.ts : m), null);
   return (
     <>
-      <PanelHead title="Session" sub={session} />
+      <PanelHead title={fmtDateTime(latest)}
+                 sub={`${rows.length} turn${rows.length === 1 ? "" : "s"} · ${session}`} />
       <div className="card">
-        <h3 className="h3-row"><span>{label}</span></h3>
-        <TracesTable rows={rows} />
-        <div className="muted ev-foot">{rows.length} turn{rows.length === 1 ? "" : "s"} in this session.</div>
+        <TracesTable rows={rows} selected={sel} onSelect={(id) => setSel(sel === id ? null : id)} />
       </div>
+      {sel ? <TraceDetail traceId={sel} /> : null}
     </>
   );
 }
 
-// --- evals (curated + mined cases) ---------------------------------------------------------- //
+// --- evals (curated + mined cases, grouped by status) --------------------------------------- //
+
+const CASE_STATUS_ORDER = ["active", "candidate", "retired"];
+const CASE_STATUS_LABEL: Record<string, string> = {
+  active: "Active · the PR Gate set",
+  candidate: "Candidate · mined, awaiting review",
+  retired: "Retired",
+};
+
+function CasesTable({ rows }: { rows: EvalCaseRow[] }) {
+  return (
+    <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
+      <table className="tbl ev-tbl">
+        <thead>
+          <tr><th>Question</th><th>Level</th><th>Source</th><th>Graders</th><th>Tags</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((c) => (
+            <tr key={c.eval_case_id}>
+              <td className="ev-q">{c.question || <span className="muted">—</span>}</td>
+              <td className="mono d">{c.level || "—"}</td>
+              <td className="mono d">{c.source?.startsWith("mined") ? "mined" : c.source || "—"}</td>
+              <td className="mono d">{c.graders.length ? c.graders.join(", ") : "—"}</td>
+              <td className="mono d">{c.tags.length ? c.tags.join(" ") : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function CasesPanel() {
-  const [data, setData] = useState<{ cases: EvalCaseRow[]; by_status?: Record<string, number>; available: boolean } | null>(null);
+  const [data, setData] = useState<{ cases: EvalCaseRow[]; available: boolean } | null>(null);
   const [err, setErr] = useState(false);
 
   useEffect(() => {
-    api.get<{ cases: EvalCaseRow[]; by_status?: Record<string, number>; available: boolean }>("/evals/cases")
+    api.get<{ cases: EvalCaseRow[]; available: boolean }>("/evals/cases")
       .then(setData).catch(() => setErr(true));
   }, []);
 
   if (err) return <LoadError />;
   if (data === null) return <Loading />;
+  // Group by status, preserving the endpoint's order within each group.
+  const groups: Record<string, EvalCaseRow[]> = {};
+  for (const c of data.cases) (groups[c.status || "other"] ||= []).push(c);
+  const statuses = [
+    ...CASE_STATUS_ORDER.filter((s) => groups[s]),
+    ...Object.keys(groups).filter((s) => !CASE_STATUS_ORDER.includes(s)),
+  ];
   return (
     <>
       <PanelHead title="Evals" sub="the questions the assistant must keep getting right" />
@@ -215,39 +328,81 @@ function CasesPanel() {
           <p className="muted mono ev-cmd">cd backend &amp;&amp; python -m evals.load_seed_cases</p>
         </div>
       ) : (
-        <>
-          <div className="ev-breakdowns">
-            <Breakdown title="cases by status" counts={data.by_status} statusColor />
+        statuses.map((s) => (
+          <div className="card" key={s}>
+            <h3 className="h3-row">
+              <span>{CASE_STATUS_LABEL[s] || s}</span>
+              <span className="muted">{groups[s].length}</span>
+            </h3>
+            <CasesTable rows={groups[s]} />
+            {s === "candidate" ? (
+              <div className="muted ev-foot">
+                Mined from real failures — a human reviews, confirms graders, and promotes to
+                <span className="mono"> active</span> before these gate anything.
+              </div>
+            ) : null}
           </div>
-          <div className="card">
-            <h3 className="h3-row"><span>Eval cases</span></h3>
-            <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
-              <table className="tbl ev-tbl">
-                <thead>
-                  <tr><th>Question</th><th>Level</th><th>Status</th><th>Source</th><th>Graders</th><th>Tags</th></tr>
-                </thead>
-                <tbody>
-                  {data.cases.map((c) => (
-                    <tr key={c.eval_case_id}>
-                      <td className="ev-q">{c.question || <span className="muted">—</span>}</td>
-                      <td className="mono d">{c.level || "—"}</td>
-                      <td><span className={"ev-pill " + statusClass(c.status)}>{c.status || "—"}</span></td>
-                      <td className="mono d">{c.source?.startsWith("mined") ? "mined" : c.source || "—"}</td>
-                      <td className="mono d">{c.graders.length ? c.graders.join(", ") : "—"}</td>
-                      <td className="mono d">{c.tags.length ? c.tags.join(" ") : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="muted ev-foot">
-              Mined cases land as <span className="mono">candidate</span> — a human reviews and
-              promotes to <span className="mono">active</span> before they gate anything.
-            </div>
-          </div>
-        </>
+        ))
       )}
     </>
+  );
+}
+
+// --- grader breakdown + reference ----------------------------------------------------------- //
+
+// Every grader that ran on one case, with its verdict, score, and own explanation — the "why".
+function GraderBreakdown({ scores }: { scores: Record<string, EvalGraderScore> }) {
+  const rows = Object.values(scores || {});
+  if (!rows.length) return null;
+  return (
+    <div className="card">
+      <h3 className="h3-row"><span>Grader breakdown</span></h3>
+      <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
+        <table className="tbl ev-tbl">
+          <thead>
+            <tr><th>Tier</th><th>Grader</th><th>Verdict</th><th className="r">Score</th><th>Detail</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => (
+              <tr key={s.name}>
+                <td className="mono d">{s.tier || "—"}</td>
+                <td className="mono">{s.name || "—"}</td>
+                <td><span className={"ev-pill " + statusClass(s.verdict || null)}>{s.verdict || "—"}</span></td>
+                <td className="r mono">{s.score == null ? "—" : s.score}</td>
+                <td className="ev-q muted">{s.detail || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// What each grader checks (GET /evals/graders — kept honest to graders.py by a test).
+function GradersReference() {
+  const [cat, setCat] = useState<EvalGraderCatalogEntry[] | null>(null);
+  const [tiers, setTiers] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api.get<{ graders: EvalGraderCatalogEntry[]; tiers: Record<string, string> }>("/evals/graders")
+      .then((d) => { setCat(d.graders || []); setTiers(d.tiers || {}); }).catch(() => setCat([]));
+  }, []);
+  if (!cat || !cat.length) return null;
+  return (
+    <details className="card ev-ref">
+      <summary>What these graders check</summary>
+      <table className="tbl ev-tbl">
+        <tbody>
+          {cat.map((g) => (
+            <tr key={g.name}>
+              <td className="mono d">{g.tier} · {tiers[g.tier] || ""}</td>
+              <td className="mono">{g.name}</td>
+              <td className="ev-q muted">{g.summary}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 }
 
@@ -257,12 +412,16 @@ function ResultsPanel({ runId, runs, onSelect }: {
   runId?: string; runs: EvalRunRow[]; onSelect: (m: Main) => void;
 }) {
   const [results, setResults] = useState<EvalResultRow[] | null>(null);
+  const [stats, setStats] = useState<EvalGraderStat[]>([]);
+  const [sel, setSel] = useState<EvalResultRow | null>(null);
 
   useEffect(() => {
+    setSel(null); setStats([]);
     if (!runId) { setResults(null); return; }
     setResults(null);
-    api.get<{ results: EvalResultRow[] }>(`/evals/runs/${encodeURIComponent(runId)}/results`)
-      .then((d) => setResults(d.results || [])).catch(() => setResults([]));
+    api.get<{ results: EvalResultRow[]; grader_stats?: EvalGraderStat[] }>(`/evals/runs/${encodeURIComponent(runId)}/results`)
+      .then((d) => { setResults(d.results || []); setStats(d.grader_stats || []); })
+      .catch(() => setResults([]));
   }, [runId]);
 
   if (runs.length === 0) {
@@ -276,7 +435,7 @@ function ResultsPanel({ runId, runs, onSelect }: {
             one and its pass rate, cost, and per-case results appear here.
           </p>
           <p className="muted mono ev-cmd">
-            cd backend &amp;&amp; python -m evals.run_evals --set golden --target-url &lt;url&gt;
+            cd backend &amp;&amp; python -m evals.run_evals --set pr-gate --target-url &lt;url&gt;
           </p>
         </div>
       </>
@@ -302,7 +461,7 @@ function ResultsPanel({ runId, runs, onSelect }: {
                     style={{ cursor: "pointer" }}
                     onClick={() => onSelect({ kind: "results", runId: runId === r.eval_run_id ? undefined : r.eval_run_id })}>
                   <td className="mono ev-when">{ago(r.ts)}</td>
-                  <td className="mono d">{r.set_name || "—"}</td>
+                  <td className="mono d">{setLabel(r.set_name)}</td>
                   <td className="mono d">{r.target || "—"}</td>
                   <td className="mono d">{r.model || "—"}</td>
                   <td className="r mono">{pct(r.pass_rate)}</td>
@@ -316,32 +475,62 @@ function ResultsPanel({ runId, runs, onSelect }: {
       </div>
 
       {runId ? (
-        <div className="card">
-          <h3 className="h3-row"><span>Results · failures first</span></h3>
-          {results === null ? <Loading /> : (
-            <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
-              <table className="tbl ev-tbl">
-                <thead>
-                  <tr><th>Verdict</th><th>Question</th><th>Failed graders</th><th>Judge</th></tr>
-                </thead>
-                <tbody>
-                  {results.map((r) => {
-                    const failed = Object.values(r.scores || {})
-                      .filter((s) => s.verdict === "fail").map((s) => s.name).filter(Boolean);
-                    return (
-                      <tr key={r.eval_case_id}>
-                        <td><span className={"ev-pill " + statusClass(r.verdict)}>{r.verdict || "—"}</span></td>
-                        <td className="ev-q">{r.question || <span className="muted">—</span>}</td>
-                        <td className="mono d">{failed.length ? failed.join(", ") : "—"}</td>
-                        <td className="ev-q muted">{r.judge_rationale || "—"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        <>
+          {stats.length ? (
+            <div className="card">
+              <h3 className="h3-row"><span>Grader failures</span><span className="muted">this run</span></h3>
+              <div className="ev-gstats">
+                {stats.map((g) => (
+                  <span key={g.grader} className={"ev-gstat" + (g.failed ? " bad" : "")}>
+                    <span className="mono d">{g.tier}</span> {g.grader}
+                    <b> {g.failed}/{g.ran}</b>
+                  </span>
+                ))}
+              </div>
+              <div className="muted ev-foot">How many cases each grader failed — the ranked fix backlog.</div>
             </div>
-          )}
-        </div>
+          ) : null}
+
+          <div className="card">
+            <h3 className="h3-row"><span>Results · failures first</span></h3>
+            {results === null ? <Loading /> : (
+              <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
+                <table className="tbl ev-tbl">
+                  <thead>
+                    <tr><th>Verdict</th><th>Question</th><th>Failed graders</th><th>Judge</th></tr>
+                  </thead>
+                  <tbody>
+                    {results.map((r) => {
+                      const failed = Object.values(r.scores || {})
+                        .filter((s) => s.verdict === "fail").map((s) => s.name).filter(Boolean);
+                      const on = sel?.eval_case_id === r.eval_case_id;
+                      return (
+                        <tr key={r.eval_case_id} className={on ? "sel" : ""} style={{ cursor: "pointer" }}
+                            onClick={() => setSel(on ? null : r)}>
+                          <td><span className={"ev-pill " + statusClass(r.verdict)}>{r.verdict || "—"}</span></td>
+                          <td className="ev-q">{r.question || <span className="muted">—</span>}</td>
+                          <td className="mono d">{failed.length ? failed.join(", ") : "—"}</td>
+                          <td className="ev-q muted">{r.judge_rationale || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="muted ev-foot">Click a row for the grader breakdown and the full turn —
+              the tool outputs make a verdict like <span className="mono">numeric_provenance</span> obvious.</div>
+          </div>
+
+          {sel ? (
+            <>
+              <GraderBreakdown scores={sel.scores} />
+              {sel.trace_id ? <TraceDetail traceId={sel.trace_id} /> : null}
+            </>
+          ) : null}
+
+          <GradersReference />
+        </>
       ) : null}
     </>
   );

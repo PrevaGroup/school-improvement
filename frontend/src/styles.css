@@ -197,6 +197,25 @@
 .ev-mut { color: var(--muted); background: var(--bg); border: 1px solid var(--line); }
 .ev-bdk.ev-ok, .ev-bdk.ev-err, .ev-bdk.ev-warn { color: var(--ink); background: none; padding: 0; }
 .ev-tbl tr.sel td { background: var(--bg); }
+/* Trace drill-in: question → tool calls (+ full output) → answer. */
+.ev-detail-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.ev-ev { padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.55; display: flex; gap: 8px; }
+.ev-ev-lab { flex: 0 0 auto; min-width: 1.1em; font-size: 11px; font-weight: 700; color: var(--muted); }
+.ev-ev-body { white-space: pre-wrap; min-width: 0; }
+.ev-ev-model { display: block; font-size: 11px; color: var(--muted); padding: 5px 0; }
+.ev-ev-tool { display: block; }
+.ev-ev-th { font-size: 12px; margin-bottom: 6px; }
+.ev-ev-out { margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; line-height: 1.4; max-height: 280px; overflow: auto; white-space: pre; }
+/* Per-grader failure chips (the fix backlog). */
+.ev-gstats { display: flex; flex-wrap: wrap; gap: 6px; }
+.ev-gstat { font-size: 11.5px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--bg); }
+.ev-gstat b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.ev-gstat.bad { border-color: var(--red); }
+.ev-gstat.bad b { color: var(--red); }
+/* Grader reference (collapsible). */
+.ev-ref > summary { cursor: pointer; font-weight: 700; font-size: 13px; color: var(--muted); }
+.ev-ref > summary:hover { color: var(--ink); }
+.ev-ref[open] > summary { margin-bottom: 8px; }
 .ev-foot { font-size: 11px; margin-top: 10px; line-height: 1.5; }
 .ev-emptycard { padding: 22px 20px; }
 .ev-emptycard h3 { margin: 0 0 6px; }

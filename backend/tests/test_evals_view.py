@@ -6,7 +6,10 @@ the output.
 """
 import datetime as _dt
 
-from app.evals_view import shape_case, shape_result, shape_run, summarize_traces
+from app.evals_view import (
+    _shape_event, grader_stats, shape_case, shape_result, shape_run, shape_trace_detail,
+    summarize_traces,
+)
 
 _TS = _dt.datetime(2026, 7, 21, tzinfo=_dt.timezone.utc)
 
@@ -92,3 +95,43 @@ def test_shape_result_keeps_verdict_scores_and_trace():
                       "judge_rationale": None, "trace_id": "t1"})
     assert s["verdict"] == "fail" and s["trace_id"] == "t1"
     assert "numeric_provenance" in s["scores"]
+
+
+# --- trace detail (envelope + event stream) ----------------------------------------------- #
+
+
+def test_shape_event_trims_each_type_to_its_useful_fields():
+    assert _shape_event({"type": "turn_start", "question": "q?", "span_id": "x"}) == {
+        "type": "turn_start", "question": "q?", "prior_messages": None}
+    tc = _shape_event({"type": "tool_call", "name": "compare_to_peers", "input": {"a": 1},
+                       "output": {"v": 2}, "error": None, "latency_ms": 5, "span_id": "x"})
+    assert tc["name"] == "compare_to_peers" and tc["output"] == {"v": 2} and "span_id" not in tc
+    assert _shape_event({"type": "turn_end", "reply": "hi"})["reply"] == "hi"
+
+
+def test_grader_stats_tallies_ran_and_failed_ranked_by_failures():
+    results = [
+        {"scores": {"numeric_provenance": {"tier": "T1", "verdict": "fail"},
+                    "expected_tools": {"tier": "T3", "verdict": "pass"}}},
+        {"scores": {"numeric_provenance": {"tier": "T1", "verdict": "pass"},
+                    "expected_tools": {"tier": "T3", "verdict": "pass"}}},
+    ]
+    st = grader_stats(results)
+    assert st[0]["grader"] == "numeric_provenance"          # most-failed first
+    np = next(s for s in st if s["grader"] == "numeric_provenance")
+    assert (np["ran"], np["failed"], np["tier"]) == (2, 1, "T1")
+    et = next(s for s in st if s["grader"] == "expected_tools")
+    assert (et["ran"], et["failed"]) == (2, 0)
+
+
+def test_shape_trace_detail_pulls_level_and_shapes_events():
+    row = {"trace_id": "t1", "session_id": "s", "ts": _TS, "status": "ok", "source": "prod",
+           "model": "claude-haiku-4-5", "question": "q?", "ui": {"level": "High"},
+           "versions": {"git_sha": "abc"}, "totals": {"cost_usd_est": 0.01}, "gcs_uri": "gs://x"}
+    events = [{"type": "turn_start", "question": "q?"},
+              {"type": "tool_call", "name": "t", "input": {}, "output": {}, "error": None},
+              {"type": "turn_end", "reply": "answer"}]
+    d = shape_trace_detail(row, events)
+    assert d["level"] == "High" and d["ts"].startswith("2026-07-21")
+    assert [e["type"] for e in d["events"]] == ["turn_start", "tool_call", "turn_end"]
+    assert d["events"][2]["reply"] == "answer"
