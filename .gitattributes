@@ -1,2 +1,4 @@
 # Normalize line endings: LF in the repo, native in the working tree.
 * text=auto
+# Shell scripts must be LF everywhere (a stray CR breaks `source`/bash).
+*.sh text eol=lf
