@@ -157,14 +157,48 @@ function TraceDetail({ traceId }: { traceId: string }) {
       </div>
       {d.events.length === 0
         ? <div className="muted">No event detail — the raw trace object is unavailable.</div>
-        : d.events.map((e, i) => <EventRow key={i} e={e} />)}
+        : d.events.map((e, i) => <EventRow key={i} e={e} meta={{ level: d.level, versions: d.versions }} />)}
     </div>
   );
 }
 
-function EventRow({ e }: { e: EvalTraceEvent }) {
+// Hover fly-over on the question: what else the model received with this prompt. The scaffolding
+// structure is fixed per turn; the hashes/level are this turn's, from the trace.
+function QInfo({ level, versions }: { level: string | null; versions: Record<string, string> }) {
+  const h = (k: string) => (versions?.[k] ? versions[k].slice(0, 8) : "—");
+  return (
+    <span className="qinfo">
+      <span className="qinfo-tag">ⓘ context</span>
+      <span className="qinfo-pop">
+        <b>Also sent to the model with this question</b>
+        <ul>
+          <li><b>System prompt</b> — role + <span className="mono">{level || "?"}</span>-level lock; a
+            one-line guide to each tool; “ground every claim in tool output”; be-concise /
+            don’t-regurgitate-the-screen; and the DATA HONESTY rules (a not-on-file plan ≠ “no plan”;
+            a missing value is UNKNOWN, never 0).</li>
+          <li><b>Live screen state</b> — the workspace slots currently visible, so “don’t regurgitate”
+            is grounded in what’s actually shown.</li>
+          <li><b>Tool catalog</b> — all 9 tool definitions (names + input schemas).</li>
+          <li><b>Conversation</b> — this session’s prior turns (their question + answer text, not
+            their tool outputs).</li>
+        </ul>
+        <span className="qinfo-hashes mono">prompt {h("prompt_hash")} · tools {h("tool_catalog_hash")}</span>
+      </span>
+    </span>
+  );
+}
+
+function EventRow({ e, meta }: {
+  e: EvalTraceEvent;
+  meta?: { level: string | null; versions: Record<string, string> };
+}) {
   if (e.type === "turn_start") {
-    return <div className="ev-ev ev-ev-q"><span className="ev-ev-lab">Q</span><span className="ev-ev-body">{e.question}</span></div>;
+    return (
+      <div className="ev-ev ev-ev-q">
+        <span className="ev-ev-lab">Q</span>
+        <span className="ev-ev-body">{e.question}{meta ? <QInfo level={meta.level} versions={meta.versions} /> : null}</span>
+      </div>
+    );
   }
   if (e.type === "model_call") {
     return (
