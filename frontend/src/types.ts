@@ -162,6 +162,7 @@ export interface EvalSummary {
 }
 export interface EvalTraceRow {
   trace_id: string;
+  session_id: string | null;
   ts: string | null;
   question: string | null;
   status: string | null;
