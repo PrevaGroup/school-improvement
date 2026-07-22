@@ -23,7 +23,7 @@ SEED_CASES: list[dict] = [
     # --- plan_status tri-states -------------------------------------------------------------
     {"question": "Does Wilson High School have an attendance improvement plan, and what are its "
                  "main goals?",
-     "level": "High", "graders": ["query_school_plan", "numeric_provenance",
+     "level": "High", "graders": ["expected_tools", "numeric_provenance",
                                    "plan_status_compliance", "usefulness_judge"],
      "params": {"tools": ["query_school_plan"]},
      "tags": ["honesty", "plan_status", "tool:query_school_plan"]},
@@ -44,21 +44,21 @@ SEED_CASES: list[dict] = [
     # --- one question per data tool ---------------------------------------------------------
     {"question": "How does Polytechnic High School's chronic absenteeism rate compare to similar "
                  "schools?",
-     "level": "High", "graders": ["compare_to_peers", "numeric_provenance", "usefulness_judge"],
+     "level": "High", "graders": ["expected_tools", "numeric_provenance", "usefulness_judge"],
      "params": {"tools": ["compare_to_peers"]},
      "tags": ["provenance", "tool:compare_to_peers"]},
     {"question": "Which schools are most similar to Millikan High School?",
-     "level": "High", "graders": ["find_similar_schools", "no_redundant_tool_calls",
+     "level": "High", "graders": ["expected_tools", "no_redundant_tool_calls",
                                    "usefulness_judge"],
      "params": {"tools": ["find_similar_schools"]},
      "tags": ["tool:find_similar_schools"]},
     {"question": "Show the English learner graduation rate at Lakewood High School.",
-     "level": "High", "graders": ["query_subgroup_metrics", "numeric_provenance",
+     "level": "High", "graders": ["expected_tools", "numeric_provenance",
                                    "usefulness_judge"],
      "params": {"tools": ["query_subgroup_metrics"]},
      "tags": ["equity", "provenance", "tool:query_subgroup_metrics"]},
     {"question": "Summarize the attendance strategies in Wilson High School's plan.",
-     "level": "High", "graders": ["query_school_attendance_plans", "plan_status_compliance",
+     "level": "High", "graders": ["expected_tools", "plan_status_compliance",
                                    "usefulness_judge"],
      "params": {"tools": ["query_school_attendance_plans"]},
      "tags": ["tool:query_school_attendance_plans"]},
@@ -92,7 +92,7 @@ SEED_CASES: list[dict] = [
                                 "school it resolved to (or asks), rather than silently guessing."},
      "tags": ["resolution", "ambiguous_name"]},
     {"question": "Compare attendance at Rogers Middle School to its peers.",
-     "level": "Middle", "graders": ["compare_to_peers", "numeric_provenance", "usefulness_judge"],
+     "level": "Middle", "graders": ["expected_tools", "numeric_provenance", "usefulness_judge"],
      "params": {"tools": ["compare_to_peers"]},
      "tags": ["provenance", "tool:compare_to_peers"]},
 

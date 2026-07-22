@@ -3,10 +3,11 @@
     python -m evals.load_seed_cases [--dry-run]
 
 Turns `seed_cases.SEED_CASES` (curated DATA) into `eval_case` rows: `status='active'`,
-`source='seed'`, a stable hash id per case so re-running is idempotent (ON CONFLICT DO NOTHING —
-edits to an existing seed case's grader config are applied by the human, not silently by re-load;
-to reshape a case, bump its question or clear the row). Runs in Cloud Shell like every producer
-job, connecting as the migrator role via `_db._engine`.
+`source='seed'`, a stable hash id per case. Seed cases are CODE-owned, so re-loading SYNCS each
+one's config from code (ON CONFLICT DO UPDATE of ui/expected/tags/notes) — that's how a fix to a
+case's graders in `seed_cases.py` reaches an already-loaded row. `status` is preserved (a human
+may retire a seed case), and only seed ids are touched, never mined candidates. Runs in Cloud
+Shell like every producer job, connecting as the migrator role via `_db._engine`.
 """
 from __future__ import annotations
 
@@ -24,7 +25,8 @@ _INSERT = text("""
     INSERT INTO eval_case (eval_case_id, tenant_id, question, ui, expected, source, status, tags,
                            notes)
     VALUES (:eval_case_id, 'public', :question, :ui, :expected, 'seed', 'active', :tags, :notes)
-    ON CONFLICT (eval_case_id) DO NOTHING
+    ON CONFLICT (eval_case_id) DO UPDATE SET
+        ui = EXCLUDED.ui, expected = EXCLUDED.expected, tags = EXCLUDED.tags, notes = EXCLUDED.notes
 """)
 
 
@@ -64,8 +66,8 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="build rows + count, write nothing")
     args = ap.parse_args()
     counts = load(dry_run=args.dry_run)
-    log.info("done%s: %d seed cases, %d inserted (rest already present)",
-             " (dry-run)" if args.dry_run else "", counts["cases"], counts["inserted"])
+    log.info("done%s: %d seed cases synced (config upserted from code)",
+             " (dry-run)" if args.dry_run else "", counts["cases"])
 
 
 if __name__ == "__main__":

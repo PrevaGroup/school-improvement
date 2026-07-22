@@ -6,8 +6,23 @@ import json
 import pytest
 
 from evals import load_seed_cases
+from evals.graders import GRADERS
 from evals.load_seed_cases import _row, load
 from evals.seed_cases import SEED_CASES, case_id
+
+# Known grader names: the deterministic registry + the judge (dispatched separately in run_graders).
+KNOWN_GRADERS = set(GRADERS) | {"usefulness_judge"}
+
+
+def test_every_seed_case_lists_only_real_graders():
+    """run_graders silently SKIPS an unknown grader name, so a typo (or a tool name pasted in by
+    mistake) quietly under-grades a case. Pin every seed case's graders to the real registry so
+    that can't recur — this test would have caught the query_school_plan/compare_to_peers slip."""
+    for c in SEED_CASES:
+        for g in c.get("graders") or []:
+            assert g in KNOWN_GRADERS, (
+                f"case {c['question'][:48]!r} lists unknown grader {g!r} — did you mean a grader "
+                f"from {sorted(KNOWN_GRADERS)}? (a tool goes in params['tools'] with expected_tools)")
 
 
 def test_case_id_is_stable_and_prefixed():
