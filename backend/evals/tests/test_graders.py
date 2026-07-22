@@ -86,6 +86,8 @@ def test_numeric_provenance_detail_names_the_nearest_value():
     r = numeric_provenance(b, {})
     assert r.verdict == "fail"
     assert "250000" in r.detail and "nearest tool value 187176" in r.detail
+    # evidence carries the bare numbers so the UI can highlight them in the answer + tool output.
+    assert r.evidence == {"reply": ["250000"], "tool": ["187176"]}
 
 
 def test_plan_status_compliance_catches_the_defamation_pattern():

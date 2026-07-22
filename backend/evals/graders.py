@@ -72,6 +72,7 @@ class GraderResult:
     verdict: str                    # pass | fail | na
     score: float | None = None      # 0..1 where meaningful (T2, provenance fraction)
     detail: str = ""
+    evidence: dict | None = None    # optional structured hints (e.g. numbers for the UI to mark)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -195,18 +196,23 @@ def numeric_provenance(bundle: Bundle, params: dict) -> GraderResult:
     reply_nums = [(v, p) for v, p in _numbers(bundle.reply) if not _is_structural(v, p)]
     if not reply_nums:
         return GraderResult("numeric_provenance", "T1", "na", detail="no risky numbers in reply")
-    ungrounded = []
+    ungrounded, flagged_reply, nearest_tool = [], [], []
     for v, p in reply_nums:
         if _grounded(v, p, tool_vals, budget_vals):
             continue
         near = _nearest(v, tool_vals)
-        ungrounded.append(f"{_fmt(v, p)} (nearest tool value {_fmt(near)}, off by "
-                          f"{_fmt(round(abs(near - v), 3))})" if near is not None
-                          else f"{_fmt(v, p)} (no numbers in tool output)")
+        flagged_reply.append(_fmt(v))                    # bare strings for the UI to highlight
+        if near is not None:
+            nearest_tool.append(_fmt(near))
+            ungrounded.append(f"{_fmt(v, p)} (nearest tool value {_fmt(near)}, off by "
+                              f"{_fmt(round(abs(near - v), 3))})")
+        else:
+            ungrounded.append(f"{_fmt(v, p)} (no numbers in tool output)")
     frac = round(1.0 - len(ungrounded) / len(reply_nums), 3)
     if ungrounded:
         return GraderResult("numeric_provenance", "T1", "fail", frac,
-                            "reply numbers not grounded — " + "; ".join(ungrounded))
+                            "reply numbers not grounded — " + "; ".join(ungrounded),
+                            evidence={"reply": flagged_reply, "tool": nearest_tool})
     return GraderResult("numeric_provenance", "T1", "pass", 1.0,
                         f"all {len(reply_nums)} reply numbers grounded in tool output")
 

@@ -212,6 +212,10 @@
 .ev-kv .qinfo-sys { margin: 0; }
 .linkbtn { font: inherit; font-size: 13px; background: none; border: 0; padding: 0; color: var(--green); cursor: pointer; text-align: left; }
 .linkbtn:hover { text-decoration: underline; }
+/* Failure narrative: one story (verdict + question → why → the turn) instead of loose boxes. */
+.ev-story-hd { display: flex; align-items: baseline; gap: 8px; margin: 10px 0 6px; flex-wrap: wrap; }
+.ev-story-q { font-weight: 600; font-size: 14px; line-height: 1.4; }
+.hl { background: var(--amber); color: #1a1a1a; border-radius: 3px; padding: 0 2px; font-weight: 600; }
 /* "ⓘ context" — click a trace's question to open the prompt breakdown (two audiences). */
 .qinfo-btn { font: inherit; font-size: 10px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; margin-left: 2px; background: var(--panel); cursor: pointer; white-space: nowrap; vertical-align: baseline; }
 .qinfo-btn:hover { color: var(--ink); border-color: var(--muted); }
