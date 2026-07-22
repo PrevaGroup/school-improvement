@@ -206,6 +206,15 @@
 .ev-ev-tool { display: block; }
 .ev-ev-th { font-size: 12px; margin-bottom: 6px; }
 .ev-ev-out { margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; line-height: 1.4; max-height: 280px; overflow: auto; white-space: pre; }
+/* "ⓘ context" fly-over on a trace's question — what scaffolding rode along with the prompt. */
+.qinfo { position: relative; display: inline-block; margin-left: 8px; vertical-align: baseline; }
+.qinfo-tag { font-size: 10px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; cursor: help; white-space: nowrap; }
+.qinfo:hover .qinfo-tag, .qinfo:focus-within .qinfo-tag { color: var(--ink); border-color: var(--muted); }
+.qinfo-pop { display: none; position: absolute; z-index: 30; top: 100%; left: 0; margin-top: 6px; width: min(520px, 84vw); max-height: 62vh; overflow: auto; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.22); font-size: 12px; line-height: 1.5; font-weight: 400; white-space: normal; color: var(--ink); }
+.qinfo:hover .qinfo-pop, .qinfo:focus-within .qinfo-pop { display: block; }
+.qinfo-sub { margin-top: 6px; color: var(--muted); }
+.qinfo-sys { margin: 8px 0 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; line-height: 1.45; max-height: 38vh; overflow: auto; white-space: pre-wrap; }
+.qinfo-hashes { display: block; margin-top: 10px; color: var(--muted); font-size: 11px; }
 /* Per-grader failure chips (the fix backlog). */
 .ev-gstats { display: flex; flex-wrap: wrap; gap: 6px; }
 .ev-gstat { font-size: 11.5px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--bg); }

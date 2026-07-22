@@ -115,9 +115,13 @@ class TraceRecorder:
         if type_ == "turn_start":                    # the turn IS the root span
             self._events[-1]["span_id"] = self._root_span
 
-    def turn_start(self, *, question: str, prior_messages: int, system_hash: str) -> None:
+    def turn_start(self, *, question: str, prior_messages: int, system_hash: str,
+                   system: str | None = None) -> None:
+        # `system` (the rendered system prompt) rides in the EVENT stream — the GCS object, not
+        # the queryable envelope — so the full instruction block is inspectable per turn without
+        # bloating the `trace` table. The hash stays in the envelope's versions for attribution.
         self._event("turn_start", {"question": question, "prior_messages": prior_messages,
-                                   "system_prompt_hash": system_hash})
+                                   "system_prompt_hash": system_hash, "system_prompt": system})
 
     def model_call(self, *, iteration: int, stop: str, usage: dict,
                    latency_ms: int, content_digest: str) -> None:

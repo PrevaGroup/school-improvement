@@ -101,8 +101,9 @@ def test_shape_result_keeps_verdict_scores_and_trace():
 
 
 def test_shape_event_trims_each_type_to_its_useful_fields():
-    assert _shape_event({"type": "turn_start", "question": "q?", "span_id": "x"}) == {
-        "type": "turn_start", "question": "q?", "prior_messages": None}
+    assert _shape_event({"type": "turn_start", "question": "q?", "system_prompt": "You help…",
+                         "span_id": "x"}) == {
+        "type": "turn_start", "question": "q?", "prior_messages": None, "system_prompt": "You help…"}
     tc = _shape_event({"type": "tool_call", "name": "compare_to_peers", "input": {"a": 1},
                        "output": {"v": 2}, "error": None, "latency_ms": 5, "span_id": "x"})
     assert tc["name"] == "compare_to_peers" and tc["output"] == {"v": 2} and "span_id" not in tc

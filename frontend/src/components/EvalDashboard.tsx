@@ -157,14 +157,45 @@ function TraceDetail({ traceId }: { traceId: string }) {
       </div>
       {d.events.length === 0
         ? <div className="muted">No event detail — the raw trace object is unavailable.</div>
-        : d.events.map((e, i) => <EventRow key={i} e={e} />)}
+        : d.events.map((e, i) => <EventRow key={i} e={e} meta={{ level: d.level, versions: d.versions }} />)}
     </div>
   );
 }
 
-function EventRow({ e }: { e: EvalTraceEvent }) {
+// Hover fly-over on the question: what else the model received with this prompt. The scaffolding
+// structure is fixed per turn; the hashes/level are this turn's, from the trace.
+function QInfo({ level, versions, system }: {
+  level: string | null; versions: Record<string, string>; system?: string | null;
+}) {
+  const h = (k: string) => (versions?.[k] ? versions[k].slice(0, 8) : "—");
+  return (
+    <span className="qinfo">
+      <span className="qinfo-tag">ⓘ context</span>
+      <span className="qinfo-pop">
+        <b>Also sent to the model with this question</b>
+        <div className="qinfo-sub">The verbatim system prompt below (it includes the live screen
+          state), the 9-tool catalog, and this session’s prior turns.</div>
+        {system
+          ? <pre className="qinfo-sys">{system}</pre>
+          : <div className="qinfo-sub muted">System prompt text wasn’t captured for this trace (it
+              pre-dates this feature). Level <span className="mono">{level || "?"}</span>.</div>}
+        <span className="qinfo-hashes mono">prompt {h("prompt_hash")} · tools {h("tool_catalog_hash")}</span>
+      </span>
+    </span>
+  );
+}
+
+function EventRow({ e, meta }: {
+  e: EvalTraceEvent;
+  meta?: { level: string | null; versions: Record<string, string> };
+}) {
   if (e.type === "turn_start") {
-    return <div className="ev-ev ev-ev-q"><span className="ev-ev-lab">Q</span><span className="ev-ev-body">{e.question}</span></div>;
+    return (
+      <div className="ev-ev ev-ev-q">
+        <span className="ev-ev-lab">Q</span>
+        <span className="ev-ev-body">{e.question}{meta ? <QInfo level={meta.level} versions={meta.versions} system={e.system_prompt} /> : null}</span>
+      </div>
+    );
   }
   if (e.type === "model_call") {
     return (
