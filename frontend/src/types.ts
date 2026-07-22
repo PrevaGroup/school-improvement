@@ -219,6 +219,7 @@ export interface EvalTraceEvent {
   type: string; // turn_start | model_call | tool_call | turn_end
   question?: string | null;
   prior_messages?: number | null;
+  system_prompt?: string | null; // the verbatim rendered system prompt (turn_start)
   iteration?: number;
   stop?: string;
   usage?: Record<string, number>;

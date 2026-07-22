@@ -627,7 +627,7 @@ def chat(
     )
     question = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
     recorder.turn_start(question=question, prior_messages=len(messages) - 1,
-                        system_hash=sha256_hex(system))
+                        system_hash=sha256_hex(system), system=system)
 
     import anthropic
 

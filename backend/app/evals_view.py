@@ -240,7 +240,8 @@ def _shape_event(e: dict) -> dict:
     """Trim one raw event to what the detail view renders (drops span ids, content digests)."""
     t = e.get("type")
     if t == "turn_start":
-        return {"type": t, "question": e.get("question"), "prior_messages": e.get("prior_messages")}
+        return {"type": t, "question": e.get("question"), "prior_messages": e.get("prior_messages"),
+                "system_prompt": e.get("system_prompt")}
     if t == "model_call":
         return {"type": t, "iteration": e.get("iteration"), "stop": e.get("stop"),
                 "usage": e.get("usage") or {}, "latency_ms": e.get("latency_ms")}
