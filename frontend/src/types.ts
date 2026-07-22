@@ -234,6 +234,40 @@ export interface EvalTraceEvent {
 export interface EvalGraderCatalogEntry { name: string; tier: string; summary: string }
 export interface EvalGraderStat { grader: string; tier: string | null; ran: number; failed: number }
 
+// Drill-ins: one case (config + run history) and one grader (definition + track record).
+export interface EvalCaseHistoryRow {
+  eval_run_id: string;
+  set_name: string | null;
+  ts: string | null;
+  verdict: string | null;
+  trace_id: string | null;
+}
+export interface EvalCaseDetail {
+  eval_case_id: string;
+  question: string | null;
+  level: string | null;
+  status: string | null;
+  source: string | null;
+  tags: string[];
+  graders: string[];
+  params: Record<string, unknown>;
+  notes: string | null;
+  created_at: string | null;
+}
+export interface EvalGraderFailure {
+  eval_case_id: string;
+  question: string | null;
+  eval_run_id: string;
+  trace_id: string | null;
+  ts: string | null;
+  detail: string | null;
+}
+export interface EvalGraderDetail {
+  grader: EvalGraderCatalogEntry;
+  stats: { ran: number; failed: number };
+  failures: EvalGraderFailure[];
+}
+
 export interface EvalTraceDetail {
   trace_id: string;
   session_id: string | null;

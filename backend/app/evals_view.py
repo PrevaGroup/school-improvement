@@ -349,3 +349,72 @@ def evals_graders(_: dict = Depends(require_admin)) -> dict:
     """The grader reference: what each grader checks and its tier. A test ties this to the evals
     GRADERS registry so it can't silently drift from the code."""
     return {"graders": GRADER_CATALOG, "tiers": TIER_LABEL}
+
+
+# --- drill-in: one case (config + run history) and one grader (definition + track record) ----- #
+
+
+def shape_case_detail(row: dict) -> dict:
+    """Full case: the list shape plus the graders' params and notes (the answer key)."""
+    base = shape_case(row)
+    base["params"] = (row.get("expected") or {}).get("params") or {}
+    base["notes"] = row.get("notes")
+    return base
+
+
+@router.get("/cases/{eval_case_id}")
+def evals_case_detail(eval_case_id: str, _: dict = Depends(require_admin),
+                      db: Session = Depends(get_db_public)) -> dict:
+    """One eval case: its full config (the answer key) + how it scored in every run."""
+    try:
+        row = db.execute(
+            text("SELECT eval_case_id, question, ui, expected, source, status, tags, notes, "
+                 "created_at FROM eval_case WHERE eval_case_id = :id"), {"id": eval_case_id},
+        ).mappings().first()
+        if not row:
+            return {"available": False}
+        hist = db.execute(
+            text("SELECT r.eval_run_id, run.ts, run.set_name, r.verdict, r.trace_id FROM eval_result r "
+                 "JOIN eval_run run ON run.eval_run_id = r.eval_run_id "
+                 "WHERE r.eval_case_id = :id ORDER BY run.ts DESC"), {"id": eval_case_id},
+        ).mappings().all()
+    except SQLAlchemyError:
+        return {"available": False}
+    return {
+        "available": True,
+        "case": shape_case_detail(dict(row)),
+        "history": [{"eval_run_id": h["eval_run_id"], "set_name": h.get("set_name"),
+                     "ts": h["ts"].isoformat() if h.get("ts") else None,
+                     "verdict": h.get("verdict"), "trace_id": h.get("trace_id")} for h in hist],
+    }
+
+
+@router.get("/graders/{name}")
+def evals_grader_detail(name: str, _: dict = Depends(require_admin),
+                        db: Session = Depends(get_db_public)) -> dict:
+    """One grader: what it checks + its track record — how often it runs/fails, and the recent
+    cases it failed (each drillable to the trace)."""
+    entry = next((g for g in GRADER_CATALOG if g["name"] == name), None)
+    if not entry:
+        return {"available": False}
+    empty = {"available": True, "grader": entry, "stats": {"ran": 0, "failed": 0}, "failures": []}
+    try:
+        rows = db.execute(
+            text("SELECT r.eval_case_id, c.question, r.eval_run_id, run.ts, r.trace_id, "
+                 "r.scores -> :g AS score FROM eval_result r "
+                 "LEFT JOIN eval_case c ON c.eval_case_id = r.eval_case_id "
+                 "JOIN eval_run run ON run.eval_run_id = r.eval_run_id "
+                 "WHERE jsonb_exists(r.scores, :g) ORDER BY run.ts DESC LIMIT 500"), {"g": name},
+        ).mappings().all()
+    except SQLAlchemyError:
+        return empty
+    failures = []
+    for r in rows:
+        sc = r.get("score") or {}
+        if sc.get("verdict") == "fail":
+            failures.append({"eval_case_id": r["eval_case_id"], "question": r.get("question"),
+                             "eval_run_id": r["eval_run_id"], "trace_id": r.get("trace_id"),
+                             "ts": r["ts"].isoformat() if r.get("ts") else None,
+                             "detail": sc.get("detail")})
+    return {"available": True, "grader": entry,
+            "stats": {"ran": len(rows), "failed": len(failures)}, "failures": failures[:50]}

@@ -7,8 +7,8 @@ the output.
 import datetime as _dt
 
 from app.evals_view import (
-    _shape_event, grader_stats, shape_case, shape_result, shape_run, shape_trace_detail,
-    summarize_traces,
+    _shape_event, grader_stats, shape_case, shape_case_detail, shape_result, shape_run,
+    shape_trace_detail, summarize_traces,
 )
 
 _TS = _dt.datetime(2026, 7, 21, tzinfo=_dt.timezone.utc)
@@ -79,6 +79,16 @@ def test_shape_case_tolerates_missing_ui_and_expected():
     c = shape_case({"eval_case_id": "x", "question": "q", "status": "candidate",
                     "source": "mined:t"})
     assert c["level"] is None and c["graders"] == [] and c["tags"] == []
+
+
+def test_shape_case_detail_adds_params_and_notes():
+    d = shape_case_detail({"eval_case_id": "c1", "question": "q", "ui": {"level": "High"},
+                           "expected": {"graders": ["numeric_provenance"],
+                                        "params": {"tools": ["compare_to_peers"]}},
+                           "source": "seed", "status": "active", "tags": ["honesty"],
+                           "notes": "a note", "created_at": _TS})
+    assert d["graders"] == ["numeric_provenance"]
+    assert d["params"] == {"tools": ["compare_to_peers"]} and d["notes"] == "a note"
 
 
 def test_shape_run_flattens_aggregates():
