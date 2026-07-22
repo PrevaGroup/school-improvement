@@ -7,6 +7,12 @@
 export const fmtUSD = (n: number | null | undefined) =>
   n == null ? "—" : "$" + Math.round(n).toLocaleString();
 
+// Absolute date+time for trace/session labels, e.g. "Jul 22, 1:10 PM". Locale-aware; null → em dash.
+export const fmtDateTime = (iso: string | null | undefined) =>
+  iso == null ? "—" : new Date(iso).toLocaleString(undefined, {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+
 // Small-money variant for AI-usage costs, which are fractions of a dollar per turn. fmtUSD
 // rounds to whole dollars (right for school budgets, its origin), which collapses a real
 // $0.02 turn cost to "$0". Show 2–4 decimals so a sub-dollar cost reads honestly.

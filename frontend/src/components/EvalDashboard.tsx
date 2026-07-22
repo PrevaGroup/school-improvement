@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { fmtNum, fmtCostUSD } from "../format";
+import { fmtNum, fmtCostUSD, fmtDateTime } from "../format";
 import { NO_SESSION } from "../traceSessions";
 import type {
   EvalSummary, EvalTraceRow, EvalCaseRow, EvalRunRow, EvalResultRow,
@@ -176,14 +176,13 @@ function TracesOverview({ traces }: { traces: EvalTraceRow[] }) {
 
 function TracesForSession({ session, traces }: { session: string; traces: EvalTraceRow[] }) {
   const rows = traces.filter((t) => (t.session_id || NO_SESSION) === session);
-  const label = rows.find((t) => t.question)?.question || session;
+  const latest = rows.reduce<string | null>((m, t) => (t.ts && (!m || t.ts > m) ? t.ts : m), null);
   return (
     <>
-      <PanelHead title="Session" sub={session} />
+      <PanelHead title={fmtDateTime(latest)}
+                 sub={`${rows.length} turn${rows.length === 1 ? "" : "s"} · ${session}`} />
       <div className="card">
-        <h3 className="h3-row"><span>{label}</span></h3>
         <TracesTable rows={rows} />
-        <div className="muted ev-foot">{rows.length} turn{rows.length === 1 ? "" : "s"} in this session.</div>
       </div>
     </>
   );

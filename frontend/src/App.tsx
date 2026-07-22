@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
-import { fmtNum, fmtPct } from "./format";
+import { fmtDateTime, fmtNum, fmtPct } from "./format";
 import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
 import { EvalPanel, type Main } from "./components/EvalDashboard";
@@ -423,7 +423,7 @@ export default function App() {
                   <div key={g.session} title={g.label || g.session}
                        className={"rail-sub" + (main.kind === "traces" && main.session === g.session ? " on" : "")}
                        onClick={() => setMain({ kind: "traces", session: g.session })}>
-                    <div className="rail-sub-t">{g.label || g.session}</div>
+                    <div className="rail-sub-t">{fmtDateTime(g.latestTs)}</div>
                     <div className="rail-sub-m">{g.count} turn{g.count === 1 ? "" : "s"}</div>
                   </div>
                 ))}
