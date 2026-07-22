@@ -50,6 +50,12 @@ function ago(iso: string | null): string {
   return `${Math.round(s / 86400)}d`;
 }
 
+// The set a run executed. "golden" is the design's name for the fast PR-gating subset; we show
+// it as "PR Gate" (clearer), and map legacy golden runs to the same label.
+export function setLabel(s: string | null | undefined): string {
+  return s === "golden" || s === "pr-gate" ? "PR Gate" : (s || "run");
+}
+
 function PanelHead({ title, sub }: { title: string; sub?: string }) {
   return (
     <div className="ev-phead">
@@ -188,19 +194,56 @@ function TracesForSession({ session, traces }: { session: string; traces: EvalTr
   );
 }
 
-// --- evals (curated + mined cases) ---------------------------------------------------------- //
+// --- evals (curated + mined cases, grouped by status) --------------------------------------- //
+
+const CASE_STATUS_ORDER = ["active", "candidate", "retired"];
+const CASE_STATUS_LABEL: Record<string, string> = {
+  active: "Active · the PR Gate set",
+  candidate: "Candidate · mined, awaiting review",
+  retired: "Retired",
+};
+
+function CasesTable({ rows }: { rows: EvalCaseRow[] }) {
+  return (
+    <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
+      <table className="tbl ev-tbl">
+        <thead>
+          <tr><th>Question</th><th>Level</th><th>Source</th><th>Graders</th><th>Tags</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((c) => (
+            <tr key={c.eval_case_id}>
+              <td className="ev-q">{c.question || <span className="muted">—</span>}</td>
+              <td className="mono d">{c.level || "—"}</td>
+              <td className="mono d">{c.source?.startsWith("mined") ? "mined" : c.source || "—"}</td>
+              <td className="mono d">{c.graders.length ? c.graders.join(", ") : "—"}</td>
+              <td className="mono d">{c.tags.length ? c.tags.join(" ") : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function CasesPanel() {
-  const [data, setData] = useState<{ cases: EvalCaseRow[]; by_status?: Record<string, number>; available: boolean } | null>(null);
+  const [data, setData] = useState<{ cases: EvalCaseRow[]; available: boolean } | null>(null);
   const [err, setErr] = useState(false);
 
   useEffect(() => {
-    api.get<{ cases: EvalCaseRow[]; by_status?: Record<string, number>; available: boolean }>("/evals/cases")
+    api.get<{ cases: EvalCaseRow[]; available: boolean }>("/evals/cases")
       .then(setData).catch(() => setErr(true));
   }, []);
 
   if (err) return <LoadError />;
   if (data === null) return <Loading />;
+  // Group by status, preserving the endpoint's order within each group.
+  const groups: Record<string, EvalCaseRow[]> = {};
+  for (const c of data.cases) (groups[c.status || "other"] ||= []).push(c);
+  const statuses = [
+    ...CASE_STATUS_ORDER.filter((s) => groups[s]),
+    ...Object.keys(groups).filter((s) => !CASE_STATUS_ORDER.includes(s)),
+  ];
   return (
     <>
       <PanelHead title="Evals" sub="the questions the assistant must keep getting right" />
@@ -214,37 +257,21 @@ function CasesPanel() {
           <p className="muted mono ev-cmd">cd backend &amp;&amp; python -m evals.load_seed_cases</p>
         </div>
       ) : (
-        <>
-          <div className="ev-breakdowns">
-            <Breakdown title="cases by status" counts={data.by_status} statusColor />
+        statuses.map((s) => (
+          <div className="card" key={s}>
+            <h3 className="h3-row">
+              <span>{CASE_STATUS_LABEL[s] || s}</span>
+              <span className="muted">{groups[s].length}</span>
+            </h3>
+            <CasesTable rows={groups[s]} />
+            {s === "candidate" ? (
+              <div className="muted ev-foot">
+                Mined from real failures — a human reviews, confirms graders, and promotes to
+                <span className="mono"> active</span> before these gate anything.
+              </div>
+            ) : null}
           </div>
-          <div className="card">
-            <h3 className="h3-row"><span>Eval cases</span></h3>
-            <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
-              <table className="tbl ev-tbl">
-                <thead>
-                  <tr><th>Question</th><th>Level</th><th>Status</th><th>Source</th><th>Graders</th><th>Tags</th></tr>
-                </thead>
-                <tbody>
-                  {data.cases.map((c) => (
-                    <tr key={c.eval_case_id}>
-                      <td className="ev-q">{c.question || <span className="muted">—</span>}</td>
-                      <td className="mono d">{c.level || "—"}</td>
-                      <td><span className={"ev-pill " + statusClass(c.status)}>{c.status || "—"}</span></td>
-                      <td className="mono d">{c.source?.startsWith("mined") ? "mined" : c.source || "—"}</td>
-                      <td className="mono d">{c.graders.length ? c.graders.join(", ") : "—"}</td>
-                      <td className="mono d">{c.tags.length ? c.tags.join(" ") : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="muted ev-foot">
-              Mined cases land as <span className="mono">candidate</span> — a human reviews and
-              promotes to <span className="mono">active</span> before they gate anything.
-            </div>
-          </div>
-        </>
+        ))
       )}
     </>
   );
@@ -275,7 +302,7 @@ function ResultsPanel({ runId, runs, onSelect }: {
             one and its pass rate, cost, and per-case results appear here.
           </p>
           <p className="muted mono ev-cmd">
-            cd backend &amp;&amp; python -m evals.run_evals --set golden --target-url &lt;url&gt;
+            cd backend &amp;&amp; python -m evals.run_evals --set pr-gate --target-url &lt;url&gt;
           </p>
         </div>
       </>
@@ -301,7 +328,7 @@ function ResultsPanel({ runId, runs, onSelect }: {
                     style={{ cursor: "pointer" }}
                     onClick={() => onSelect({ kind: "results", runId: runId === r.eval_run_id ? undefined : r.eval_run_id })}>
                   <td className="mono ev-when">{ago(r.ts)}</td>
-                  <td className="mono d">{r.set_name || "—"}</td>
+                  <td className="mono d">{setLabel(r.set_name)}</td>
                   <td className="mono d">{r.target || "—"}</td>
                   <td className="mono d">{r.model || "—"}</td>
                   <td className="r mono">{pct(r.pass_rate)}</td>

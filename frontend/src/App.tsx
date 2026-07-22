@@ -3,7 +3,7 @@ import { api } from "./api";
 import { fmtDateTime, fmtNum, fmtPct } from "./format";
 import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
-import { EvalPanel, type Main } from "./components/EvalDashboard";
+import { EvalPanel, setLabel, type Main } from "./components/EvalDashboard";
 import { applyChatWorkspace, defaultSpecForLevel } from "./workspace";
 import { groupBySession } from "./traceSessions";
 import {
@@ -441,10 +441,10 @@ export default function App() {
                   <div key={r.eval_run_id}
                        className={"rail-sub" + (main.kind === "results" && main.runId === r.eval_run_id ? " on" : "")}
                        onClick={() => setMain({ kind: "results", runId: r.eval_run_id })}>
-                    <div className="rail-sub-t">
-                      {(r.set_name || "run")} · {r.pass_rate == null ? "—" : (r.pass_rate * 100).toFixed(0) + "%"}
+                    <div className="rail-sub-t">{fmtDateTime(r.ts)}</div>
+                    <div className="rail-sub-m">
+                      {setLabel(r.set_name)} · {r.pass_rate == null ? "—" : (r.pass_rate * 100).toFixed(0) + "%"}
                     </div>
-                    <div className="rail-sub-m">{r.ts ? relTime(new Date(r.ts).getTime()) : "—"}</div>
                   </div>
                 ))}
               </div>

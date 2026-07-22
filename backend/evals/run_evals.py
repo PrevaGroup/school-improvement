@@ -1,6 +1,6 @@
 """Run the eval set against the deployed agent and score every answer.
 
-    python -m evals.run_evals [--set golden|full] [--target live] [--target-url URL]
+    python -m evals.run_evals [--set pr-gate|full] [--target live] [--target-url URL]
                               [--max-cases N] [--no-judge] [--dry-run]
 
 The loop's scoring pass (eval-trace-system.md §3–4). For each active `eval_case` it drives
@@ -251,7 +251,8 @@ def main() -> None:
     from .auth import eval_token_from_env
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--set", dest="set_name", default="golden", choices=["golden", "full"])
+    ap.add_argument("--set", dest="set_name", default="pr-gate", choices=["pr-gate", "full"],
+                    help="pr-gate = the fast set run as a PR check; full = all active cases")
     ap.add_argument("--target", default="live", help="label stored on the run (default: live)")
     ap.add_argument("--target-url", default=os.environ.get("EVAL_TARGET_URL", ""),
                     help="deployed base URL, e.g. https://sip.prevagroup.com (or EVAL_TARGET_URL)")
