@@ -180,6 +180,7 @@ export interface EvalGraderScore {
   verdict?: string; // pass | fail | na
   score?: number | null;
   detail?: string;
+  evidence?: { reply?: string[]; tool?: string[] } | null; // numbers to highlight in the turn
 }
 export interface EvalCaseRow {
   eval_case_id: string;

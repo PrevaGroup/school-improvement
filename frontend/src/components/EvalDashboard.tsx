@@ -132,9 +132,33 @@ function TracesTable({ rows, selected, onSelect }: {
   );
 }
 
+// Wrap each of `nums` where it appears as a standalone number in `text` (not inside a longer
+// number) in a <mark>, so a grader's flagged figures light up in the answer and the tool output.
+function markNumbers(text: string, nums: string[]): (string | JSX.Element)[] {
+  if (!text || !nums || !nums.length) return [text];
+  const esc = [...new Set(nums)].filter(Boolean).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (!esc.length) return [text];
+  const re = new RegExp(esc.join("|"), "g");
+  const isNumChar = (c: string | undefined) => c !== undefined && /[\d.]/.test(c);
+  const out: (string | JSX.Element)[] = [];
+  let last = 0, k = 0, m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const start = m.index, end = start + m[0].length;
+    if (isNumChar(text[start - 1]) || isNumChar(text[end])) continue; // part of a longer number
+    if (start > last) out.push(text.slice(last, start));
+    out.push(<mark className="hl" key={k++}>{m[0]}</mark>);
+    last = end;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+type Highlight = { reply: string[]; tool: string[] };
+
 // One turn, expanded: the question, each tool call with its full output, and the final answer —
 // fetched from the GCS object via GET /evals/traces/{id}. Degrades to the header if it aged out.
-function TraceDetail({ traceId }: { traceId: string }) {
+// `highlight` marks a grader's flagged numbers in the answer + tool outputs.
+function TraceDetail({ traceId, highlight }: { traceId: string; highlight?: Highlight }) {
   const [d, setD] = useState<EvalTraceDetail | null>(null);
   const [err, setErr] = useState(false);
 
@@ -158,7 +182,8 @@ function TraceDetail({ traceId }: { traceId: string }) {
       </div>
       {d.events.length === 0
         ? <div className="muted">No event detail — the raw trace object is unavailable.</div>
-        : d.events.map((e, i) => <EventRow key={i} e={e} meta={{ level: d.level, versions: d.versions }} />)}
+        : d.events.map((e, i) => <EventRow key={i} e={e} highlight={highlight}
+                                           meta={{ level: d.level, versions: d.versions }} />)}
     </div>
   );
 }
@@ -218,9 +243,10 @@ function QPanel({ level, versions, system }: {
   );
 }
 
-function EventRow({ e, meta }: {
+function EventRow({ e, meta, highlight }: {
   e: EvalTraceEvent;
   meta?: { level: string | null; versions: Record<string, string> };
+  highlight?: Highlight;
 }) {
   const [open, setOpen] = useState(false);
   if (e.type === "turn_start") {
@@ -256,12 +282,13 @@ function EventRow({ e, meta }: {
           <b>{e.name}</b>({JSON.stringify(e.input)})
           {e.error ? <span className="ev-pill ev-err" style={{ marginLeft: 6 }}>error</span> : null}
         </div>
-        <pre className="ev-ev-out">{JSON.stringify(e.output, null, 2)}</pre>
+        <pre className="ev-ev-out">{markNumbers(JSON.stringify(e.output, null, 2), highlight?.tool || [])}</pre>
       </div>
     );
   }
   if (e.type === "turn_end") {
-    return <div className="ev-ev ev-ev-a"><span className="ev-ev-lab">A</span><span className="ev-ev-body">{e.reply}</span></div>;
+    return <div className="ev-ev ev-ev-a"><span className="ev-ev-lab">A</span>
+      <span className="ev-ev-body">{markNumbers(e.reply || "", highlight?.reply || [])}</span></div>;
   }
   return null;
 }
@@ -601,6 +628,28 @@ function GraderDetail({ name }: { name: string }) {
 
 // --- results (scored runs) ------------------------------------------------------------------ //
 
+// One failing (or passing) case, told as a story: the question + verdict, WHY it scored that way
+// (the grader breakdown, which now shows its work), then THE TURN — with the grader's flagged
+// numbers highlighted in the answer and the tool output that should have grounded them.
+function CaseNarrative({ result }: { result: EvalResultRow }) {
+  const ev = result.scores?.numeric_provenance?.evidence;
+  const hl: Highlight | undefined = ev ? { reply: ev.reply || [], tool: ev.tool || [] } : undefined;
+  return (
+    <div className="ev-story">
+      <div className="ev-story-hd">
+        <span className={"ev-pill " + statusClass(result.verdict)}>{result.verdict || "—"}</span>
+        <span className="ev-story-q">{result.question || "—"}</span>
+      </div>
+      <div className="qpanel-hd">Why it scored this way</div>
+      <GraderBreakdown scores={result.scores} />
+      <div className="qpanel-hd">The turn</div>
+      {result.trace_id
+        ? <TraceDetail traceId={result.trace_id} highlight={hl} />
+        : <div className="card muted">No trace recorded for this case.</div>}
+    </div>
+  );
+}
+
 function ResultsPanel({ runId, runs, onSelect }: {
   runId?: string; runs: EvalRunRow[]; onSelect: (m: Main) => void;
 }) {
@@ -715,12 +764,7 @@ function ResultsPanel({ runId, runs, onSelect }: {
               the tool outputs make a verdict like <span className="mono">numeric_provenance</span> obvious.</div>
           </div>
 
-          {sel ? (
-            <>
-              <GraderBreakdown scores={sel.scores} />
-              {sel.trace_id ? <TraceDetail traceId={sel.trace_id} /> : null}
-            </>
-          ) : null}
+          {sel ? <CaseNarrative result={sel} /> : null}
 
           <GradersReference />
         </>
