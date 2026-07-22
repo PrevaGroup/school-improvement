@@ -162,26 +162,58 @@ function TraceDetail({ traceId }: { traceId: string }) {
   );
 }
 
-// Hover fly-over on the question: what else the model received with this prompt. The scaffolding
-// structure is fixed per turn; the hashes/level are this turn's, from the trace.
-function QInfo({ level, versions, system }: {
+// The six kinds of content in the system prompt — read the left columns as a novice ("what is
+// this?"), the right column as a tuner ("what do I change, and which grader tells me it worked?").
+const PROMPT_LAYERS = [
+  { layer: "Identity & scope", what: "Who the assistant is, and what's off-limits", when: "static",
+    tune: "edit the role / out-of-scope text → the decline cases + the usefulness judge" },
+  { layer: "Guardrails", what: "Rules it must never break (honesty / legal)", when: "static",
+    tune: "tighten a rule → its matching grader: numeric_provenance, plan_status_compliance, suppressed_value_handling" },
+  { layer: "Operating doctrine", what: "How it should work — strong habits", when: "static",
+    tune: "reword the habit → expected_tools / efficiency + the judge" },
+  { layer: "Tool routing", what: "When to reach for which tool", when: "static",
+    tune: "edit here or the tool catalog → expected_tools + iteration count" },
+  { layer: "Output style", what: "Voice, length, format", when: "static",
+    tune: "reword → the usefulness judge + output-token count" },
+  { layer: "Runtime context", what: "This turn's facts: level + the on-screen charts (school: not yet)", when: "per turn",
+    tune: "change what build_system assembles → resolution_correctness + fewer redundant set_school" },
+];
+
+// Click-to-open panel: what the model received with this question, categorized (for novices) and
+// annotated with how to tune each layer + which grader confirms it (for tuners), then this turn's
+// hashes and verbatim system prompt.
+function QPanel({ level, versions, system }: {
   level: string | null; versions: Record<string, string>; system?: string | null;
 }) {
   const h = (k: string) => (versions?.[k] ? versions[k].slice(0, 8) : "—");
   return (
-    <span className="qinfo">
-      <span className="qinfo-tag">ⓘ context</span>
-      <span className="qinfo-pop">
-        <b>Also sent to the model with this question</b>
-        <div className="qinfo-sub">The verbatim system prompt below (it includes the live screen
-          state), the 9-tool catalog, and this session’s prior turns.</div>
-        {system
-          ? <pre className="qinfo-sys">{system}</pre>
-          : <div className="qinfo-sub muted">System prompt text wasn’t captured for this trace (it
-              pre-dates this feature). Level <span className="mono">{level || "?"}</span>.</div>}
-        <span className="qinfo-hashes mono">prompt {h("prompt_hash")} · tools {h("tool_catalog_hash")}</span>
-      </span>
-    </span>
+    <div className="qpanel">
+      <div className="qpanel-lead">Sent to the model with this question: the <b>system prompt</b> (six
+        layers below), the <b>9-tool catalog</b>, and this session's <b>prior turns</b>.</div>
+      <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
+        <table className="tbl ev-tbl qpanel-tbl">
+          <thead><tr><th>Layer</th><th>What it is</th><th>When</th><th>Tune it → check with</th></tr></thead>
+          <tbody>
+            {PROMPT_LAYERS.map((l) => (
+              <tr key={l.layer}>
+                <td className="mono">{l.layer}</td>
+                <td>{l.what}</td>
+                <td className="mono d">{l.when}</td>
+                <td className="muted">{l.tune}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="qpanel-hd">This turn</div>
+      <div className="qpanel-meta mono">level {level || "?"} · prompt {h("prompt_hash")} · tools {h("tool_catalog_hash")}</div>
+      {system
+        ? <pre className="qinfo-sys">{system}</pre>
+        : <div className="qpanel-note muted">Verbatim system prompt not captured for this trace — it
+            pre-dates the capture feature. New turns show the exact text here.</div>}
+      <div className="qpanel-note muted">Also shaping the answer, but not in the prompt: the tool
+        catalog (capabilities), the conversation (this session's memory), and the model itself.</div>
+    </div>
   );
 }
 
@@ -189,11 +221,22 @@ function EventRow({ e, meta }: {
   e: EvalTraceEvent;
   meta?: { level: string | null; versions: Record<string, string> };
 }) {
+  const [open, setOpen] = useState(false);
   if (e.type === "turn_start") {
     return (
-      <div className="ev-ev ev-ev-q">
-        <span className="ev-ev-lab">Q</span>
-        <span className="ev-ev-body">{e.question}{meta ? <QInfo level={meta.level} versions={meta.versions} system={e.system_prompt} /> : null}</span>
+      <div>
+        <div className="ev-ev ev-ev-q">
+          <span className="ev-ev-lab">Q</span>
+          <span className="ev-ev-body">
+            {e.question}{" "}
+            {meta ? (
+              <button className="qinfo-btn" onClick={() => setOpen((v) => !v)}>
+                ⓘ context {open ? "▲" : "▼"}
+              </button>
+            ) : null}
+          </span>
+        </div>
+        {open && meta ? <QPanel level={meta.level} versions={meta.versions} system={e.system_prompt} /> : null}
       </div>
     );
   }
