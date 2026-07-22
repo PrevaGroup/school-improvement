@@ -40,6 +40,13 @@ python -m evals.ingest_traces --dry-run  # parse + count, write nothing
 No watermark by design: emission is fire-and-forget, so late objects land inside their
 `dt=` partition; the 3-day overlap re-scan + `ON CONFLICT DO NOTHING` absorbs them.
 
+**In production** this runs **hourly** as a Cloud Run Job (`sip-ingest-traces`) triggered by
+Cloud Scheduler — job + trigger + the dedicated `eval-runner` service account are set up in
+[`backend/DEPLOY.md`](../DEPLOY.md) (§ *Scheduling trace ingest*). Note the two non-obvious bits
+that section covers: the job reaches Cloud SQL over the `/cloudsql/<ICN>` socket (this module's
+`_db.py` has no Connector logic), and the SA needs `storage.objectViewer` to *read* the bucket
+the app only *writes*.
+
 ## How to change safely
 
 1. The JSONL schema is a **cross-module contract** with `app/traces.py` (no shared code —

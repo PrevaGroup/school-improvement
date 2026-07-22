@@ -178,6 +178,118 @@ Google popup, so the address can sign in; the backend allowlist is the real gate
 > sign-in + allowlist enforcement in [`app/security.py`](app/security.py), and the in-app
 > spend caps in [`app/usage.py`](app/usage.py) (whose docstring keeps the full rationale).
 
+## Scheduling trace ingest (Cloud Run job + Cloud Scheduler)
+
+`evals.ingest_traces` is batch work — idempotent, re-scans the last N `dt=` partitions,
+`ON CONFLICT (trace_id) DO NOTHING` ([`evals/README.md`](evals/README.md)). It has **no HTTP
+endpoint** (the `evals` module has no serving surface by design), so it is scheduled as a
+**Cloud Run Job** triggered by **Cloud Scheduler** — not as a route on `sip-api`.
+
+Two facts from the code shape the job, and a naive recipe gets both wrong:
+
+1. **DB connection is the Cloud SQL socket, not the Connector.** `evals/_db.py` builds its
+   engine from `settings.migration_database_url`, which is plain host:port — it has **none** of
+   `app/db.py`'s Cloud SQL Python Connector logic, so `INSTANCE_CONNECTION_NAME` does nothing
+   for it. On a Cloud Run job the instance is mounted as a Unix socket at `/cloudsql/<ICN>`, so
+   the job sets `DB_HOST=/cloudsql/<ICN>` (psycopg reads a `/`-prefixed host as a socket
+   directory). No code change — just the env var.
+2. **Ingest reads the bucket; the app SA can only write it.** The go-live deploy granted the
+   runtime SA `storage.objectCreator` (write, for *emitting* traces). Ingest lists + reads,
+   which needs `storage.objectViewer` — a separate grant, or the job silently ingests zero.
+
+Also: ingest connects as the **migrator** role (`evals/_db.py`), so the SA needs
+`secretAccessor` on `sip-migrator-password`, not just the app password.
+
+### A dedicated service account (least privilege)
+
+Give the batch job its own identity rather than reusing `sip-api`'s runtime SA — the
+internet-facing web service and an owner-role batch job shouldn't share a credential. (A
+service account is `name@<project>.iam.gserviceaccount.com`; a Workspace address like
+`eval-runner@prevagroup.com` is **not** a valid SA — jobs run as service accounts, never
+Workspace users.)
+
+```bash
+gcloud iam service-accounts create eval-runner \
+  --project school-improvement-501916 \
+  --display-name "Trace ingest / eval runner"
+RUN_SA=eval-runner@school-improvement-501916.iam.gserviceaccount.com
+```
+
+Grant exactly what ingest needs — DB connect, the migrator secret, bucket read:
+
+```bash
+gcloud projects add-iam-policy-binding school-improvement-501916 \
+  --member=serviceAccount:$RUN_SA --role=roles/cloudsql.client
+gcloud secrets add-iam-policy-binding sip-migrator-password \
+  --member=serviceAccount:$RUN_SA --role=roles/secretmanager.secretAccessor
+gcloud storage buckets add-iam-policy-binding gs://school-improvement-traces \
+  --member=serviceAccount:$RUN_SA --role=roles/storage.objectViewer
+```
+
+> Deploying a job that **runs as** `$RUN_SA` needs `iam.serviceAccounts.actAs` on it — project
+> owners have it; otherwise grant yourself `roles/iam.serviceAccountUser` on the SA. The name is
+> `eval-runner` because the phase-3 eval runner (which drives `/api/chat` as its own principal so
+> the spend caps bound it — see [`evals/CLAUDE.md`](evals/CLAUDE.md)) is a plausible second user
+> of this identity. Split into a `trace-ingest` SA if you later want the two audited/revoked
+> separately — they are different workloads with different permissions.
+
+### The job + the hourly trigger
+
+Reuse the deployed `sip-api` image (identical code, no second build) and override the
+entrypoint. `--days 2` covers midnight-boundary late flushes at hourly cadence (the CLI default
+is 3; at hourly, `--days 1` is also enough — the extra day is cheap, idempotent overlap):
+
+```bash
+gcloud services enable cloudscheduler.googleapis.com run.googleapis.com \
+  --project school-improvement-501916
+
+IMAGE=$(gcloud run services describe sip-api --region us-central1 \
+  --format='value(spec.template.spec.containers[0].image)')
+
+gcloud run jobs create sip-ingest-traces \
+  --region us-central1 \
+  --image "$IMAGE" \
+  --command python \
+  --args=-m,evals.ingest_traces,--days,2 \
+  --set-cloudsql-instances school-improvement-501916:us-central1:school-improvement-sql \
+  --set-env-vars GCP_PROJECT=school-improvement-501916,DB_NAME=sip,DB_HOST=/cloudsql/school-improvement-501916:us-central1:school-improvement-sql,TRACES_BUCKET=school-improvement-traces \
+  --service-account $RUN_SA \
+  --max-retries 1 --task-timeout 600
+```
+
+Smoke-test once — expect exit 0 and a `done: N objects, M inserted, …` log line:
+
+```bash
+gcloud run jobs execute sip-ingest-traces --region us-central1 --wait
+```
+
+Let the SA invoke the job, then schedule it at the top of every hour:
+
+```bash
+gcloud run jobs add-iam-policy-binding sip-ingest-traces --region us-central1 \
+  --member=serviceAccount:$RUN_SA --role=roles/run.invoker
+
+gcloud scheduler jobs create http sip-ingest-traces-hourly \
+  --location us-central1 \
+  --schedule="0 * * * *" --time-zone="Etc/UTC" \
+  --uri="https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/school-improvement-501916/jobs/sip-ingest-traces:run" \
+  --http-method=POST \
+  --oauth-service-account-email=$RUN_SA
+```
+
+`$RUN_SA` wears two hats: the identity the job **runs as** (DB / secret / storage) and the
+identity Cloud Scheduler uses to **invoke** it (that's the `run.invoker` binding).
+
+> **The job pins the image at creation — it does NOT track new `sip-api` deploys.** `IMAGE`
+> above is whatever digest was live when you ran `jobs create`; a later `run deploy` leaves the
+> job on the old code. That's the safer default (ingest behavior changes only when you say so).
+> After a deploy whose changes you *want* in ingest, refresh it:
+> ```bash
+> gcloud run jobs update sip-ingest-traces --region us-central1 \
+>   --image "$(gcloud run services describe sip-api --region us-central1 \
+>     --format='value(spec.template.spec.containers[0].image)')"
+> ```
+
 ## Chat UI (`GET /` + `POST /chat`)
 
 The UI is the React + Vite SPA in [`frontend/`](../frontend), built into the image and served
