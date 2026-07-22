@@ -11,6 +11,7 @@ rather than 500 — the dashboard then shows an honest "no traces yet" state.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends
@@ -227,3 +228,76 @@ def evals_run_results(run_id: str, _: dict = Depends(require_admin),
     except SQLAlchemyError:
         return {"available": False, "results": []}
     return {"available": True, "results": [shape_result(dict(r)) for r in rows]}
+
+
+# --- one trace's full turn: envelope + the GCS event stream (question → tools → answer) ----- #
+# The trace table holds only the envelope; the events (with full tool outputs) live in the GCS
+# object. This is the only place serving reads that object — the graders do the same from evals.
+
+
+def _shape_event(e: dict) -> dict:
+    """Trim one raw event to what the detail view renders (drops span ids, content digests)."""
+    t = e.get("type")
+    if t == "turn_start":
+        return {"type": t, "question": e.get("question"), "prior_messages": e.get("prior_messages")}
+    if t == "model_call":
+        return {"type": t, "iteration": e.get("iteration"), "stop": e.get("stop"),
+                "usage": e.get("usage") or {}, "latency_ms": e.get("latency_ms")}
+    if t == "tool_call":
+        return {"type": t, "name": e.get("name"), "input": e.get("input"),
+                "output": e.get("output"), "error": e.get("error"), "latency_ms": e.get("latency_ms")}
+    if t == "turn_end":
+        return {"type": t, "reply": e.get("reply"), "tools_used": e.get("tools_used") or []}
+    return {"type": t}
+
+
+def shape_trace_detail(row: dict, events: list[dict]) -> dict:
+    """Envelope row + parsed event lines → the detail payload (pure)."""
+    return {
+        "trace_id": row["trace_id"],
+        "session_id": row.get("session_id"),
+        "ts": row["ts"].isoformat() if row.get("ts") else None,
+        "status": row.get("status"),
+        "source": row.get("source"),
+        "model": row.get("model"),
+        "level": (row.get("ui") or {}).get("level"),
+        "question": row.get("question"),
+        "totals": row.get("totals") or {},
+        "versions": row.get("versions") or {},
+        "gcs_uri": row.get("gcs_uri"),
+        "events": [_shape_event(e) for e in events],
+    }
+
+
+def _fetch_events(gcs_uri: str | None) -> list[dict]:
+    """Read the JSONL object from GCS and return its event lines (line 0 is the envelope). Returns
+    [] if the object is gone (90-day lifecycle) or unreadable — the detail degrades to the
+    envelope header rather than erroring."""
+    if not gcs_uri:
+        return []
+    try:
+        import fsspec
+        with fsspec.open(gcs_uri, "r") as f:
+            lines = [json.loads(x) for x in f.read().strip().splitlines()]
+        return lines[1:]
+    except Exception:
+        log.info("trace detail: could not read %s", gcs_uri)
+        return []
+
+
+@router.get("/traces/{trace_id}")
+def evals_trace_detail(trace_id: str, _: dict = Depends(require_admin),
+                       db: Session = Depends(get_db_public)) -> dict:
+    """One trace's full turn: envelope + the event stream (question → tool calls with outputs →
+    answer). `available: false` if the trace is unknown or the store isn't there yet."""
+    try:
+        row = db.execute(
+            text("SELECT trace_id, session_id, ts, status, source, model, question, ui, "
+                 "versions, totals, gcs_uri FROM trace WHERE trace_id = :id"), {"id": trace_id},
+        ).mappings().first()
+    except SQLAlchemyError:
+        return {"available": False}
+    if not row:
+        return {"available": False}
+    return {"available": True,
+            "trace": shape_trace_detail(dict(row), _fetch_events(row.get("gcs_uri")))}

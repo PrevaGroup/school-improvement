@@ -3,7 +3,7 @@ import { api } from "../api";
 import { fmtNum, fmtCostUSD, fmtDateTime } from "../format";
 import { NO_SESSION } from "../traceSessions";
 import type {
-  EvalSummary, EvalTraceRow, EvalCaseRow, EvalRunRow, EvalResultRow,
+  EvalSummary, EvalTraceRow, EvalCaseRow, EvalRunRow, EvalResultRow, EvalTraceDetail, EvalTraceEvent,
 } from "../types";
 
 // The admin eval views, rendered in the main panel. The left rail (App.tsx) is the navigator —
@@ -96,7 +96,9 @@ function Breakdown({ title, counts, statusColor }:
   );
 }
 
-function TracesTable({ rows }: { rows: EvalTraceRow[] }) {
+function TracesTable({ rows, selected, onSelect }: {
+  rows: EvalTraceRow[]; selected?: string | null; onSelect?: (id: string) => void;
+}) {
   return (
     <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
       <table className="tbl ev-tbl">
@@ -108,7 +110,10 @@ function TracesTable({ rows }: { rows: EvalTraceRow[] }) {
         </thead>
         <tbody>
           {rows.map((t) => (
-            <tr key={t.trace_id}>
+            <tr key={t.trace_id}
+                className={selected === t.trace_id ? "sel" : ""}
+                style={onSelect ? { cursor: "pointer" } : undefined}
+                onClick={onSelect ? () => onSelect(t.trace_id) : undefined}>
               <td className="mono ev-when">{ago(t.ts)}</td>
               <td className="ev-q">{t.question || <span className="muted">—</span>}</td>
               <td><span className={"ev-pill " + statusClass(t.status)}>{t.status || "—"}</span></td>
@@ -125,11 +130,72 @@ function TracesTable({ rows }: { rows: EvalTraceRow[] }) {
   );
 }
 
+// One turn, expanded: the question, each tool call with its full output, and the final answer —
+// fetched from the GCS object via GET /evals/traces/{id}. Degrades to the header if it aged out.
+function TraceDetail({ traceId }: { traceId: string }) {
+  const [d, setD] = useState<EvalTraceDetail | null>(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    setD(null); setErr(false);
+    api.get<{ trace?: EvalTraceDetail; available: boolean }>(`/evals/traces/${encodeURIComponent(traceId)}`)
+      .then((r) => (r.available && r.trace ? setD(r.trace) : setErr(true)))
+      .catch(() => setErr(true));
+  }, [traceId]);
+
+  if (err) return <div className="card muted">Couldn’t load this trace — the raw object may have aged out of the 90-day window.</div>;
+  if (!d) return <Loading />;
+  const tot = d.totals || {};
+  return (
+    <div className="card ev-detail">
+      <div className="ev-detail-meta mono">
+        {d.model || "—"} · <span className={"ev-pill " + statusClass(d.status)}>{d.status || "—"}</span>
+        {" · "}{d.level || "—"} · in {fmtNum(tot.input_tokens ?? 0)} / out {fmtNum(tot.output_tokens ?? 0)}
+        {" · "}{fmtCostUSD(tot.cost_usd_est ?? 0)}
+        {d.versions?.git_sha ? " · git " + d.versions.git_sha.slice(0, 7) : ""}
+      </div>
+      {d.events.length === 0
+        ? <div className="muted">No event detail — the raw trace object is unavailable.</div>
+        : d.events.map((e, i) => <EventRow key={i} e={e} />)}
+    </div>
+  );
+}
+
+function EventRow({ e }: { e: EvalTraceEvent }) {
+  if (e.type === "turn_start") {
+    return <div className="ev-ev ev-ev-q"><span className="ev-ev-lab">Q</span><span className="ev-ev-body">{e.question}</span></div>;
+  }
+  if (e.type === "model_call") {
+    return (
+      <div className="ev-ev ev-ev-model mono">
+        model call #{e.iteration} → {e.stop} · {e.usage?.output_tokens ?? 0} out · {e.latency_ms ?? "—"}ms
+      </div>
+    );
+  }
+  if (e.type === "tool_call") {
+    return (
+      <div className="ev-ev ev-ev-tool">
+        <div className="ev-ev-th mono">
+          <span className="ev-ev-lab">↳</span>
+          <b>{e.name}</b>({JSON.stringify(e.input)})
+          {e.error ? <span className="ev-pill ev-err" style={{ marginLeft: 6 }}>error</span> : null}
+        </div>
+        <pre className="ev-ev-out">{JSON.stringify(e.output, null, 2)}</pre>
+      </div>
+    );
+  }
+  if (e.type === "turn_end") {
+    return <div className="ev-ev ev-ev-a"><span className="ev-ev-lab">A</span><span className="ev-ev-body">{e.reply}</span></div>;
+  }
+  return null;
+}
+
 // --- traces overview (the capture stage) ---------------------------------------------------- //
 
 function TracesOverview({ traces }: { traces: EvalTraceRow[] }) {
   const [summary, setSummary] = useState<EvalSummary | null>(null);
   const [err, setErr] = useState(false);
+  const [sel, setSel] = useState<string | null>(null);
 
   useEffect(() => {
     api.get<EvalSummary>("/evals/summary").then(setSummary).catch(() => setErr(true));
@@ -168,12 +234,14 @@ function TracesOverview({ traces }: { traces: EvalTraceRow[] }) {
           </div>
           <div className="card">
             <h3 className="h3-row"><span>Recent traces</span></h3>
-            <TracesTable rows={traces.slice(0, 50)} />
+            <TracesTable rows={traces.slice(0, 50)} selected={sel}
+                         onSelect={(id) => setSel(sel === id ? null : id)} />
             <div className="muted ev-foot">
-              Real use only (source=prod). Pseudonymous — no identity is stored or shown. Pick a
-              session in the rail to see just its turns.
+              Real use only (source=prod). Pseudonymous — no identity is stored or shown. Click a
+              row to read the full turn; pick a session in the rail to see just its turns.
             </div>
           </div>
+          {sel ? <TraceDetail traceId={sel} /> : null}
         </>
       )}
     </>
@@ -181,6 +249,7 @@ function TracesOverview({ traces }: { traces: EvalTraceRow[] }) {
 }
 
 function TracesForSession({ session, traces }: { session: string; traces: EvalTraceRow[] }) {
+  const [sel, setSel] = useState<string | null>(null);
   const rows = traces.filter((t) => (t.session_id || NO_SESSION) === session);
   const latest = rows.reduce<string | null>((m, t) => (t.ts && (!m || t.ts > m) ? t.ts : m), null);
   return (
@@ -188,8 +257,9 @@ function TracesForSession({ session, traces }: { session: string; traces: EvalTr
       <PanelHead title={fmtDateTime(latest)}
                  sub={`${rows.length} turn${rows.length === 1 ? "" : "s"} · ${session}`} />
       <div className="card">
-        <TracesTable rows={rows} />
+        <TracesTable rows={rows} selected={sel} onSelect={(id) => setSel(sel === id ? null : id)} />
       </div>
+      {sel ? <TraceDetail traceId={sel} /> : null}
     </>
   );
 }
@@ -283,8 +353,10 @@ function ResultsPanel({ runId, runs, onSelect }: {
   runId?: string; runs: EvalRunRow[]; onSelect: (m: Main) => void;
 }) {
   const [results, setResults] = useState<EvalResultRow[] | null>(null);
+  const [selTrace, setSelTrace] = useState<string | null>(null);
 
   useEffect(() => {
+    setSelTrace(null);
     if (!runId) { setResults(null); return; }
     setResults(null);
     api.get<{ results: EvalResultRow[] }>(`/evals/runs/${encodeURIComponent(runId)}/results`)
@@ -342,32 +414,40 @@ function ResultsPanel({ runId, runs, onSelect }: {
       </div>
 
       {runId ? (
-        <div className="card">
-          <h3 className="h3-row"><span>Results · failures first</span></h3>
-          {results === null ? <Loading /> : (
-            <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
-              <table className="tbl ev-tbl">
-                <thead>
-                  <tr><th>Verdict</th><th>Question</th><th>Failed graders</th><th>Judge</th></tr>
-                </thead>
-                <tbody>
-                  {results.map((r) => {
-                    const failed = Object.values(r.scores || {})
-                      .filter((s) => s.verdict === "fail").map((s) => s.name).filter(Boolean);
-                    return (
-                      <tr key={r.eval_case_id}>
-                        <td><span className={"ev-pill " + statusClass(r.verdict)}>{r.verdict || "—"}</span></td>
-                        <td className="ev-q">{r.question || <span className="muted">—</span>}</td>
-                        <td className="mono d">{failed.length ? failed.join(", ") : "—"}</td>
-                        <td className="ev-q muted">{r.judge_rationale || "—"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <>
+          <div className="card">
+            <h3 className="h3-row"><span>Results · failures first</span></h3>
+            {results === null ? <Loading /> : (
+              <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
+                <table className="tbl ev-tbl">
+                  <thead>
+                    <tr><th>Verdict</th><th>Question</th><th>Failed graders</th><th>Judge</th></tr>
+                  </thead>
+                  <tbody>
+                    {results.map((r) => {
+                      const failed = Object.values(r.scores || {})
+                        .filter((s) => s.verdict === "fail").map((s) => s.name).filter(Boolean);
+                      return (
+                        <tr key={r.eval_case_id}
+                            className={selTrace === r.trace_id ? "sel" : ""}
+                            style={r.trace_id ? { cursor: "pointer" } : undefined}
+                            onClick={r.trace_id ? () => setSelTrace(selTrace === r.trace_id ? null : r.trace_id) : undefined}>
+                          <td><span className={"ev-pill " + statusClass(r.verdict)}>{r.verdict || "—"}</span></td>
+                          <td className="ev-q">{r.question || <span className="muted">—</span>}</td>
+                          <td className="mono d">{failed.length ? failed.join(", ") : "—"}</td>
+                          <td className="ev-q muted">{r.judge_rationale || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="muted ev-foot">Click a row to read that case's full turn — the tool
+              outputs make a verdict like <span className="mono">numeric_provenance</span> obvious.</div>
+          </div>
+          {selTrace ? <TraceDetail traceId={selTrace} /> : null}
+        </>
       ) : null}
     </>
   );

@@ -214,6 +214,37 @@ export interface EvalResultRow {
   trace_id: string | null;
 }
 
+// One trace's full turn (GET /api/evals/traces/{trace_id}): envelope header + the event stream.
+export interface EvalTraceEvent {
+  type: string; // turn_start | model_call | tool_call | turn_end
+  question?: string | null;
+  prior_messages?: number | null;
+  iteration?: number;
+  stop?: string;
+  usage?: Record<string, number>;
+  latency_ms?: number | null;
+  name?: string; // tool name
+  input?: unknown;
+  output?: unknown;
+  error?: string | null;
+  reply?: string | null;
+  tools_used?: string[];
+}
+export interface EvalTraceDetail {
+  trace_id: string;
+  session_id: string | null;
+  ts: string | null;
+  status: string | null;
+  source: string | null;
+  model: string | null;
+  level: string | null;
+  question: string | null;
+  totals: Record<string, number>;
+  versions: Record<string, string>;
+  gcs_uri: string | null;
+  events: EvalTraceEvent[];
+}
+
 export interface District { district_id: string; district_name: string }
 export type Level = "High" | "Middle" | "Primary";
 export interface ChatTurn { role: "user" | "assistant"; content: string }
