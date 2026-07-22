@@ -230,6 +230,9 @@ export interface EvalTraceEvent {
   reply?: string | null;
   tools_used?: string[];
 }
+export interface EvalGraderCatalogEntry { name: string; tier: string; summary: string }
+export interface EvalGraderStat { grader: string; tier: string | null; ran: number; failed: number }
+
 export interface EvalTraceDetail {
   trace_id: string;
   session_id: string | null;

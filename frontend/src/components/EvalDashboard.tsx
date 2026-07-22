@@ -4,6 +4,7 @@ import { fmtNum, fmtCostUSD, fmtDateTime } from "../format";
 import { NO_SESSION } from "../traceSessions";
 import type {
   EvalSummary, EvalTraceRow, EvalCaseRow, EvalRunRow, EvalResultRow, EvalTraceDetail, EvalTraceEvent,
+  EvalGraderCatalogEntry, EvalGraderScore, EvalGraderStat,
 } from "../types";
 
 // The admin eval views, rendered in the main panel. The left rail (App.tsx) is the navigator —
@@ -347,20 +348,80 @@ function CasesPanel() {
   );
 }
 
+// --- grader breakdown + reference ----------------------------------------------------------- //
+
+// Every grader that ran on one case, with its verdict, score, and own explanation — the "why".
+function GraderBreakdown({ scores }: { scores: Record<string, EvalGraderScore> }) {
+  const rows = Object.values(scores || {});
+  if (!rows.length) return null;
+  return (
+    <div className="card">
+      <h3 className="h3-row"><span>Grader breakdown</span></h3>
+      <div className="tbl-wrap" style={{ maxHeight: "unset" }}>
+        <table className="tbl ev-tbl">
+          <thead>
+            <tr><th>Tier</th><th>Grader</th><th>Verdict</th><th className="r">Score</th><th>Detail</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => (
+              <tr key={s.name}>
+                <td className="mono d">{s.tier || "—"}</td>
+                <td className="mono">{s.name || "—"}</td>
+                <td><span className={"ev-pill " + statusClass(s.verdict || null)}>{s.verdict || "—"}</span></td>
+                <td className="r mono">{s.score == null ? "—" : s.score}</td>
+                <td className="ev-q muted">{s.detail || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// What each grader checks (GET /evals/graders — kept honest to graders.py by a test).
+function GradersReference() {
+  const [cat, setCat] = useState<EvalGraderCatalogEntry[] | null>(null);
+  const [tiers, setTiers] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api.get<{ graders: EvalGraderCatalogEntry[]; tiers: Record<string, string> }>("/evals/graders")
+      .then((d) => { setCat(d.graders || []); setTiers(d.tiers || {}); }).catch(() => setCat([]));
+  }, []);
+  if (!cat || !cat.length) return null;
+  return (
+    <details className="card ev-ref">
+      <summary>What these graders check</summary>
+      <table className="tbl ev-tbl">
+        <tbody>
+          {cat.map((g) => (
+            <tr key={g.name}>
+              <td className="mono d">{g.tier} · {tiers[g.tier] || ""}</td>
+              <td className="mono">{g.name}</td>
+              <td className="ev-q muted">{g.summary}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
 // --- results (scored runs) ------------------------------------------------------------------ //
 
 function ResultsPanel({ runId, runs, onSelect }: {
   runId?: string; runs: EvalRunRow[]; onSelect: (m: Main) => void;
 }) {
   const [results, setResults] = useState<EvalResultRow[] | null>(null);
-  const [selTrace, setSelTrace] = useState<string | null>(null);
+  const [stats, setStats] = useState<EvalGraderStat[]>([]);
+  const [sel, setSel] = useState<EvalResultRow | null>(null);
 
   useEffect(() => {
-    setSelTrace(null);
+    setSel(null); setStats([]);
     if (!runId) { setResults(null); return; }
     setResults(null);
-    api.get<{ results: EvalResultRow[] }>(`/evals/runs/${encodeURIComponent(runId)}/results`)
-      .then((d) => setResults(d.results || [])).catch(() => setResults([]));
+    api.get<{ results: EvalResultRow[]; grader_stats?: EvalGraderStat[] }>(`/evals/runs/${encodeURIComponent(runId)}/results`)
+      .then((d) => { setResults(d.results || []); setStats(d.grader_stats || []); })
+      .catch(() => setResults([]));
   }, [runId]);
 
   if (runs.length === 0) {
@@ -415,6 +476,21 @@ function ResultsPanel({ runId, runs, onSelect }: {
 
       {runId ? (
         <>
+          {stats.length ? (
+            <div className="card">
+              <h3 className="h3-row"><span>Grader failures</span><span className="muted">this run</span></h3>
+              <div className="ev-gstats">
+                {stats.map((g) => (
+                  <span key={g.grader} className={"ev-gstat" + (g.failed ? " bad" : "")}>
+                    <span className="mono d">{g.tier}</span> {g.grader}
+                    <b> {g.failed}/{g.ran}</b>
+                  </span>
+                ))}
+              </div>
+              <div className="muted ev-foot">How many cases each grader failed — the ranked fix backlog.</div>
+            </div>
+          ) : null}
+
           <div className="card">
             <h3 className="h3-row"><span>Results · failures first</span></h3>
             {results === null ? <Loading /> : (
@@ -427,11 +503,10 @@ function ResultsPanel({ runId, runs, onSelect }: {
                     {results.map((r) => {
                       const failed = Object.values(r.scores || {})
                         .filter((s) => s.verdict === "fail").map((s) => s.name).filter(Boolean);
+                      const on = sel?.eval_case_id === r.eval_case_id;
                       return (
-                        <tr key={r.eval_case_id}
-                            className={selTrace === r.trace_id ? "sel" : ""}
-                            style={r.trace_id ? { cursor: "pointer" } : undefined}
-                            onClick={r.trace_id ? () => setSelTrace(selTrace === r.trace_id ? null : r.trace_id) : undefined}>
+                        <tr key={r.eval_case_id} className={on ? "sel" : ""} style={{ cursor: "pointer" }}
+                            onClick={() => setSel(on ? null : r)}>
                           <td><span className={"ev-pill " + statusClass(r.verdict)}>{r.verdict || "—"}</span></td>
                           <td className="ev-q">{r.question || <span className="muted">—</span>}</td>
                           <td className="mono d">{failed.length ? failed.join(", ") : "—"}</td>
@@ -443,10 +518,18 @@ function ResultsPanel({ runId, runs, onSelect }: {
                 </table>
               </div>
             )}
-            <div className="muted ev-foot">Click a row to read that case's full turn — the tool
-              outputs make a verdict like <span className="mono">numeric_provenance</span> obvious.</div>
+            <div className="muted ev-foot">Click a row for the grader breakdown and the full turn —
+              the tool outputs make a verdict like <span className="mono">numeric_provenance</span> obvious.</div>
           </div>
-          {selTrace ? <TraceDetail traceId={selTrace} /> : null}
+
+          {sel ? (
+            <>
+              <GraderBreakdown scores={sel.scores} />
+              {sel.trace_id ? <TraceDetail traceId={sel.trace_id} /> : null}
+            </>
+          ) : null}
+
+          <GradersReference />
         </>
       ) : null}
     </>

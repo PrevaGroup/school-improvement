@@ -227,7 +227,8 @@ def evals_run_results(run_id: str, _: dict = Depends(require_admin),
         ).mappings().all()
     except SQLAlchemyError:
         return {"available": False, "results": []}
-    return {"available": True, "results": [shape_result(dict(r)) for r in rows]}
+    shaped = [shape_result(dict(r)) for r in rows]
+    return {"available": True, "results": shaped, "grader_stats": grader_stats(shaped)}
 
 
 # --- one trace's full turn: envelope + the GCS event stream (question → tools → answer) ----- #
@@ -301,3 +302,49 @@ def evals_trace_detail(trace_id: str, _: dict = Depends(require_admin),
         return {"available": False}
     return {"available": True,
             "trace": shape_trace_detail(dict(row), _fetch_events(row.get("gcs_uri")))}
+
+
+# --- grader reference + per-run grader stats ------------------------------------------------ #
+# GRADER_CATALOG is serving's copy of the grader registry — serving may NOT import the evals
+# module (the boundary), so it can't read evals.graders.GRADERS at runtime. Instead
+# tests/test_grader_catalog.py imports BOTH (tests are boundary-exempt) and fails if they drift,
+# so this reference stays honest to the code.
+
+TIER_LABEL = {"T1": "honesty", "T2": "usefulness", "T3": "trajectory"}
+GRADER_CATALOG = [
+    {"name": "numeric_provenance", "tier": "T1",
+     "summary": "Every number in the reply must appear in some tool output — the invented-figure guard."},
+    {"name": "plan_status_compliance", "tier": "T1",
+     "summary": "If a plan is not on file, the reply must not claim the school has no plan (defamation guard)."},
+    {"name": "suppressed_value_handling", "tier": "T1",
+     "summary": "A privacy-suppressed value must never be reported as 0 or none — suppressed is UNKNOWN."},
+    {"name": "resolution_correctness", "tier": "T1",
+     "summary": "The turn must have operated on the expected school — catches wrong-school answers."},
+    {"name": "expected_tools", "tier": "T3",
+     "summary": "The tool(s) a correct answer needs were actually used."},
+    {"name": "no_redundant_tool_calls", "tier": "T3",
+     "summary": "No identical tool call was made twice."},
+    {"name": "efficiency", "tier": "T3",
+     "summary": "Iterations, cost, and latency stayed within the case's budget."},
+    {"name": "usefulness_judge", "tier": "T2",
+     "summary": "A stronger (Opus) judge scores whether the answer is grounded, direct, and actionable."},
+]
+
+
+def grader_stats(results: list[dict]) -> list[dict]:
+    """Per-grader ran/failed tallies across a run's results (pure) — the fix backlog, ranked."""
+    stats: dict[str, dict] = {}
+    for r in results:
+        for name, s in (r.get("scores") or {}).items():
+            st = stats.setdefault(name, {"grader": name, "tier": s.get("tier"), "ran": 0, "failed": 0})
+            st["ran"] += 1
+            if s.get("verdict") == "fail":
+                st["failed"] += 1
+    return sorted(stats.values(), key=lambda s: (-s["failed"], s["grader"]))
+
+
+@router.get("/graders")
+def evals_graders(_: dict = Depends(require_admin)) -> dict:
+    """The grader reference: what each grader checks and its tier. A test ties this to the evals
+    GRADERS registry so it can't silently drift from the code."""
+    return {"graders": GRADER_CATALOG, "tiers": TIER_LABEL}
