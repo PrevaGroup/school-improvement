@@ -137,7 +137,9 @@ scope.
 > "graders are bespoke" holds but "don't exist yet" was stale by the time this note merged).
 > P3 **accepted** (implementation pending — needs the LC MCP endpoint + credentials).
 > P4 **declined for now** (correct: LC's current evaluators grade *content artifacts*, which this
-> assistant doesn't produce). P5 **accepted** (implementation pending). P6 **open** (see below).
+> assistant doesn't produce). P5 **accepted + shipped** — `evals/otel_export.py` converts a trace
+> to OTLP/JSON (a collector accepts it), documented in `evals/README.md` § OpenTelemetry export.
+> P6 **open** (see below).
 > What P1/P2 shipped as: a `version` on every `GraderResult` (stamped by `run_graders` from
 > `GRADER_VERSIONS`), and an `EXTERNAL_GRADERS` adapter registry whose graders take an injected
 > `client` — the seam a Learning Commons evaluator plugs into — with a reference adapter that
