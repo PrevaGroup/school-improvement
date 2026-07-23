@@ -88,6 +88,30 @@ The span tree: the **turn** is the root `chat {model}` SERVER span; each `model_
 (the normalized `stop`, never a provider's `stop_reason`), so no wire-format field leaks into the
 OTLP output. Same rule as the emitter (§8.4).
 
+## Benchmark & calibration (interoperability)
+
+The seed set (`seed_cases.py`) is our **ground-truth benchmark**, and it is **versioned**
+(`BENCHMARK_VERSION`, SemVer) — the reproducibility discipline Learning Commons applies to its
+published datasets, here for our own set ([eval-interoperability.md P6](../../docs/design/eval-interoperability.md)):
+
+- Bump **MAJOR** when a case's expected behavior changes (old runs are no longer comparable),
+  **MINOR** when cases are added, **PATCH** for wording/typo fixes.
+- Every `eval_run` stamps `benchmark_version` into its `versions`, so a pass-rate is attributable
+  to the exact benchmark it scored — right beside the code versions (git_sha, prompt, catalog).
+
+**Judge calibration** (`calibration.py`) reports judge-vs-human agreement over a labeled sample in
+the **vocabulary LC uses**, so the numbers are field-comparable and rubric drift is visible
+run-over-run:
+
+| Metric | Meaning |
+|---|---|
+| `exact_match` | judge verdict == human verdict (strict categorical — LC's "accuracy") |
+| `expert_agreement_rate` | judge score within tolerance of the human's (looser numeric agreement) |
+| `reasoning_quality` | mean human rating (0..1) of the judge's rationale, where provided |
+
+A human labels a sample of eval turns; `calibration_report(pairs)` turns those labels into a
+report to attach to a run. Empty sample → honest `None`s, never a spurious 100%.
+
 ## How to change safely
 
 1. The JSONL schema is a **cross-module contract** with `app/traces.py` (no shared code —
