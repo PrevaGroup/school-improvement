@@ -97,10 +97,12 @@ backend/
   public_metrics/           ← DONE 2026-07-15: _shared.py, load_ca_*.py, seed_ca_dims.py
   serving/                  ← was app/marts.py + app/chat.py (was: separate plan_marts + chat
                               modules; merged 2026-07-15 — see the decision above)
-  evals/                    ← DONE 2026-07-17: trace store + eval loop (eval-trace-system.md).
-                              Born in the module layout — models.py, migrations/0006_*,
-                              ingest_traces.py, tests/. Producer; no serving surface in v1.
-frontend/                   ← React + Vite (not yet built)
+  evals/                    ← DONE 2026-07-17: trace store + full eval loop (eval-trace-system.md).
+                              Born in the module layout — models.py, migrations/0006_*, ingest_traces.py,
+                              seed_cases + load_seed_cases, graders, run_evals, mine_traces, calibration,
+                              otel_export, tests/. Producer; no serving surface (the /evals dashboard
+                              is serving's, reading these tables via SQL).
+frontend/                   ← React + Vite — shipped 2026-07-16, built into the API container (§5 ARCHITECTURE)
 ```
 
 Note: Python package dirs use underscores (`public_metrics`), because hyphens aren't importable.

@@ -1,10 +1,11 @@
 # evals — trace store + continuous-improvement loop
 
-The **store half** of the eval trace system ([design + all decisions](../../docs/design/eval-trace-system.md)):
+The **producer module for the eval trace system** ([design + all decisions](../../docs/design/eval-trace-system.md);
+interoperability follow-ups in [eval-interoperability.md](../../docs/design/eval-interoperability.md)):
 `serving` emits each chat turn as a JSONL object to GCS (`app/traces.py` — no tables); this
-module ingests those objects in batch and owns everything queryable. Phase 2 of the design —
-later phases add `run_evals` (drives `/api/chat` as an HTTP client) and `mine_traces`
-(failures/feedback → candidate eval cases).
+module ingests those objects and owns the whole offline loop — **store, graders, runner, miner,
+calibration, and OTel export**. It depends only on `core` and never imports `serving`: the runner
+drives `/api/chat` as an HTTP client, and graders read producers' tables via SQL.
 
 ## Component map
 
@@ -13,8 +14,17 @@ later phases add `run_evals` (drives `/api/chat` as an HTTP client) and `mine_tr
 | `models.py` | the 5 owned tables (below) — JSONB-heavy on purpose; see its docstring |
 | `migrations/0006_eval_tables.py` | their DDL, wired via `alembic.ini version_locations` |
 | `ingest_traces.py` | `python -m evals.ingest_traces` — GCS objects → `trace` rows, idempotent on trace_id |
+| `seed_cases.py` | the seed golden set (curated DATA) + `BENCHMARK_VERSION` — the versioned ground truth |
+| `load_seed_cases.py` | `python -m evals.load_seed_cases` — `SEED_CASES` → `eval_case` rows (idempotent sync) |
+| `graders.py` | the graders (T1 honesty · T3 trajectory · T2 judge) + `run_graders`; the normalized `GraderResult` and the `EXTERNAL_GRADERS` third-party seam |
+| `run_evals.py` | `python -m evals.run_evals` — drives `/api/chat` as an HTTP client, scores each answer, writes `eval_run`/`eval_result` with a baseline delta |
+| `mine_traces.py` | `python -m evals.mine_traces` — prod-trace failure signals → candidate `eval_case` rows (flywheel step 1) |
+| `calibration.py` | judge-vs-human agreement in LC's vocabulary (`exact_match` · `expert_agreement_rate` · `reasoning_quality`) |
+| `otel_export.py` | `python -m evals.otel_export` — a trace → OTLP/JSON for any OpenTelemetry backend |
+| `auth.py` | mints the eval principal's Identity Platform token — the runner's key into `/api/chat` |
 | `_db.py` | this module's own engine (migrator role) — same pattern as sip's `_db.py` |
-| `tests/` | parse/ingest logic + the emitter↔ingest JSONL contract cross-check |
+| `_ids.py` | `uuid7()` (time-ordered) for run ids |
+| `tests/` | pure grader/runner/calibration/export logic + the emitter↔ingest JSONL contract cross-check |
 
 ## Owned tables (the contract)
 
@@ -120,4 +130,4 @@ report to attach to a run. Empty sample → honest `None`s, never a spurious 100
 2. New envelope fields: prefer keys inside the existing JSONB columns (no migration) over new
    scalar columns (migration). Scalars are for what you filter/index on.
 3. Never import another module at runtime (`serving` included) — the boundary test enforces it.
-   Graders (phase 3+) get ground truth from producers' tables via SQL, the sanctioned seam.
+   Graders get ground truth from producers' tables via SQL, the sanctioned seam.
