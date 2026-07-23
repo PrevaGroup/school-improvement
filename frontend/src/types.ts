@@ -242,6 +242,7 @@ export interface EvalCaseHistoryRow {
   ts: string | null;
   verdict: string | null;
   trace_id: string | null;
+  scores: Record<string, EvalGraderScore>;
 }
 export interface EvalCaseDetail {
   eval_case_id: string;

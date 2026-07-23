@@ -24,9 +24,32 @@
   .seg button { font-size: 13px; padding: 5px 12px; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; color: var(--muted); cursor: pointer; }
   .seg button.on { background: var(--green); color: #fff; border-color: var(--green); }
   select { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
-  .cols { display: grid; grid-template-columns: 200px 1fr 440px; grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; }
-  /* Admin eval panels replace the two workspace columns; the rail stays put. */
-  .cols.panel { grid-template-columns: 200px 1fr; }
+  /* The screen: a fixed section nav (admins) beside the active section (workspace or a workbench). */
+  .app { display: flex; flex: 1; min-height: 0; }
+  .appnav { flex: 0 0 148px; border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; padding: 10px 8px; gap: 2px; overflow-y: auto; }
+  .appnav-i { font: inherit; font-size: 13px; font-weight: 600; text-align: left; padding: 8px 11px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+  .appnav-i:hover { color: var(--ink); background: var(--bg); }
+  .appnav-i.on { color: #fff; background: var(--green); border-color: var(--green); }
+  .cols { display: grid; grid-template-columns: 200px 1fr 440px; grid-template-rows: minmax(0, 1fr); flex: 1; min-width: 0; min-height: 0; }
+  /* A section workbench: its list of items | the selected item's detail, each scrolling on its own. */
+  .wb { display: grid; grid-template-columns: 340px 1fr; flex: 1; min-width: 0; min-height: 0; }
+  .wb-list { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 8px; min-height: 0; }
+  .wb-detail { overflow-y: auto; padding: 20px 22px; min-width: 0; min-height: 0; }
+  .wb-hd { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 8px 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .wb-group { padding: 12px 8px 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .wb-row { padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; margin-bottom: 1px; }
+  .wb-row:hover { background: var(--bg); }
+  .wb-row.on { background: var(--bg); border-color: var(--line); }
+  .wb-row.open { background: var(--bg); }
+  .wb-row-t { font-size: 12.5px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .wb-row-m { font-size: 10.5px; color: var(--muted); margin-top: 2px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .wb-caret { color: var(--muted); font-weight: 400; }
+  .wb-sub { margin: 2px 0 6px 8px; padding-left: 8px; border-left: 2px solid var(--line); }
+  .wb-subrow { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 7px; cursor: pointer; font-size: 12px; }
+  .wb-subrow:hover { background: var(--bg); }
+  .wb-subrow.on { background: var(--bg); }
+  .wb-subrow-t { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wb-empty { padding: 26px 8px; font-size: 12.5px; line-height: 1.5; text-align: center; }
   /* Session rail — recent lines of inquiry, stored client-side (localStorage), flip to restore. */
   .rail { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
   .new-sess { margin: 10px 10px 6px; padding: 7px 10px; font: inherit; font-size: 12px; font-weight: 600; border: 1px dashed var(--line); border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
@@ -60,12 +83,22 @@
   .chat { border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); min-width: 0; min-height: 0; }
   .chat-hd { padding: 11px 14px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; }
   .chat-hd .muted { font-weight: 400; font-size: 11px; }
+  /* Below ~1000px the workbench drops to a single column (list on top, detail below); the section
+     nav becomes a top tab bar under ~700px. The wide monitor is the target; this keeps it usable. */
+  @media (max-width: 1000px) {
+    .wb { grid-template-columns: 1fr; grid-template-rows: minmax(0, 40%) minmax(0, 1fr); }
+    .wb-list { border-right: 0; border-bottom: 1px solid var(--line); }
+  }
   @media (max-width: 900px) {
     #root { height: auto; min-height: 100%; }
     .cols { grid-template-columns: 1fr; grid-template-rows: auto; flex: none; }
-    .cols.panel { grid-template-columns: 1fr; }
     .diag { overflow: visible; }
     .chat { border-left: 0; border-top: 1px solid var(--line); height: 72vh; }
+  }
+  @media (max-width: 700px) {
+    .app { flex-direction: column; }
+    .appnav { flex: none; flex-direction: row; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+    .appnav-i { white-space: nowrap; }
   }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
   .school-hd { margin-bottom: 14px; }
