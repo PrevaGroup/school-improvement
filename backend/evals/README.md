@@ -47,6 +47,47 @@ that section covers: the job reaches Cloud SQL over the `/cloudsql/<ICN>` socket
 `_db.py` has no Connector logic), and the SA needs `storage.objectViewer` to *read* the bucket
 the app only *writes*.
 
+## OpenTelemetry export (interoperability)
+
+Our trace JSONL is deliberately **OTel-shaped**, so a trace exports to any OTLP-compatible
+eval/observability backend (Phoenix, Langfuse, Braintrust) **without rework** — that portability
+is the design's interoperability asset ([eval-trace-system.md §2](../../docs/design/eval-trace-system.md),
+[eval-interoperability.md P5](../../docs/design/eval-interoperability.md)). Two things make it a
+remap, not a reshape:
+
+- Envelope/event fields already follow the **OTel GenAI semantic conventions**
+  (`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.*`).
+- Every event already carries `trace_id` / `span_id` / `parent_span_id` — the trace *is* a span
+  tree.
+
+`otel_export.py` does the conversion (pure, unit-tested; no OTel SDK, no hot-path instrumentation
+— we own the JSONL and convert on demand):
+
+```
+python -m evals.otel_export gs://<bucket>/traces/v1/dt=YYYY-MM-DD/<trace_id>.jsonl > spans.json
+python -m evals.otel_export ./trace.jsonl            # a local object works too
+```
+
+It emits an OTLP/JSON `ResourceSpans` payload a collector accepts (POST to its traces endpoint).
+The span tree: the **turn** is the root `chat {model}` SERVER span; each `model_call` is a child
+`chat` CLIENT span; each `tool_call` is a child `execute_tool {name}` span.
+
+| Our trace field | OTel span / attribute |
+|---|---|
+| envelope `trace_id` | `traceId` |
+| event `span_id` / `parent_span_id` | `spanId` / `parentSpanId` |
+| `gen_ai.provider.name`, `gen_ai.request.model` | same (GenAI semconv) |
+| `totals.input_tokens` / `output_tokens` | `gen_ai.usage.input_tokens` / `output_tokens` |
+| normalized `stop` (tool_use·end·max_tokens·refusal) | `gen_ai.response.finish_reasons` |
+| `tool_call.name` | `gen_ai.tool.name` (op `execute_tool`) |
+| `session_id` | `session.id` |
+| `status` (ok·refusal·error·max_iters) | span `status` (unset·ok·error) |
+| `ts` + `latency_ms` | `startTimeUnixNano` + `endTimeUnixNano` |
+
+**The vendor-agnostic invariant holds here too:** the exporter reads only the neutral vocabulary
+(the normalized `stop`, never a provider's `stop_reason`), so no wire-format field leaks into the
+OTLP output. Same rule as the emitter (§8.4).
+
 ## How to change safely
 
 1. The JSONL schema is a **cross-module contract** with `app/traces.py` (no shared code —
