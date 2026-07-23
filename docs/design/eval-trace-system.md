@@ -325,9 +325,13 @@ Traces retain **user questions** — the first user-generated content this syste
 | **0** | this doc; storage decision confirmed | docs |
 | **1** | ✅ shipped — `TraceRecorder` + GCS flush + ops log line (`app/traces.py`); `session_id` in `ChatRequest`; version hashes; Anthropic→neutral stop mapping in chat.py (moves to `AnthropicRunner` in phase 5) | `serving` (no tables) |
 | **2** | ✅ shipped — `evals` scaffold: migration 0006 (5 tables incl. `feedback`, schema only), `ingest_traces` (idempotent, 3-day re-scan window) — no feedback endpoint/UI (deferred, §8.5) | `evals` |
-| **3** | seed golden set (~30), T1+T3 graders, `run_evals` + baseline report | `evals` |
-| **4** | T2 judge + calibration, PR-gate wiring, `mine_traces` | `evals` |
+| **3** | ✅ shipped — seed golden set (`seed_cases.py` + `load_seed_cases.py`), T1/T3 graders, `run_evals` + baseline delta (`graders.py`, `run_evals.py`) | `evals` |
+| **4** | ✅ mostly shipped — T2 judge (`usefulness_judge`), `mine_traces`, and calibration (`calibration.py`, LC-aligned metrics — see [eval-interoperability.md](eval-interoperability.md) P6); **the PR-gate is still manual** (`run_evals` from Cloud Shell via `eval-env.sh` — no dedicated CI workflow yet) | `evals` |
 | **5** | `AgentRunner` seam (thin: Anthropic only) + vendor-boundary test (§5) — with the chat overhaul | `serving` |
+
+Interoperability follow-ups since (normalized/versioned grader envelope + third-party grader seam,
+OTLP export, benchmark versioning, LC-aligned calibration) live in
+[`eval-interoperability.md`](eval-interoperability.md) — P1/P2/P5/P6 shipped; P3 held, P4 declined.
 
 Phase 1 produces value alone (traces to look at); each later phase compounds. Nothing here
 blocks go-live; conversely go-live's §3.6 doesn't block phases 1–4 (traces work behind the IAM
