@@ -5,6 +5,9 @@ a **new producer module `evals`** (store + loop), GCS (raw traces) ·
 **Supersedes:** [`chat-traces-and-evals.md`](chat-traces-and-evals.md) — its analysis of the
 seam collision and the honesty-first eval target carries forward unchanged; this doc makes the
 storage call it parked and designs the whole loop.
+**See also:** [`eval-interoperability.md`](eval-interoperability.md) (PROPOSED) — how to make this
+loop's graders and grounding interoperable with the field (Learning Commons), without changing any
+decision here.
 
 ## 0. What this is for
 
