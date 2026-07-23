@@ -129,7 +129,22 @@ real **only on the content/standards axis**. Converging the honesty graders towa
 library would trade away the highest-value, most product-specific checks we have. Explicitly out of
 scope.
 
-## 5. ⚖️ Decisions routed to the human (OPEN)
+## 5. ⚖️ Decisions routed to the human
+
+> **Resolved 2026-07-23.** P1 **accepted + shipped** and P2 **accepted + shipped** (this landed as
+> a *refactor*, not greenfield: the grader layer — `evals/graders.py`, a `GRADERS` registry,
+> `run_graders`, the T1/T3 graders and the injected-callable T2 judge — already existed, so §1's
+> "graders are bespoke" holds but "don't exist yet" was stale by the time this note merged).
+> P3 **accepted** (implementation pending — needs the LC MCP endpoint + credentials).
+> P4 **declined for now** (correct: LC's current evaluators grade *content artifacts*, which this
+> assistant doesn't produce). P5 **accepted** (implementation pending). P6 **open** (see below).
+> What P1/P2 shipped as: a `version` on every `GraderResult` (stamped by `run_graders` from
+> `GRADER_VERSIONS`), and an `EXTERNAL_GRADERS` adapter registry whose graders take an injected
+> `client` — the seam a Learning Commons evaluator plugs into — with a reference adapter that
+> normalizes the neutral `{score, label, explanation}` envelope, unit-tested with a fake client
+> (no live LC call, per P4).
+
+The original decisions, for the record:
 
 1. **Grader envelope (P1)** — adopt the normalized `{grader_id, grader_version, score, label,
    explanation}` shape now, as convention over the existing `eval_result.scores` JSONB? (Cheap,

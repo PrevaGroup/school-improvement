@@ -185,3 +185,55 @@ def test_run_graders_passes_when_all_pass_and_reports_error_status():
     assert run_graders(b, {"graders": ["numeric_provenance", "expected_tools"],
                            "params": {"tools": ["compare_to_peers"]}})["verdict"] == "pass"
     assert run_graders(_b(status="error"), {"graders": ["numeric_provenance"]})["verdict"] == "error"
+
+
+# --------------------------------------------------------------- normalized shape + versioning (P1)
+
+
+def test_every_scored_grader_carries_a_version():
+    """P1: run_graders stamps a grader_version onto every result — a score is attributable."""
+    out = run_graders(_b(reply="x"), {"graders": ["numeric_provenance", "usefulness_judge"]},
+                      judge=None)
+    assert out["scores"]["numeric_provenance"]["version"] == "v1"
+    # the judge tracks its own rubric version, surfaced per-result too
+    from evals.graders import JUDGE_RUBRIC_VERSION
+    assert out["scores"]["usefulness_judge"]["version"] == JUDGE_RUBRIC_VERSION
+
+
+# ------------------------------------------------------------------- third-party graders (P2)
+
+
+def _fake_lc_client(payload):
+    """Stand-in for a third-party evaluator returning the neutral {score,label,explanation}
+    envelope (the shape LC's SDK returns) — proves the adapter without any live call."""
+    return {"score": 0.82, "label": "grade-4", "explanation": "reads at target band"}
+
+
+def test_external_grader_is_na_without_a_client():
+    from evals.graders import EXTERNAL_GRADERS
+    r = EXTERNAL_GRADERS["external_content_quality"].run(_b(reply="hi"), {}, client=None)
+    assert r.verdict == "na" and "no external grader client" in r.detail
+
+
+def test_external_grader_normalizes_a_third_party_envelope():
+    from evals.graders import EXTERNAL_GRADERS
+    r = EXTERNAL_GRADERS["external_content_quality"].run(
+        _b(reply="a passage"), {"external_threshold": 0.6}, client=_fake_lc_client)
+    assert r.verdict == "pass" and r.score == 0.82
+    assert r.evidence == {"label": "grade-4"} and "target band" in r.detail
+
+
+def test_run_graders_dispatches_external_grader_with_injected_client():
+    out = run_graders(_b(reply="a passage"), {"graders": ["external_content_quality"]},
+                      clients={"external_content_quality": _fake_lc_client})
+    assert out["scores"]["external_content_quality"]["verdict"] == "pass"
+    assert out["scores"]["external_content_quality"]["version"] == "v1"
+
+
+def test_external_grader_does_not_gate_the_overall_verdict_by_default():
+    """A failing third-party grader is advisory (gating=False) — it must not flip a PR red."""
+    low = lambda payload: {"score": 0.1, "label": "grade-8", "explanation": "too complex"}
+    out = run_graders(_b(reply="a passage"), {"graders": ["external_content_quality"]},
+                      clients={"external_content_quality": low})
+    assert out["scores"]["external_content_quality"]["verdict"] == "fail"
+    assert out["verdict"] == "pass"        # advisory: does not gate

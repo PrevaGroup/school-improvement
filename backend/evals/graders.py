@@ -14,6 +14,28 @@ Tiers (eval-trace-system.md §4):
 A grader returns verdict `pass` / `fail` / `na` (na = the case didn't exercise this rule, so it
 doesn't count for or against). Overall verdict fails if any gating (T1/T3) grader fails, or the
 judge falls below threshold; `error` if the turn itself errored.
+
+**Normalized result envelope (eval-interoperability.md P1).** Every grader — built-in or
+third-party — returns the SAME `GraderResult` shape, and every result now carries a
+`grader_version`, so a score is attributable to a specific grader revision. We keep our field
+names (renaming would break `app/evals_view.py` + the dashboard + stored rows), with a documented
+crosswalk to the Learning Commons evaluator envelope:
+
+    ours          Learning Commons (result.*)
+    ----          ---------------------------
+    name       →  (evaluator id)
+    version    →  (evaluator SemVer)
+    verdict    →  answer.label   (pass/fail/na)
+    score      →  score
+    detail     →  explanation.summary
+
+**Third-party graders (P2).** `EXTERNAL_GRADERS` holds adapters that delegate scoring to an
+INJECTED `client` callable (network/SDK), normalizing whatever it returns into `GraderResult` —
+exactly how the T2 judge already injects its model call. Kept in a separate registry from the
+deterministic built-in `GRADERS` so the pure core stays pure and `app/evals_view.py`'s catalog is
+undisturbed. We ship the *seam* and a reference adapter (unit-tested with a fake client); we do
+NOT wire a live Learning Commons evaluator yet (P4 — LC's current evaluators grade content
+artifacts, which this assistant doesn't produce).
 """
 from __future__ import annotations
 
@@ -73,6 +95,8 @@ class GraderResult:
     score: float | None = None      # 0..1 where meaningful (T2, provenance fraction)
     detail: str = ""
     evidence: dict | None = None    # optional structured hints (e.g. numbers for the UI to mark)
+    version: str = "v1"             # grader revision — stamped by run_graders (P1: attributable
+                                    # scores). Appended last so positional construction is unchanged.
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -362,6 +386,57 @@ def usefulness_judge(bundle: Bundle, params: dict, *, judge: Callable[[str], str
         return GraderResult("usefulness_judge", "T2", "na", detail=f"judge error: {e}")
 
 
+# --------------------------------------------------------------------- third-party graders (P2)
+
+
+@dataclass(frozen=True)
+class ExternalGrader:
+    """An adapter for a grader that lives outside this process (an HTTP/SDK service).
+
+    `run(bundle, params, *, client)` uses an INJECTED `client` — never a module-level network
+    call — so the adapter is unit-testable with a fake and takes no live dependency until a real
+    client is wired. `gating` is False by default: a third-party grader is advisory unless a case
+    opts it into blocking (paid/external checks shouldn't silently gate a PR)."""
+    id: str
+    tier: str                       # T1 | T2 | T3
+    version: str
+    run: Callable[..., GraderResult]
+    gating: bool = False
+
+
+def _external_content_quality(bundle: Bundle, params: dict, *, client) -> GraderResult:
+    """Reference third-party adapter — the seam a Learning Commons evaluator would plug into.
+
+    `client` is an injected `callable(payload: dict) -> dict` returning the neutral external-grader
+    envelope `{score, label, explanation}` — the exact shape LC's SDK returns
+    (`result.score` / `result.answer.label` / `result.explanation.summary`). Injected, so this is
+    tested with a fake and makes NO live call here (P4). `na` when no client is configured —
+    identical posture to the T2 judge, so a run without external creds simply skips it."""
+    if client is None:
+        return GraderResult("external_content_quality", "T2", "na",
+                            detail="no external grader client configured")
+    threshold = params.get("external_threshold", 0.6)
+    try:
+        payload = {"question": bundle.question, "answer": bundle.reply,
+                   "params": params.get("external_params") or {}}
+        env = client(payload)                              # {score, label, explanation}
+        score = float(env["score"])
+        verdict = "pass" if score >= threshold else "fail"
+        return GraderResult("external_content_quality", "T2", verdict, round(score, 3),
+                            str(env.get("explanation") or env.get("label") or ""),
+                            evidence={"label": env.get("label")})
+    except Exception as e:                                 # an external failure is not a case failure
+        return GraderResult("external_content_quality", "T2", "na",
+                            detail=f"external grader error: {e}")
+
+
+EXTERNAL_GRADERS: dict[str, ExternalGrader] = {
+    "external_content_quality": ExternalGrader(
+        id="external_content_quality", tier="T2", version="v1",
+        run=_external_content_quality, gating=False),
+}
+
+
 # --------------------------------------------------------------------------- orchestration
 
 GRADERS: dict[str, Callable[[Bundle, dict], GraderResult]] = {
@@ -375,30 +450,51 @@ GRADERS: dict[str, Callable[[Bundle, dict], GraderResult]] = {
 }
 GATING = {"T1", "T3"}
 
+# Per-grader versions (P1) — the single place a grader's revision is declared; `run_graders`
+# stamps it onto every result. Bump the entry when a grader's logic changes, so a stored score
+# stays attributable to the grader that produced it. Built-ins start at v1; the judge tracks its
+# own rubric version; external graders declare theirs on the spec.
+GRADER_VERSIONS: dict[str, str] = {name: "v1" for name in GRADERS}
+GRADER_VERSIONS["usefulness_judge"] = JUDGE_RUBRIC_VERSION
+_ALL_VERSIONS: dict[str, str] = {
+    **GRADER_VERSIONS, **{eid: e.version for eid, e in EXTERNAL_GRADERS.items()}}
 
-def run_graders(bundle: Bundle, expected: dict, *, judge: Callable[[str], str] | None = None) -> dict:
+
+def run_graders(bundle: Bundle, expected: dict, *, judge: Callable[[str], str] | None = None,
+                clients: dict[str, Callable] | None = None) -> dict:
     """Run the case's requested graders over one turn's trace. Returns the eval_result payload:
-    overall verdict, per-grader scores, and the judge's rationale.
+    overall verdict, per-grader scores (each carrying its grader `version`), and the judge's
+    rationale.
 
     `expected['graders']` is the list of grader names to run (defaults to all deterministic ones
-    plus the judge). Overall verdict: `error` if the turn errored; `fail` if any gating (T1/T3)
-    grader fails or the judge fails; else `pass`."""
+    plus the judge). A name may be a built-in (`GRADERS`), the judge, or a third-party adapter
+    (`EXTERNAL_GRADERS`); `clients[name]` injects an external adapter's client (absent → the
+    adapter self-reports `na`, exactly like the judge without a `judge`). Overall verdict: `error`
+    if the turn errored; `fail` if any gating (T1/T3) grader, the judge, or a gating external
+    grader fails; else `pass`."""
     names = expected.get("graders") or list(GRADERS) + ["usefulness_judge"]
     params = expected.get("params") or {}
+    clients = clients or {}
     results: list[GraderResult] = []
     for name in names:
         if name == "usefulness_judge":
             results.append(usefulness_judge(bundle, params, judge=judge))
         elif name in GRADERS:
             results.append(GRADERS[name](bundle, params))
+        elif name in EXTERNAL_GRADERS:
+            results.append(EXTERNAL_GRADERS[name].run(bundle, params, client=clients.get(name)))
         else:
             # A name that isn't a real grader (a typo, or a tool name pasted in) used to vanish
             # silently, under-grading the case. Surface it as an `na` result so it's visible in
             # the breakdown instead of disappearing.
             results.append(GraderResult(name, "?", "na", detail="unknown grader — not run"))
+    for r in results:                                    # stamp the declared version (P1)
+        r.version = _ALL_VERSIONS.get(r.name, r.version)
     if bundle.status in {"error", "max_iters"}:
         verdict = "error" if bundle.status == "error" else "fail"
-    elif any(r.verdict == "fail" and (r.tier in GATING or r.name == "usefulness_judge")
+    elif any(r.verdict == "fail" and (
+                r.tier in GATING or r.name == "usefulness_judge"
+                or (r.name in EXTERNAL_GRADERS and EXTERNAL_GRADERS[r.name].gating))
              for r in results):
         verdict = "fail"
     else:
