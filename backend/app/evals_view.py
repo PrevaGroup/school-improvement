@@ -374,8 +374,8 @@ def evals_case_detail(eval_case_id: str, _: dict = Depends(require_admin),
         if not row:
             return {"available": False}
         hist = db.execute(
-            text("SELECT r.eval_run_id, run.ts, run.set_name, r.verdict, r.trace_id FROM eval_result r "
-                 "JOIN eval_run run ON run.eval_run_id = r.eval_run_id "
+            text("SELECT r.eval_run_id, run.ts, run.set_name, r.verdict, r.trace_id, r.scores "
+                 "FROM eval_result r JOIN eval_run run ON run.eval_run_id = r.eval_run_id "
                  "WHERE r.eval_case_id = :id ORDER BY run.ts DESC"), {"id": eval_case_id},
         ).mappings().all()
     except SQLAlchemyError:
@@ -385,7 +385,8 @@ def evals_case_detail(eval_case_id: str, _: dict = Depends(require_admin),
         "case": shape_case_detail(dict(row)),
         "history": [{"eval_run_id": h["eval_run_id"], "set_name": h.get("set_name"),
                      "ts": h["ts"].isoformat() if h.get("ts") else None,
-                     "verdict": h.get("verdict"), "trace_id": h.get("trace_id")} for h in hist],
+                     "verdict": h.get("verdict"), "trace_id": h.get("trace_id"),
+                     "scores": h.get("scores") or {}} for h in hist],
     }
 
 
