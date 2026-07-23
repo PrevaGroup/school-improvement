@@ -17,6 +17,13 @@ from __future__ import annotations
 
 import hashlib
 
+# The ground-truth benchmark version (eval-interoperability.md P6). SemVer, bumped when the set
+# changes — MAJOR when a case's expected behavior changes (old runs aren't comparable), MINOR when
+# cases are added, PATCH for wording/typo fixes. Every `eval_run` stamps this into its `versions`
+# so a pass-rate is attributable to the exact benchmark it scored — the reproducibility discipline
+# Learning Commons applies to its published datasets, here for our own seed set.
+BENCHMARK_VERSION = "1.0.0"
+
 # Each: question, level (High|Middle|Primary), graders, params, tags, notes.
 # `graders` omitted → all deterministic graders + the judge run.
 SEED_CASES: list[dict] = [

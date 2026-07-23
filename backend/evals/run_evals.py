@@ -29,6 +29,7 @@ from sqlalchemy import text
 
 from ._ids import uuid7
 from .graders import bundle_from_jsonl, run_graders
+from .seed_cases import BENCHMARK_VERSION
 
 log = logging.getLogger("evals.run_evals")
 
@@ -109,7 +110,10 @@ def assemble(cases: list[dict], *, answers: dict, traces: dict, judge, run_id: s
     return {
         "run_row": {
             "eval_run_id": run_id, "ts": now, "set_name": set_name, "target": target,
-            "provider": provider, "model": model, "versions": versions,
+            "provider": provider, "model": model,
+            # Stamp the benchmark version alongside the trace's code versions (P6) so a run's
+            # pass-rate is attributable to the exact ground-truth set it scored.
+            "versions": {**(versions or {}), "benchmark_version": BENCHMARK_VERSION},
             "baseline_run_id": baseline_run_id, "aggregates": aggregates,
             "cost_usd": round(cost, 4),
         },
