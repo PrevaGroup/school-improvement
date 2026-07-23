@@ -65,6 +65,40 @@ Two separate things fail, with different fixes:
 
 ## Deploy
 
+There are two deploy shapes and they are **not interchangeable** — pick by whether you are
+changing config or just code.
+
+> **⚠️ `--set-env-vars` REPLACES the entire env set; `--update-env-vars` MERGES.** This is
+> the single biggest deploy footgun here. The live service carries vars the full command
+> below **does not list** — `ALLOWED_EMAILS` (the eval runner + individual testers sign in
+> through it) and `EVAL_PRINCIPAL_EMAIL` (stamps eval traffic `source="eval"`). Copy the
+> full `--set-env-vars` command for a routine redeploy and you silently **drop both** — the
+> eval runner loses sign-in and eval runs start polluting the prod trace stream. For a
+> code-only redeploy, use the merge form below, which touches nothing but `GIT_SHA`.
+
+### Routine redeploy — code change only (the safe default)
+
+Ships new code and re-stamps `GIT_SHA` (so a trace attributes the delta to the new revision);
+leaves every env var, the Cloud SQL wiring, scaling, and the IAM binding exactly as they are.
+
+```bash
+# Run from the REPO ROOT (school-improvement/, where .git is). `--source .` uploads THIS
+# local tree, not GitHub — a stale checkout rebuilds the OLD bundle and "nothing changed".
+cd <repo-root> && git checkout main && git pull
+gcloud run deploy sip-api --source . --region us-central1 \
+  --update-env-vars GIT_SHA=$(git rev-parse HEAD)
+```
+
+### Full deploy — first provision, or deliberately re-asserting the whole env set
+
+Because `--set-env-vars` replaces everything, this must list **every** var the live service
+needs. Before running it, reconcile against what's actually live so you don't drop one:
+
+```bash
+gcloud run services describe sip-api --region us-central1 \
+  --format="value(spec.template.spec.containers[0].env)"
+```
+
 ```bash
 # NOTE: all env vars go in ONE --set-env-vars flag — repeating the flag overwrites
 # (last wins), which would silently drop GCP_PROJECT + INSTANCE_CONNECTION_NAME.
@@ -77,6 +111,19 @@ gcloud run deploy sip-api \
   --max-instances 4 \
   --allow-unauthenticated
 ```
+
+The command above shows the infra + preva-only auth vars. **The live service also has**, and
+this form must re-add (values from the `describe` above, not from memory):
+
+- **`ALLOWED_EMAILS=…`** — per-email invite hatch. The eval runner
+  (`eval-runner@prevagroup.com`) signs in through this, as do any individual/magic-link
+  testers (see the invite-list section). Multiple addresses are comma-separated, which
+  collides with gcloud's own comma parsing — use the `^@^` delimiter trick (below).
+- **`EVAL_PRINCIPAL_EMAIL=eval-runner@prevagroup.com`** — the address the eval runner
+  authenticates as; when the verified caller matches, `/api/chat` stamps the turn
+  `source="eval"` so eval traffic is separable from real use in the trace store. Drop it and
+  eval runs are indistinguishable from prod (`source="prod"`), quietly corrupting the eval
+  loop's mined-case source.
 
 ### Administrators — Workspace group `ADMIN_GROUP` (one-time GCP setup)
 
