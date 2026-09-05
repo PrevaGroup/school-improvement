@@ -129,13 +129,26 @@ class AnthropicRater:
 
 
 def resolve_api_key(project: str | None = None) -> str:
-    """Env first, then Secret Manager. Never a file, and never a literal.
+    """Env, then core's settings, then a gcloud shell-out. Never a file, never a literal.
+
+    The middle one is the path that matters — `app.config` already resolves and caches this secret
+    for the rest of the system, and a second mechanism reading the same secret differently is how
+    two halves of a deployment end up on two keys. The shell-out stays as the last resort because
+    it is what makes the pipeline runnable from a workstation with nothing configured but gcloud,
+    which is where a prompt change actually gets tried.
 
     `gcloud` on Windows is `gcloud.cmd`; `CreateProcess` will not find the bare name, which is why
-    both are tried rather than shelling out through a shell.
+    both are tried rather than going through a shell.
     """
     if os.environ.get("ANTHROPIC_API_KEY"):
         return os.environ["ANTHROPIC_API_KEY"]
+    try:
+        from app.config import settings
+
+        if key := settings.anthropic_api_key_value:
+            return key
+    except Exception:                     # no settings, no secret access — fall through to gcloud
+        pass
     gc = shutil.which("gcloud") or shutil.which("gcloud.cmd")
     if not gc:
         raise RuntimeError(
