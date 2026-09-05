@@ -83,6 +83,8 @@ class Node(Base):
 
     __table_args__ = (
         CheckConstraint("kind IN (" + ",".join(f"'{k}'" for k in NODE_KINDS) + ")", name="kind"),
+        # You cannot fit what you cannot read: a one-category scale is not a scale.
+        CheckConstraint("jsonb_array_length(scale_categories) >= 2", name="scale_fittable"),
         Index("ix_registry_node_standard", "standard_code", "grade_band"),
         Index("ix_registry_node_kind", "kind"),
     )
@@ -227,5 +229,9 @@ class ScoringConfiguration(Base):
         UniqueConstraint("config_key", "version", name="version"),
         CheckConstraint(
             "status IN ('draft','active','superseded','withdrawn')", name="status"),
+        # A promotion nobody recorded a reason for is a change nobody can explain later.
+        CheckConstraint(
+            "status <> 'active' OR (promoted_by IS NOT NULL AND rationale IS NOT NULL)",
+            name="promotion_recorded"),
         Index("ix_registry_configuration_key", "config_key", "status"),
     )

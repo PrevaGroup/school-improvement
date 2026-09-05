@@ -93,7 +93,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("section_id", "principal_hash", "role", "active_from",
                             name="uq_roster_section_staff_span"),
         sa.CheckConstraint("role IN (" + ",".join(f"'{r}'" for r in _ROLES) + ")",
-                           name="ck_roster_section_staff_role"),
+                           name="role"),
     )
     op.create_index("ix_roster_section_staff_principal", "roster_section_staff",
                     ["tenant_id", "principal_hash"])

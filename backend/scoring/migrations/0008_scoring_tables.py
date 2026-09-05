@@ -83,7 +83,7 @@ def upgrade() -> None:
         sa.Column("visibility", sa.Text(), nullable=False, server_default="public"),
         sa.CheckConstraint(
             "state IN (" + ",".join(f"'{s}'" for s in _STATES) + ")",
-            name="ck_artifact_state"),
+            name="state"),
     )
     op.create_index("ix_artifact_binding", "artifact",
                     ["tenant_id", "section_id", "task_id", "iteration"])
@@ -131,12 +131,12 @@ def upgrade() -> None:
         sa.Column("visibility", sa.Text(), nullable=False, server_default="public"),
         sa.UniqueConstraint("idempotency_key", name="uq_score_event_idempotency"),
         sa.CheckConstraint("scorer_type IN ('ai','teacher','expert')",
-                           name="ck_score_event_scorer_type"),
+                           name="scorer_type"),
         # A level without a score, or a score without a level, is a row that means nothing.
         sa.CheckConstraint(
             "(status = 'scored' AND level IS NOT NULL) OR "
             "(status <> 'scored' AND level IS NULL)",
-            name="ck_score_event_level_matches_status"),
+            name="level_matches_status"),
     )
     op.create_index("ix_score_event_artifact", "score_event", ["artifact_id"])
     op.create_index("ix_score_event_node", "score_event", ["tenant_id", "node_id"])
@@ -162,7 +162,7 @@ def upgrade() -> None:
                   nullable=False, server_default="public"),
         sa.Column("visibility", sa.Text(), nullable=False, server_default="public"),
         sa.CheckConstraint("actor_type IN ('machine','teacher')",
-                           name="ck_transition_actor_type"),
+                           name="actor_type"),
     )
     op.create_index("ix_artifact_state_transition_artifact", "artifact_state_transition",
                     ["artifact_id", "created_at"])

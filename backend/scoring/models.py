@@ -253,4 +253,5 @@ class ArtifactStateTransition(Base, TenantMixin):
 
     __table_args__ = (
         Index("ix_artifact_state_transition_artifact", "artifact_id", "created_at"),
+        CheckConstraint("actor_type IN ('machine','teacher')", name="actor_type"),
     )

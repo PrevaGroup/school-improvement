@@ -52,7 +52,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("tenant_id", "frame_key", "version",
                             name="uq_estimation_frame_version"),
         sa.CheckConstraint("status IN (" + ",".join(f"'{s}'" for s in _STATUSES) + ")",
-                           name="ck_estimation_frame_status"),
+                           name="status"),
     )
     op.create_index("ix_estimation_frame_key", "estimation_frame",
                     ["tenant_id", "frame_key", "status"])
@@ -88,7 +88,7 @@ def upgrade() -> None:
                   nullable=False, server_default="public"),
         sa.Column("visibility", sa.Text(), nullable=False, server_default="public"),
         sa.CheckConstraint("subject_type IN ('student','section','artifact')",
-                           name="ck_measurement_tombstone_subject_type"),
+                           name="subject_type"),
     )
     op.create_index("ix_measurement_tombstone_subject", "measurement_deletion_tombstone",
                     ["tenant_id", "subject_type", "subject_id"])

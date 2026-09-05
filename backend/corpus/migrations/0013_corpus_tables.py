@@ -64,7 +64,7 @@ def upgrade() -> None:
         sa.Column("partition", sa.Text(), nullable=False, server_default="unassigned"),
         sa.UniqueConstraint("source_id", "external_id", name="uq_corpus_paper_external_id"),
         sa.CheckConstraint("partition IN ('calibration','validation','unassigned')",
-                           name="ck_corpus_paper_partition"),
+                           name="partition"),
     )
     op.create_index("ix_corpus_paper_hash", "corpus_paper", ["text_hash"])
     op.create_index("ix_corpus_paper_partition", "corpus_paper", ["source_id", "partition"])

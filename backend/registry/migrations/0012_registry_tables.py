@@ -42,9 +42,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.TIMESTAMP(timezone=True),
                   nullable=False, server_default=sa.text("now()")),
         sa.CheckConstraint("kind IN ('anchor','module_local','diagnostic_only')",
-                           name="ck_registry_node_kind"),
+                           name="kind"),
         sa.CheckConstraint("jsonb_array_length(scale_categories) >= 2",
-                           name="ck_registry_node_scale_fittable"),
+                           name="scale_fittable"),
     )
     op.create_index("ix_registry_node_standard", "registry_node",
                     ["standard_code", "grade_band"])
@@ -63,7 +63,7 @@ def upgrade() -> None:
                   nullable=False, server_default=sa.text("now()")),
         sa.UniqueConstraint("node_id", "version", name="uq_registry_node_version"),
         sa.CheckConstraint("status IN ('draft','published','superseded','withdrawn')",
-                           name="ck_registry_node_version_status"),
+                           name="status"),
     )
     op.create_index("ix_registry_node_version_node", "registry_node_version",
                     ["node_id", "status"])
@@ -125,11 +125,11 @@ def upgrade() -> None:
                   nullable=False, server_default=sa.text("now()")),
         sa.UniqueConstraint("config_key", "version", name="uq_registry_configuration_version"),
         sa.CheckConstraint("status IN ('draft','active','superseded','withdrawn')",
-                           name="ck_registry_configuration_status"),
+                           name="status"),
         # A promotion without a recorded reason is a change nobody can explain later.
         sa.CheckConstraint(
             "status <> 'active' OR (promoted_by IS NOT NULL AND rationale IS NOT NULL)",
-            name="ck_registry_configuration_promotion_recorded"),
+            name="promotion_recorded"),
     )
     op.create_index("ix_registry_configuration_key", "registry_scoring_configuration",
                     ["config_key", "status"])

@@ -45,7 +45,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("district_tenant_id", "scope", "effective_from",
                             name="uq_pooling_consent_span"),
         sa.CheckConstraint("scope IN ('module_evidence','teacher_instrumentation')",
-                           name="ck_pooling_consent_scope"),
+                           name="scope"),
     )
     op.create_index("ix_pooling_consent_district", "pooling_aggregation_consent",
                     ["district_tenant_id", "scope"])
@@ -69,7 +69,7 @@ def upgrade() -> None:
                   nullable=False, server_default=sa.text("now()")),
         sa.Column("finished_at", sa.TIMESTAMP(timezone=True)),
         sa.CheckConstraint("status IN ('running','succeeded','failed','superseded')",
-                           name="ck_pooling_run_status"),
+                           name="status"),
     )
     op.create_index("ix_pooling_run_definition", "pooling_aggregate_run",
                     ["definition_key", "window_label"])

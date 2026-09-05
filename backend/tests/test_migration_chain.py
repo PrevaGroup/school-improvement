@@ -113,3 +113,39 @@ def test_the_head_reaches_the_base():
         assert walked <= len(revs) + 1, "cycle in the migration chain"
     assert walked == len(revs), (
         f"walked {walked} revisions from head but {len(revs)} exist — some are unreachable")
+
+
+def test_no_constraint_name_is_doubled():
+    """The naming convention is `ck_%(table_name)s_%(constraint_name)s`, so an explicit CHECK name
+    that already carries the prefix gets it a second time — `ck_registry_node_ck_registry_node_...`.
+
+    Found on 2026-09-05 by reading the rendered SQL, not by any test: the models had been corrected
+    but the migrations had not, so the database would have ended up with different constraint names
+    than the models declare, and the next `--autogenerate` would have tried to reconcile the
+    difference. Unique constraints are unaffected — their template has no `constraint_name` token,
+    so an explicit name passes through.
+    """
+    from app.models import Base
+    import corpus.models, measurement.models, pooling.models  # noqa: F401
+    import registry.models, roster.models, scoring.models     # noqa: F401
+
+    doubled = sorted(
+        c.name for table in Base.metadata.tables.values() for c in table.constraints
+        if c.name and c.name.count(f"ck_{table.name}_") > 1)
+    assert not doubled, (
+        f"constraint names carry the convention prefix twice: {doubled}. "
+        f"Name the constraint bare (`state`, not `ck_artifact_state`) and let the convention "
+        f"expand it.")
+
+
+def test_migration_check_names_are_bare():
+    """The same rule at the source: a CHECK in a migration must not spell its own prefix, or the
+    database and the models disagree about what the constraint is called."""
+    offenders = []
+    for f in _migration_files():
+        for line in f.read_text(encoding="utf8", errors="replace").splitlines():
+            if 'name="ck_' in line:
+                offenders.append(f"{f.name}: {line.strip()}")
+    assert not offenders, (
+        "CHECK constraints naming their own `ck_` prefix — the convention adds it: "
+        + "; ".join(offenders))
