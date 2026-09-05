@@ -16,8 +16,46 @@ contract holds.
 
 Models: `scoring/models.py`.
 
+## The pipeline
+
+| File | Role |
+|---|---|
+| `verify.py` | Span verification - the deterministic gate. Exact substring, versioned normalization, no model involved |
+| `prompts.py` | The prompt text, versioned AND fingerprinted. Half the rater's identity |
+| `rater.py` | `RaterIdentity` (the configuration, as an object) and the model call behind a two-method protocol |
+| `score.py` | Stage C then stage D, one criterion at a time. **Pure** - a function of (text, criteria, rater) |
+| `run_scoring.py` | The driver: registry read, ids, transaction, state transition |
+
+`score.py` is pure so the architectural properties can be asserted rather than instructed:
+`tests/test_score.py` checks the assembled prompts for the absence of the student's text at stage D,
+of any other criterion, and of any prior score. Those are properties of the context, and a property
+of the context is checkable; an instruction to the model is not.
+
 ## Migration revisions owned
 `0008_scoring_tables.py`.
+
+## What the driver reads, and what it refuses
+
+Reads `registry_*` and writes nothing there - SQL only, never an import (the boundary rule; a
+produced table is the contract).
+
+Three refusals, all stops rather than warnings:
+
+1. **A configuration whose prompt text has moved.** `registry_scoring_configuration` stamps prompt
+   versions and hashes; `prompts.fingerprint()` computes them from the text on disk. A mismatch
+   means the rater is not the one an administrator promoted.
+2. **An ambiguous rater.** Two active configurations for a key, or two published versions of a node.
+   Both are now impossible in the database (0014), and both are still checked where they are read.
+3. **Two configurations already inside one section x task x iteration.** The damage is done; a third
+   set of scores does not help.
+
+## The configuration pin is derived, not stored
+
+A configuration must not change inside one section x task x iteration - a teacher looking at their
+class's scores is looking at one rater's work, or the comparison means nothing. There is **no pin
+table**: the pin is read back out of `score_event`, the only place that cannot drift from what
+actually happened. A scope that already has scores keeps their configuration even after it has been
+superseded; a new scope takes the active one, and that becomes the pin by being written.
 
 ## Invariants this module guarantees
 
