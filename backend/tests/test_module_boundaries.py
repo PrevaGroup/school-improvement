@@ -72,6 +72,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "roster": "roster",  # sections, enrolments, the section-scoped access edge — expansion plan §7
     "measurement": "measurement",  # estimation frames — engine, no serving surface (expansion plan §10)
     "pooling": "pooling",  # the ONLY module that crosses the district threshold — expansion plan §7
+    "registry": "registry",  # nodes, tasks, scoring sites, scoring configuration + the linter
 }
 
 # Scanned trees. `tests/`, `scripts/`, and `migrations/` are tooling that legitimately

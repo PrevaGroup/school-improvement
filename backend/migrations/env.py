@@ -33,6 +33,7 @@ import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_st
 import roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
 import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
 import pooling.models  # noqa: E402,F401  — pooling_aggregation_consent, pooling_aggregate_run
+import registry.models  # noqa: E402,F401  — registry_node, registry_task, registry_scoring_* (6)
 
 target_metadata = Base.metadata
 config = context.config

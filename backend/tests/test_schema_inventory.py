@@ -56,6 +56,7 @@ import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_st
 import roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
 import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
 import pooling.models  # noqa: E402,F401  — pooling_aggregation_consent, pooling_aggregate_run
+import registry.models  # noqa: E402,F401  — registry_node, registry_task, registry_scoring_* (6)
 
 # table -> the module that DECLARES it (whose models.py the class lives in). That's what this
 # file can actually check: Base.metadata is built from declarations, not from who writes rows.
@@ -130,6 +131,14 @@ EXPECTED_TABLES: dict[str, str] = {
     #     no tenant mapping read them. ---
     "pooling_aggregation_consent": "pooling",
     "pooling_aggregate_run": "pooling",
+    # --- registry's tables — declared in registry/models.py. Public reference
+    #     content, no tenancy: a node means the same thing in every district. ---
+    "registry_node": "registry",
+    "registry_node_version": "registry",
+    "registry_task": "registry",
+    "registry_scoring_site": "registry",
+    "registry_scoring_site_node": "registry",
+    "registry_scoring_configuration": "registry",
 }
 
 
@@ -192,6 +201,12 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "measurement_deletion_tombstone": "0010_measurement_frames.py",
     "pooling_aggregation_consent": "0011_pooling_seam.py",
     "pooling_aggregate_run": "0011_pooling_seam.py",
+    "registry_node": "0012_registry_tables.py",
+    "registry_node_version": "0012_registry_tables.py",
+    "registry_task": "0012_registry_tables.py",
+    "registry_scoring_site": "0012_registry_tables.py",
+    "registry_scoring_site_node": "0012_registry_tables.py",
+    "registry_scoring_configuration": "0012_registry_tables.py",
 }
 
 
