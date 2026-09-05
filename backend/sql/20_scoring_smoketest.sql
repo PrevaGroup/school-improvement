@@ -50,9 +50,58 @@ VALUES ('sm-ev-1', 'sm-art-2', 'sm-run', 'ci', 'ai', 'scored', 3, 'sm-idem-1',
 -- --------------------------------------------------------------------------- --
 SELECT set_config('app.actor_type', 'machine', true);
 
+-- THE test. It must be attempted from `in_review`, where `released` IS a legal move — from any
+-- other state the transition-legality check fires first and the actor check is never reached, which
+-- passes for the wrong reason and proves nothing. That is exactly what the first version of this
+-- file did.
+--
+-- sm-art-3 is walked to in_review entirely by machine moves, so reaching the gate proves the
+-- machine got there legitimately and was stopped only at the authority.
+INSERT INTO artifact (artifact_id, run_id, content_hash, state, tenant_id, visibility)
+VALUES ('sm-art-3', 'sm-run', 'hash-3', 'bound', 'public', 'public');
+UPDATE artifact SET state='scored'    WHERE artifact_id='sm-art-3';
+UPDATE artifact SET state='composed'  WHERE artifact_id='sm-art-3';
+UPDATE artifact SET state='in_review' WHERE artifact_id='sm-art-3';
+
+DO $$
+DECLARE code text;
+BEGIN
+    BEGIN
+        UPDATE artifact SET state='released' WHERE artifact_id='sm-art-3';
+    EXCEPTION WHEN others THEN
+        GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+        IF code = '42501' THEN
+            RAISE NOTICE 'PASS  a machine cannot release from in_review (insufficient_privilege)';
+            RETURN;
+        END IF;
+        RAISE EXCEPTION 'FAIL  blocked, but by the wrong check (SQLSTATE %): %', code, SQLERRM;
+    END;
+    RAISE EXCEPTION 'FAIL  A MACHINE RELEASED AN ARTIFACT. The authority claim does not hold.';
+END $$;
+
+-- An unset actor must be treated as a machine: a code path that forgot to say who it is cannot
+-- release by omission.
+SELECT set_config('app.actor_type', '', true);
+DO $$
+DECLARE code text;
+BEGIN
+    BEGIN
+        UPDATE artifact SET state='released' WHERE artifact_id='sm-art-3';
+    EXCEPTION WHEN others THEN
+        GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+        IF code = '42501' THEN
+            RAISE NOTICE 'PASS  an unset actor cannot release (defaults to machine)';
+            RETURN;
+        END IF;
+        RAISE EXCEPTION 'FAIL  wrong check (SQLSTATE %): %', code, SQLERRM;
+    END;
+    RAISE EXCEPTION 'FAIL  AN UNSET ACTOR RELEASED AN ARTIFACT.';
+END $$;
+SELECT set_config('app.actor_type', 'machine', true);
+
 SELECT pg_temp.expect_fail(
   $$UPDATE artifact SET state='released' WHERE artifact_id='sm-art-2'$$,
-  'a machine cannot release');
+  'bound -> released is refused on legality, before the actor is even considered');
 
 SELECT pg_temp.expect_fail(
   $$UPDATE artifact SET state='released' WHERE artifact_id='sm-art-1'$$,
