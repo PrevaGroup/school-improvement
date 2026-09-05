@@ -271,6 +271,11 @@ class LintAcknowledgment(Base):
         ForeignKey("registry_node_version.node_version_id"))
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     acknowledged_by: Mapped[str] = mapped_column(Text, nullable=False)
+    # ONE judgment answering several findings is one decision. The linter reports stacked
+    # conditionals per category, so a row with the problem in all four cells yields four findings
+    # and one review; four unlinked rows would record four reviews that never happened. Same shape
+    # and same reasoning as score_event.set_override_id. Migration 0016.
+    decision_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default="now()")
 
@@ -279,4 +284,5 @@ class LintAcknowledgment(Base):
         # A reason that says nothing is the check being skipped with extra steps.
         CheckConstraint("length(btrim(reason)) >= 12", name="reason_substantive"),
         Index("ix_registry_lint_ack_version", "node_version_id"),
+        Index("ix_registry_lint_ack_decision", "decision_id"),
     )

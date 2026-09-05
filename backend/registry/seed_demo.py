@@ -34,6 +34,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import uuid
 
 from sqlalchemy import text
 
@@ -177,31 +178,42 @@ def purge() -> dict:
     return counts
 
 
-def acknowledge(rule: str, subject: str, reason: str, by: str,
-                node_version_id: str | None = None) -> None:
-    """Record a judgment about one advisory finding.
+def acknowledge(rule: str, subjects: list[str], reason: str, by: str) -> dict:
+    """Record ONE judgment answering one or more advisory findings.
 
-    The linter says what it cannot decide; this is where somebody decides it. The reason is stored
-    rather than the fact of an acknowledgment, because "acknowledged" alone is indistinguishable
-    from the check having been skipped — which is the whole difference the two severity classes
-    exist to preserve. A CHECK constraint refuses a reason under twelve characters.
+    The linter says what it cannot decide; this is where somebody decides it. Two things are
+    deliberate:
+
+    The REASON is stored, not the fact of an acknowledgment. "Acknowledged" alone is
+    indistinguishable from the check having been skipped, which is the whole difference the two
+    severity classes exist to preserve. A CHECK refuses a reason under twelve characters.
+
+    Several subjects share one `decision_id`. A rubric row that stacks conditionals in all four
+    cells produces four findings and gets one review; four unlinked rows would later read as four
+    reviews. Same reasoning as `score_event.set_override_id`.
     """
+    decision_id = f"dec-{uuid.uuid4().hex[:12]}"
+    version_of = lambda s: s.split(":", 1)[0] if ":" in s else None   # noqa: E731
     with engine().begin() as conn:
-        conn.execute(text("""
-            INSERT INTO registry_lint_acknowledgment
-                (ack_id, rule, subject, node_version_id, reason, acknowledged_by)
-            VALUES (:i, :r, :s, :v, :why, :who)
-            ON CONFLICT (rule, subject) DO UPDATE
-                SET reason = EXCLUDED.reason, acknowledged_by = EXCLUDED.acknowledged_by,
-                    created_at = now()"""),
-            {"i": f"{rule}:{subject}", "r": rule, "s": subject, "v": node_version_id,
-             "why": reason, "who": by})
+        for subject in subjects:
+            conn.execute(text("""
+                INSERT INTO registry_lint_acknowledgment
+                    (ack_id, rule, subject, node_version_id, reason, acknowledged_by, decision_id)
+                VALUES (:i, :r, :s, :v, :why, :who, :d)
+                ON CONFLICT (rule, subject) DO UPDATE
+                    SET reason = EXCLUDED.reason, acknowledged_by = EXCLUDED.acknowledged_by,
+                        decision_id = EXCLUDED.decision_id, created_at = now()"""),
+                {"i": f"{rule}:{subject}", "r": rule, "s": subject, "v": version_of(subject),
+                 "why": reason, "who": by, "d": decision_id})
+    return {"decision_id": decision_id, "rule": rule, "subjects": subjects, "by": by,
+            "reason": reason}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--acknowledge", nargs=4, metavar=("RULE", "SUBJECT", "REASON", "BY"),
-                    help="record a judgment about one advisory finding and re-run the lint")
+    ap.add_argument("--acknowledge", nargs=4, metavar=("RULE", "SUBJECTS", "REASON", "BY"),
+                    help="record ONE judgment answering one or more advisory findings. SUBJECTS "
+                         "is comma-separated; they share a decision id.")
     ap.add_argument("--prompt-versions",
                     help='the pipeline fingerprint, as JSON. Get it with '
                          '`python -m scoring.prompts`.')
@@ -212,10 +224,9 @@ def main() -> None:
         print(json.dumps(purge(), indent=1))
         return
     if args.acknowledge:
-        rule, subject, reason, by = args.acknowledge
-        acknowledge(rule, subject, reason, by)
-        print(json.dumps({"acknowledged": f"{rule}:{subject}", "by": by, "reason": reason},
-                         indent=1))
+        rule, subjects, reason, by = args.acknowledge
+        print(json.dumps(acknowledge(rule, [s.strip() for s in subjects.split(",") if s.strip()],
+                                     reason, by), indent=1))
         return
     if not args.prompt_versions:
         ap.error("--prompt-versions is required: the configuration records the prompt fingerprint "
