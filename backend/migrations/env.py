@@ -31,6 +31,7 @@ import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school
 import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback
 import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_state_transition
 import roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
+import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
 
 target_metadata = Base.metadata
 config = context.config

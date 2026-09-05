@@ -54,6 +54,7 @@ import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school
 import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback
 import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_state_transition
 import roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
+import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
 
 # table -> the module that DECLARES it (whose models.py the class lives in). That's what this
 # file can actually check: Base.metadata is built from declarations, not from who writes rows.
@@ -118,6 +119,11 @@ EXPECTED_TABLES: dict[str, str] = {
     "roster_section": "roster",
     "roster_enrollment": "roster",
     "roster_section_staff": "roster",
+    # --- measurement's tables — declared in measurement/models.py. The estimator
+    #     itself is Phase 6; these record what any estimate was fitted over. ---
+    "estimation_frame": "measurement",
+    "estimation_frame_member": "measurement",
+    "measurement_deletion_tombstone": "measurement",
 }
 
 
@@ -175,6 +181,9 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "roster_section": "0009_roster_tables.py",
     "roster_enrollment": "0009_roster_tables.py",
     "roster_section_staff": "0009_roster_tables.py",
+    "estimation_frame": "0010_measurement_frames.py",
+    "estimation_frame_member": "0010_measurement_frames.py",
+    "measurement_deletion_tombstone": "0010_measurement_frames.py",
 }
 
 
