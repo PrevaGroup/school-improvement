@@ -97,14 +97,18 @@ def test_matching_strand_is_not_flagged():
     assert "strand_substitution" not in rules_hit(lint(r))
 
 
-def test_w_whst_swap_is_flagged_too_but_is_the_harmless_one():
-    """Near-verbatim in CCSS, so the writing-side swap is harmless in practice — but the linter
-    reports it rather than encoding a judgment about which substitutions are benign."""
+def test_w_whst_swap_is_advisory_not_blocking():
+    """The asymmetry IS the finding. Reading-side strands diverge materially at Anchor 6, so a
+    substitution is a construct error; W and WHST are near-verbatim, so the same swap is harmless.
+    Flattening them to one severity would discard the evidence that a generic RI/RL rubric library
+    exists and an RH one does not."""
     r = Registry(
         nodes=[node("ci", standard="W.11-12.1a")],
         tasks=[task(standards=["WHST.11-12.1a"])],
         sites=[site()], site_nodes=[{"site_id": "s1", "node_id": "ci"}])
-    assert "strand_substitution" in rules_hit(lint(r))
+    f = lint(r)
+    assert "strand_substitution" in rules_hit(f)
+    assert not blocks_publication(f), "the writing-side swap must not block"
 
 
 def test_missing_anchor_at_a_measurement_occasion_is_blocking():

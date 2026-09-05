@@ -29,16 +29,18 @@ from typing import Any, Iterable, Mapping, Sequence
 
 BLOCKING, ADVISORY = "blocking", "advisory"
 
-# Reading-strand siblings under one CCR anchor. They are NOT general and specific: at Anchor 6,
-# RI is single-text and rhetorical while RH is cross-author and evidentiary. Scoring one on the
-# other's guide is a construct error, not a coding error — the crosswalk found it three times, and
-# it produces a hard ceiling on the item rather than a label mismatch.
-STRAND_SIBLINGS: dict[str, tuple[str, ...]] = {
-    "RI": ("RH", "RL"),
-    "RH": ("RI", "RL"),
-    "RL": ("RI", "RH"),
-    "W": ("WHST",),
-    "WHST": ("W",),
+# Severity differs by family, and the asymmetry is itself a finding rather than a convenience.
+# On the READING side the strands diverge materially — at Anchor 6, RI is single-text and rhetorical
+# while RH is cross-author and evidentiary — so a substitution is a construct error that produces a
+# ceiling on the item. On the WRITING side W and WHST are near-verbatim in CCSS, so the same swap is
+# harmless. That asymmetry is the evidence that a generic RI/RL mini-task rubric library exists and
+# an RH one does not, which is worth surfacing rather than flattening.
+STRAND_SIBLINGS: dict[str, tuple[tuple[str, ...], str]] = {
+    "RI": (("RH", "RL"), BLOCKING),
+    "RH": (("RI", "RL"), BLOCKING),
+    "RL": (("RI", "RH"), BLOCKING),
+    "W": (("WHST",), ADVISORY),
+    "WHST": (("W",), ADVISORY),
 }
 
 
@@ -138,14 +140,19 @@ def check_strand_substitution(r: Registry) -> list[Finding]:
         node_prefix, _, node_rest = node_code.partition(".")
         for tagged in (task.get("standards") or []):
             t_prefix, _, t_rest = str(tagged).partition(".")
-            if (t_rest and t_rest == node_rest
-                    and t_prefix != node_prefix
-                    and node_prefix in STRAND_SIBLINGS.get(t_prefix, ())):
+            siblings, severity = STRAND_SIBLINGS.get(t_prefix, ((), BLOCKING))
+            if (t_rest and t_rest == node_rest and t_prefix != node_prefix
+                    and node_prefix in siblings):
+                why = ("these strands diverge materially — one is single-text and rhetorical, the "
+                       "other cross-author and evidentiary — so expect a ceiling on the item "
+                       "rather than a label mismatch"
+                       if severity == BLOCKING else
+                       "these are near-verbatim in CCSS, so the swap is probably harmless; "
+                       "recorded because the reading-side asymmetry is itself the finding")
                 out.append(Finding(
-                    "strand_substitution", BLOCKING, node["node_id"],
+                    "strand_substitution", severity, node["node_id"],
                     f"task {task['task_id']} is tagged {tagged} but this node scores {node_code}. "
-                    f"These are strand siblings under one anchor, not a general and a specific "
-                    f"form — expect a ceiling on the item rather than a label mismatch."))
+                    f"Strand siblings under one anchor: {why}."))
     return out
 
 
