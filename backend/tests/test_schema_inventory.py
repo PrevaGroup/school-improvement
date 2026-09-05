@@ -55,6 +55,7 @@ import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_res
 import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_state_transition
 import roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
 import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
+import pooling.models  # noqa: E402,F401  — pooling_aggregation_consent, pooling_aggregate_run
 
 # table -> the module that DECLARES it (whose models.py the class lives in). That's what this
 # file can actually check: Base.metadata is built from declarations, not from who writes rows.
@@ -124,6 +125,11 @@ EXPECTED_TABLES: dict[str, str] = {
     "estimation_frame": "measurement",
     "estimation_frame_member": "measurement",
     "measurement_deletion_tombstone": "measurement",
+    # --- pooling's tables — declared in pooling/models.py. Tenant-NEUTRAL by
+    #     design: they belong to no district, which is what lets a principal with
+    #     no tenant mapping read them. ---
+    "pooling_aggregation_consent": "pooling",
+    "pooling_aggregate_run": "pooling",
 }
 
 
@@ -184,6 +190,8 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "estimation_frame": "0010_measurement_frames.py",
     "estimation_frame_member": "0010_measurement_frames.py",
     "measurement_deletion_tombstone": "0010_measurement_frames.py",
+    "pooling_aggregation_consent": "0011_pooling_seam.py",
+    "pooling_aggregate_run": "0011_pooling_seam.py",
 }
 
 
