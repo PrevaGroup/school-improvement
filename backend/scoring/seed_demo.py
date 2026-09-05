@@ -1,23 +1,23 @@
-"""Seed enough registry and artifact rows to run the pipeline end to end, then remove them.
+"""Seed the artifacts for an end-to-end run, and remove them again.
 
-    python -m scoring.seed_demo --text-dir /tmp/sip-demo          # seed
-    python -m scoring.run_scoring --config-key demo-writing       # score
-    python -m scoring.seed_demo --purge                           # remove every demo- row
+    python -m registry.seed_demo --prompt-versions "$(python -m scoring.prompts)"   # the rubric
+    python -m scoring.seed_demo --text-dir /tmp/sip-demo                            # the papers
+    python -m scoring.run_scoring --config-key demo-writing                         # score
+    python -m scoring.seed_demo --purge && python -m registry.seed_demo --purge     # clean up
 
-Why this exists: every piece of the pipeline is tested and none of it has ever run. The unit
-tests use a scripted rater, and the SQL smoke test provokes the triggers with fixtures that carry
-no text. Neither one has made a model call, read a registry row, or watched an artifact change
-state. That is a gap you can only close by doing it.
+TWO COMMANDS, NOT ONE, AND THAT IS THE POINT. This file used to seed the rubric too — six
+`registry_node_version` rows inserted straight to `published` from the scoring module, bypassing
+the linter that exists to gate exactly that. The import boundary test could not see it, because
+there was no import; `tests/test_table_ownership.py` was written afterwards and does.
 
-WHAT THIS IS NOT. The node identifiers here are prefixed `demo-` and marked `diagnostic_only`,
-which is the kind that is excluded from linking and estimated sparsely. They are NOT the Free
-Speech module's real node identifiers: those are an LDC product manager's to assign, once, and
-never to be recycled — so a demo that squatted on one would poison the registry permanently in
-exactly the way the node rule exists to prevent. `--purge` deletes only rows whose ids begin
-`demo-`, and it deletes score_event rows through the artifact, not by editing them.
+"A produced table is the contract" only means something if one module produces it. Two writers is
+not a contract, it is a shared mutable global with a longer name. Authoring a rubric is registry's
+job and scoring may read it, so the seed is split the same way the modules are.
 
-The papers are synthetic — written for the slice-1 prototype, not handed in by anyone. The
-subsystem has no real student writing in it and will not until a hardening phase.
+The papers are synthetic — written for the slice-1 prototype, not handed in by anyone. There is no
+real student writing in this subsystem and there will not be until a hardening phase.
+
+The `demo-` prefix is a safety property rather than a naming convention: `--purge` deletes by it.
 """
 from __future__ import annotations
 
@@ -30,25 +30,17 @@ import tempfile
 from sqlalchemy import text
 
 from ._db import engine
-from .prompts import fingerprint
-from .rater import RaterIdentity
 
-FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "demo_freespeech.json"
+FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "demo_freespeech_papers.json"
 
 PREFIX = "demo-"
-TASK_ID = f"{PREFIX}fs10-oped"
-SITE_ID = f"{PREFIX}fs10-oped-final"
-SECTION_ID = f"{PREFIX}sec-1"
-CONFIG_KEY = f"{PREFIX}writing"
-CONFIG_ID = f"{PREFIX}cfg-1"
 RUN_ID = f"{PREFIX}run-1"
-MODEL_ID = "claude-opus-5"
-EFFORT = "high"
-
-# The demo scores the FINAL iteration and declares it the measurement occasion. A draft site is
-# seeded too, deliberately not the occasion: it is the one place the draft/final distinction is
-# visible as data rather than as prose, and a seed that only created the easy case would hide it.
-DRAFT_SITE_ID = f"{PREFIX}fs10-oped-draft"
+SECTION_ID = f"{PREFIX}sec-1"
+# Duplicated from registry.seed_demo rather than imported — the boundary rule, and the same honest
+# duplication `_db.py` and `_ids.py` already carry. A binding key names a task; it does not import
+# one. `tests/test_seed_demo.py` asserts the two files still agree.
+TASK_ID = f"{PREFIX}fs10-oped"
+CONFIG_KEY = f"{PREFIX}writing"
 
 
 def load() -> dict:
@@ -58,63 +50,13 @@ def load() -> dict:
 def seed(text_dir: pathlib.Path) -> dict:
     fx = load()
     text_dir.mkdir(parents=True, exist_ok=True)
-
-    identity = RaterIdentity(CONFIG_ID, MODEL_ID, EFFORT, fingerprint(), "1")
-    node_ids = [f"{PREFIX}{n['id']}" for n in fx["nodes"]]
+    artifacts = []
 
     with engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', 'public', true)"))
         conn.execute(text("SELECT set_config('app.actor_type', 'teacher', true)"))
         conn.execute(text("SELECT set_config('app.actor_id', 'demo-seed', true)"))
 
-        conn.execute(text("""
-            INSERT INTO registry_task (task_id, module_key, name, ordinal, grade_band, standards)
-            VALUES (:t, 'demo-free-speech', 'Culminating op-ed', 1, '11-12', NULL)
-            ON CONFLICT (task_id) DO NOTHING"""), {"t": TASK_ID})
-
-        for site, iteration, occasion in ((DRAFT_SITE_ID, "draft", False),
-                                          (SITE_ID, "final", True)):
-            conn.execute(text("""
-                INSERT INTO registry_scoring_site
-                    (site_id, task_id, iteration, is_measurement_occasion, note)
-                VALUES (:s, :t, :i, :o, 'demo fixture — synthetic papers, not student work')
-                ON CONFLICT (site_id) DO NOTHING"""),
-                {"s": site, "t": TASK_ID, "i": iteration, "o": occasion})
-
-        for ordinal, node in enumerate(fx["nodes"]):
-            nid = f"{PREFIX}{node['id']}"
-            cats = sorted(float(k) if "." in k else int(k) for k in node["levels"])
-            conn.execute(text("""
-                INSERT INTO registry_node (node_id, standard_code, criterion_label, grade_band,
-                                           scale_categories, kind, source)
-                VALUES (:n, :std, :label, '11-12', CAST(:cats AS jsonb), 'diagnostic_only', :src)
-                ON CONFLICT (node_id) DO NOTHING"""),
-                {"n": nid, "std": f"DEMO.{node['id'].upper()}", "label": node["name"],
-                 "cats": json.dumps(cats), "src": node.get("source", "demo fixture")})
-            conn.execute(text("""
-                INSERT INTO registry_node_version
-                    (node_version_id, node_id, version, descriptors, status, change_note)
-                VALUES (:v, :n, 1, CAST(:d AS jsonb), 'published', 'demo seed')
-                ON CONFLICT (node_version_id) DO NOTHING"""),
-                {"v": f"{nid}-v1", "n": nid, "d": json.dumps(node["levels"])})
-            for site in (DRAFT_SITE_ID, SITE_ID):
-                conn.execute(text("""
-                    INSERT INTO registry_scoring_site_node (site_id, node_id, ordinal)
-                    VALUES (:s, :n, :o) ON CONFLICT DO NOTHING"""),
-                    {"s": site, "n": nid, "o": ordinal})
-
-        conn.execute(text("""
-            INSERT INTO registry_scoring_configuration
-                (config_id, config_key, version, model_id, effort, prompt_versions,
-                 normalization_version, definition_hash, status, promoted_at, promoted_by,
-                 rationale)
-            VALUES (:c, :k, 1, :m, :e, CAST(:pv AS jsonb), '1', :h, 'active', now(),
-                    'demo-seed', 'Demo configuration for the end-to-end run. Not a promotion.')
-            ON CONFLICT (config_id) DO NOTHING"""),
-            {"c": CONFIG_ID, "k": CONFIG_KEY, "m": MODEL_ID, "e": EFFORT,
-             "pv": json.dumps(identity.prompt_versions), "h": identity.definition_hash})
-
-        artifacts = []
         for key, paper in fx["papers"].items():
             body = paper["text"]
             path = text_dir / f"{PREFIX}{key}.txt"
@@ -132,23 +74,26 @@ def seed(text_dir: pathlib.Path) -> dict:
                  "uri": str(path),
                  "rp": json.dumps({k: "looked_up" for k in
                                    ("student", "section", "task", "iteration")})})
-            # unbound -> bound as a TEACHER, through the trigger, rather than inserting
-            # straight into `bound`. An INSERT bypasses the state machine entirely (the trigger
-            # is BEFORE UPDATE), so seeding the end state would leave the demo exercising a path
-            # no real artifact takes and producing no audit row.
+            # unbound -> bound as a TEACHER, through the trigger, rather than inserting straight
+            # into `bound`. The transition trigger is BEFORE UPDATE, so an INSERT bypasses the
+            # state machine entirely — seeding the end state would have the demo exercising a path
+            # no real artifact takes, and producing no audit row.
             conn.execute(text(
                 "UPDATE artifact SET state = 'bound' WHERE artifact_id = :a AND state = 'unbound'"),
                 {"a": aid})
             artifacts.append(aid)
 
-    return {"task": TASK_ID, "sites": [DRAFT_SITE_ID, SITE_ID], "nodes": node_ids,
-            "config_key": CONFIG_KEY, "artifacts": artifacts, "text_dir": str(text_dir)}
+    return {"artifacts": artifacts, "text_dir": str(text_dir), "config_key": CONFIG_KEY}
 
 
 def purge() -> dict:
-    """Remove every demo- row. score_event is append-only by trigger for UPDATE and DELETE, so a
-    demo run's events are removed by dropping the trigger for this transaction — which is why
-    this is a maintenance script and not something the pipeline can do."""
+    """Remove the demo artifacts and their events.
+
+    score_event is append-only by trigger for UPDATE and DELETE, so the trigger is disabled for
+    this transaction. That is why this is a maintenance script and not something the pipeline can
+    reach: the append-only rule is not negotiable from inside the pipeline, and a cleanup path that
+    the scorer could call would make it so.
+    """
     with engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', 'public', true)"))
         conn.execute(text("ALTER TABLE score_event DISABLE TRIGGER trg_score_event_append_only"))
@@ -167,15 +112,6 @@ def purge() -> dict:
         finally:
             conn.execute(text(
                 "ALTER TABLE score_event ENABLE TRIGGER trg_score_event_append_only"))
-
-        for table, col in (("registry_scoring_site_node", "site_id"),
-                           ("registry_scoring_configuration", "config_id"),
-                           ("registry_node_version", "node_version_id"),
-                           ("registry_scoring_site", "site_id"),
-                           ("registry_node", "node_id"),
-                           ("registry_task", "task_id")):
-            counts[table] = conn.execute(
-                text(f"DELETE FROM {table} WHERE {col} LIKE :p"), {"p": f"{PREFIX}%"}).rowcount
     return counts
 
 
@@ -183,7 +119,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--text-dir", default=None,
                     help="where to write the papers (default: a temp directory)")
-    ap.add_argument("--purge", action="store_true", help="remove every demo- row and exit")
+    ap.add_argument("--purge", action="store_true",
+                    help="remove the demo artifacts and their events (the rubric is "
+                         "`python -m registry.seed_demo --purge`)")
     args = ap.parse_args()
 
     if args.purge:

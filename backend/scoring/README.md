@@ -16,11 +16,16 @@ workstation — this connects as the migrator role, like every producer job.
 
 ```bash
 cd backend
-python -m scoring.seed_demo --text-dir /tmp/sip-demo   # registry + 2 synthetic papers, bound
+python -m registry.seed_demo --prompt-versions "$(python -m scoring.prompts)"  # author + lint
+python -m scoring.seed_demo --text-dir /tmp/sip-demo                # 2 synthetic papers, bound
 python -m scoring.run_scoring --config-key demo-writing --dry-run   # calls the model, writes nothing
-python -m scoring.run_scoring --config-key demo-writing            # scores, writes, transitions
-python -m scoring.seed_demo --purge                    # remove every demo- row
+python -m scoring.run_scoring --config-key demo-writing             # scores, writes, transitions
+python -m scoring.seed_demo --purge && python -m registry.seed_demo --purge
 ```
+
+Two seeds, because authoring a rubric is `registry`'s job and scoring may only read it. The shell
+substitution is not a workaround: recording the pipeline's prompt fingerprint into the
+configuration is what promotion IS, and if the two ever disagree `run_scoring` refuses to score.
 
 `--dry-run` still spends money: it makes every model call and discards the result. That is the
 point of it — the thing worth rehearsing is the calls and the assembly, not the INSERT.

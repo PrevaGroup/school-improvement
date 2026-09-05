@@ -143,3 +143,9 @@ def fingerprint() -> dict:
 
 def _sha(s: str) -> str:
     return hashlib.sha256(s.encode("utf8")).hexdigest()[:16]
+
+
+if __name__ == "__main__":     # `python -m scoring.prompts` prints what a configuration stamps
+    import json
+
+    print(json.dumps(fingerprint()))
