@@ -18,7 +18,31 @@ makes cross-district anchoring possible without a cross-tenant query.
 | `registry_scoring_site_node` | The trait set: which nodes a site is scored on. Frozen at binding, before stage C |
 | `registry_scoring_configuration` | The rater, as a versioned object: model id, prompt versions, effort, normalization rules |
 
-Models: `registry/models.py`. Linter: `registry/lint.py`. Migration: `0012_registry_tables.py`.
+Models: `registry/models.py`. Linter: `registry/lint.py`.
+Migrations: `0012_registry_tables.py`, `0014_one_published_version.py`.
+
+## Exactly one current row, in two places
+
+Two partial unique indexes (0014), both found by writing the query that depends on them rather than
+by designing the table:
+
+- **One published version per node.** The scoring driver assembles a trait set by joining
+  `registry_node_version` on `status = 'published'`. With two published versions the join returns
+  the node twice - the artifact is scored on it twice, under two wordings, and the trait set
+  recorded on the events no longer matches the one used. Nothing raised; the linter checks
+  authoring quality, not this.
+- **One active configuration per key.** Two active rows makes the rater ambiguous, and a rater that
+  cannot be named cannot have a severity estimated.
+
+Superseded, withdrawn and draft rows are untouched: the history stays, only the count of *current*
+rows is bounded.
+
+## What `scoring` reads from here
+
+The scoring driver reads `registry_scoring_site`, `registry_scoring_site_node`, `registry_node`,
+`registry_node_version` and `registry_scoring_configuration` **with SQL and never by import** - a
+produced table is the contract. Those five table shapes are therefore load-bearing for the pipeline;
+changing a column name in them breaks a consumer that no import graph will show you.
 
 ## The node rule
 

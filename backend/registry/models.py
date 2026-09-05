@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (CheckConstraint, ForeignKey, Index, Integer, Text, TIMESTAMP,
+from sqlalchemy import (CheckConstraint, ForeignKey, Index, Integer, Text, text, TIMESTAMP,
                         UniqueConstraint)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -120,6 +120,12 @@ class NodeVersion(Base):
         CheckConstraint(
             "status IN (" + ",".join(f"'{s}'" for s in VERSION_STATUSES) + ")", name="status"),
         Index("ix_registry_node_version_node", "node_id", "status"),
+        # Exactly one published version per node. Two would make the driver's trait-set join
+        # return the node twice — scored twice, under two wordings, with no error anywhere.
+        # Superseded and withdrawn rows are unaffected: the history stays, only the count of
+        # current ones is bounded. Migration 0014.
+        Index("uq_registry_node_one_published", "node_id", unique=True,
+              postgresql_where=text("status = 'published'")),
     )
 
 
@@ -234,4 +240,8 @@ class ScoringConfiguration(Base):
             "status <> 'active' OR (promoted_by IS NOT NULL AND rationale IS NOT NULL)",
             name="promotion_recorded"),
         Index("ix_registry_configuration_key", "config_key", "status"),
+        # Exactly one active configuration per key. Two active rows is an ambiguous rater, and a
+        # rater that cannot be named cannot have a severity estimated. Migration 0014.
+        Index("uq_registry_configuration_one_active", "config_key", unique=True,
+              postgresql_where=text("status = 'active'")),
     )

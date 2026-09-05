@@ -234,6 +234,37 @@ SELECT pg_temp.expect_fail(
      WHERE node_version_id='sm-nv'$$,
   'published descriptors are frozen');
 
+-- Exactly one published version per node (0014). Two would make the scoring driver's trait-set
+-- join return the node twice — scored twice, under two wordings, and nothing would raise.
+INSERT INTO registry_node_version (node_version_id, node_id, version, descriptors, status)
+VALUES ('sm-nv2', 'sm-node', 2, '{"1":"a","2":"b","3":"c","4":"d"}'::jsonb, 'draft');
+SELECT pg_temp.expect_ok(
+  $$SELECT 1$$, 'a draft second version is fine — history is not what is bounded');
+SELECT pg_temp.expect_fail(
+  $$UPDATE registry_node_version SET status='published' WHERE node_version_id='sm-nv2'$$,
+  'a node cannot have two published versions at once');
+
+-- Exactly one active configuration per key (0014). Two active rows is an ambiguous rater.
+INSERT INTO registry_scoring_configuration
+    (config_id, config_key, version, model_id, effort, prompt_versions, normalization_version,
+     definition_hash, status, promoted_by, rationale)
+VALUES ('sm-cfg-1', 'sm-key', 1, 'claude-opus-5', 'high', '{}'::jsonb, '1', 'h1', 'active',
+        'sm-admin', 'smoke test');
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO registry_scoring_configuration
+        (config_id, config_key, version, model_id, effort, prompt_versions,
+         normalization_version, definition_hash, status, promoted_by, rationale)
+    VALUES ('sm-cfg-2','sm-key',2,'claude-opus-5','high','{}'::jsonb,'1','h2','active',
+            'sm-admin','smoke test')$$,
+  'a config key cannot have two active configurations');
+
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO registry_scoring_configuration
+        (config_id, config_key, version, model_id, effort, prompt_versions,
+         normalization_version, definition_hash, status)
+    VALUES ('sm-cfg-3','sm-key-2',1,'claude-opus-5','high','{}'::jsonb,'1','h3','active')$$,
+  'a promotion with no recorded reason is a change nobody can explain later');
+
 -- --------------------------------------------------------------------------- --
 -- 5. Section access fails closed.
 -- --------------------------------------------------------------------------- --
