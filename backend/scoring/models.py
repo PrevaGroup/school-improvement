@@ -255,3 +255,21 @@ class ArtifactStateTransition(Base, TenantMixin):
         Index("ix_artifact_state_transition_artifact", "artifact_id", "created_at"),
         CheckConstraint("actor_type IN ('machine','teacher')", name="actor_type"),
     )
+
+
+class ArtifactTransitionRule(Base):
+    """The legal moves, as data — read by the trigger in 0008 to validate every transition.
+
+    Declared here even though the migration creates it with raw SQL, and that is the point. A table
+    that exists in the database and not in `Base.metadata` is one `alembic revision --autogenerate`
+    away from a DROP TABLE, which is the failure `tests/test_schema_inventory.py` exists to prevent.
+    It went unnoticed by every test because it was missing from BOTH sides — only visible against a
+    live database.
+
+    Not tenant-scoped: the machine is the same for every district.
+    """
+    __tablename__ = "artifact_transition_rule"
+
+    from_state: Mapped[str] = mapped_column(Text, primary_key=True)
+    to_state: Mapped[str] = mapped_column(Text, primary_key=True)
+    actor_type: Mapped[str] = mapped_column(Text, nullable=False)
