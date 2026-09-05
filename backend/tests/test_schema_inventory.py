@@ -116,6 +116,7 @@ EXPECTED_TABLES: dict[str, str] = {
     "artifact": "scoring",
     "score_event": "scoring",
     "artifact_state_transition": "scoring",
+    "artifact_composition": "scoring",
     # Created by raw SQL inside 0008's trigger block; declared in models.py anyway,
     # because a table absent from Base.metadata is one autogenerate away from a DROP.
     "artifact_transition_rule": "scoring",
@@ -203,6 +204,7 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "artifact": "0008_scoring_tables.py",
     "score_event": "0008_scoring_tables.py",
     "artifact_state_transition": "0008_scoring_tables.py",
+    "artifact_composition": "0017_artifact_composition.py",
     "artifact_transition_rule": "0008_scoring_tables.py",
     "roster_student": "0009_roster_tables.py",
     "roster_section": "0009_roster_tables.py",

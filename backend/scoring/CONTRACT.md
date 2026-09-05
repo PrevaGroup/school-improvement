@@ -13,6 +13,7 @@ contract holds.
 | `artifact` | One submitted document under one binding key, in one state. Holds the state machine's current position and the supersession pointer |
 | `artifact_state_transition` | Every state change with the actor who made it — the audit half of the machine |
 | `artifact_transition_rule` | The legal moves, as data. Read by the trigger; mirrors `ARTIFACT_TRANSITIONS` in `models.py`, and a test asserts they agree |
+| `artifact_composition` | The review packet, stored as the teacher saw it. Append-only by trigger |
 
 Models: `scoring/models.py`.
 
@@ -24,7 +25,8 @@ Models: `scoring/models.py`.
 | `prompts.py` | The prompt text, versioned AND fingerprinted. Half the rater's identity |
 | `rater.py` | `RaterIdentity` (the configuration, as an object) and the model call behind a two-method protocol |
 | `score.py` | Stage C then stage D, one criterion at a time. **Pure** - a function of (text, criteria, rater) |
-| `run_scoring.py` | The driver: registry read, ids, transaction, state transition |
+| `run_scoring.py` | The driver: registry read, ids, transaction, state transition (`bound` -> `scored`) |
+| `compose.py` | The review packet, and `scored` -> `composed` |
 
 `score.py` is pure so the architectural properties can be asserted rather than instructed:
 `tests/test_score.py` checks the assembled prompts for the absence of the student's text at stage D,
@@ -32,7 +34,33 @@ of any other criterion, and of any prior score. Those are properties of the cont
 of the context is checkable; an instruction to the model is not.
 
 ## Migration revisions owned
-`0008_scoring_tables.py`.
+`0008_scoring_tables.py`, `0017_artifact_composition.py`.
+
+## Why the packet is stored rather than derived on read
+
+Nearly all of it IS derivable from `score_event`, and a stored copy of derivable data is normally a
+second source of truth waiting to drift. It is not, here: `score_event` is append-only, so a teacher
+override APPENDS. Re-deriving after a review produces a different packet than the one the teacher
+was looking at when they decided, and what was in front of a person at the moment of judgment is not
+derivable from anything.
+
+## The prior-observations panel
+
+Three filters stand between the record and the invitation to read a trend, and none is cosmetic:
+
+- **Same node only.** A prior level is comparable only if it came from the same node - same
+  standard, criterion, scale structure and grade band. Two criteria that both sound like "evidence"
+  are two nodes. The identifier is the identity, so this is a join, not a judgment.
+- **Measurement occasions only.** A draft is scored and is not an occasion. A draft level beside a
+  final one reads as growth within an assignment, and a draft is not a valid comparison point.
+- **The rater is named and a change is flagged.** The pin holds within one section x task x
+  iteration. Across tasks it does not, so two priors can be two raters; raw levels from two raters
+  are not directly comparable. `prior_rater_mismatch` and a plain-English `prior_note` carry that
+  qualification into whatever renders the packet.
+
+Dropped spans reach the packet as a COUNT, never as text. Showing a teacher the sentences a model
+invented invites reading the invention as evidence; `score_event` keeps the full text for whoever is
+debugging the pipeline rather than reviewing a paper.
 
 ## What the driver reads, and what it refuses
 

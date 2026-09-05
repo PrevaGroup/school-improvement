@@ -39,8 +39,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (CheckConstraint, ForeignKey, Index, Integer, Numeric, Text,
-                        TIMESTAMP, UniqueConstraint)
+from sqlalchemy import (Boolean, CheckConstraint, ForeignKey, Index, Integer, Numeric,
+                        Text, TIMESTAMP, UniqueConstraint)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -273,3 +273,46 @@ class ArtifactTransitionRule(Base):
     from_state: Mapped[str] = mapped_column(Text, primary_key=True)
     to_state: Mapped[str] = mapped_column(Text, primary_key=True)
     actor_type: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ArtifactComposition(Base, TenantMixin):
+    """The review packet, stored as the teacher saw it.
+
+    Almost all of this is derivable from score_event, and a stored copy of derivable data is
+    normally a second source of truth waiting to drift. It is not, here, for one specific reason:
+    score_event is append-only, so a teacher override APPENDS. Re-deriving the packet after a
+    review produces a different packet than the one the teacher was looking at when they decided,
+    and what was in front of a person at the moment of judgment is not derivable from anything.
+
+    Append-only for the same reason, enforced by trigger. Recomposition writes a new row pointing
+    at the one it replaces; the latest is current and the earlier one is what somebody reviewed.
+
+    `needs_human` and `prior_rater_mismatch` are denormalised out of the packet because they drive
+    the queue, and a queue that opens every JSON blob to sort itself gets slower with the year.
+
+    Migration 0017.
+    """
+    __tablename__ = "artifact_composition"
+
+    composition_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("artifact.artifact_id"), nullable=False)
+    composer_version: Mapped[str] = mapped_column(Text, nullable=False)
+    packet: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    needs_human: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # True when any prior observation shown came from a different scoring configuration. Raw
+    # levels from two raters are not directly comparable, and a trend drawn through them is the
+    # growth claim the measurement design exists to qualify.
+    prior_rater_mismatch: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false")
+
+    supersedes_composition_id: Mapped[str | None] = mapped_column(
+        ForeignKey("artifact_composition.composition_id"))
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default="now()")
+
+    __table_args__ = (
+        Index("ix_artifact_composition_artifact", "artifact_id", "created_at"),
+        Index("ix_artifact_composition_queue", "tenant_id", "needs_human"),
+    )

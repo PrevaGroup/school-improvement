@@ -91,6 +91,30 @@ SELECT count(*) AS events, count(DISTINCT idempotency_key) AS distinct_keys,
   FROM score_event;
 
 \echo ''
+\echo '=== the review packet: what a teacher would be shown ==='
+SELECT c.artifact_id, c.composer_version, c.needs_human, c.prior_rater_mismatch,
+       jsonb_array_length(c.packet->'criteria')                       AS criteria,
+       (SELECT count(*) FROM jsonb_array_elements(c.packet->'criteria') x
+         WHERE jsonb_array_length(x->'prior') > 0)                    AS with_prior,
+       c.packet->>'prior_note'                                        AS qualification
+  FROM artifact_composition c
+ ORDER BY c.artifact_id;
+
+\echo ''
+\echo '=== no dropped span reaches the packet as evidence ==='
+SELECT CASE WHEN count(*) = 0
+            THEN 'ok — every span shown to a teacher survived verification'
+            ELSE 'FAIL — ' || count(*) || ' fabricated span(s) reached a packet' END AS verdict
+  FROM artifact_composition c,
+       jsonb_array_elements(c.packet->'criteria') crit,
+       jsonb_array_elements_text(crit->'evidence') shown,
+       score_event e,
+       jsonb_array_elements(e.evidence->'dropped') d
+ WHERE e.artifact_id = c.artifact_id
+   AND e.node_id = crit->>'node_id'
+   AND shown = d->>'span';
+
+\echo ''
 \echo '=== a level exists if and only if the status is scored ==='
 SELECT CASE WHEN count(*) = 0 THEN 'ok — no level without a score, no score without a level'
             ELSE 'FAIL — ' || count(*) || ' row(s) violate it' END AS verdict

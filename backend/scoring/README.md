@@ -20,6 +20,7 @@ python -m registry.seed_demo --prompt-versions "$(python -m scoring.prompts)"  #
 python -m scoring.seed_demo --text-dir /tmp/sip-demo                # 2 synthetic papers, bound
 python -m scoring.run_scoring --config-key demo-writing --dry-run   # calls the model, writes nothing
 python -m scoring.run_scoring --config-key demo-writing             # scores, writes, transitions
+python -m scoring.compose                                           # scored -> composed
 python -m scoring.seed_demo --purge && python -m registry.seed_demo --purge
 ```
 
