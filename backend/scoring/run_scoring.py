@@ -96,12 +96,16 @@ _PINNED_CONFIG = text("""
        AND scorer_type = 'ai' AND scoring_configuration_id IS NOT NULL
 """)
 
+# The CAST on :run_id is load-bearing, not decoration. An optional parameter that appears only
+# beside IS NULL gives the planner nothing to infer a type from, and Postgres refuses the whole
+# statement with `could not determine data type of parameter $2` — at execution, against a real
+# server, which is the one place none of the unit tests look. Naming the type once fixes it.
 _PENDING = text("""
     SELECT artifact_id, run_id, student_id, section_id, task_id, iteration, window_label,
            content_hash, source_uri, tenant_id, visibility
       FROM artifact
      WHERE tenant_id = :tenant AND state = 'bound'
-       AND (:run_id IS NULL OR run_id = :run_id)
+       AND (CAST(:run_id AS text) IS NULL OR run_id = CAST(:run_id AS text))
      ORDER BY created_at
      LIMIT :limit
 """)

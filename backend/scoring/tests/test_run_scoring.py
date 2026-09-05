@@ -10,6 +10,9 @@ says nothing about whether it fires.
 """
 from __future__ import annotations
 
+import pathlib
+import re
+
 import pytest
 
 from app.vocab import SCORE_STATUS_IDS
@@ -186,3 +189,26 @@ def test_a_floating_model_alias_is_not_a_pinned_rater():
     every score before and after looks identical."""
     with pytest.raises(ValueError, match="floating alias"):
         RaterIdentity("cfg-x", "claude-opus-latest", "high", fingerprint(), "1")
+
+
+# ------------------------------------------------------------------ the SQL itself
+
+
+def test_no_optional_parameter_is_compared_to_null_without_a_type():
+    """`AND (:run_id IS NULL OR run_id = :run_id)` looks obviously fine and Postgres refuses it.
+
+    A bind parameter that only ever appears beside IS NULL gives the planner nothing to infer a
+    type from, and the whole statement fails with `could not determine data type of parameter $2`
+    — at execution, against a real server. Every unit test here passed; the first Cloud Shell run
+    did not survive its first query.
+
+    This is a text scan rather than a real check, and it only catches the shape that already bit
+    us. That is the honest scope of it: the general problem needs a database, and this is the part
+    that can be caught without one.
+    """
+    src = pathlib.Path(__file__).resolve().parent.parent.joinpath("run_scoring.py").read_text(
+        encoding="utf8")
+    bare = [m.group(0) for m in re.finditer(r"(?<!AS text\)\s)\B:(\w+)\s+IS\s+NULL", src)]
+    assert not bare, (
+        f"optional bind parameters compared to NULL without a CAST: {bare}. Postgres cannot infer "
+        f"a type for them and refuses the statement.")
