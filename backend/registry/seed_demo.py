@@ -35,6 +35,7 @@ import hashlib
 import json
 import pathlib
 import uuid
+from dataclasses import replace
 
 from sqlalchemy import text
 
@@ -57,7 +58,15 @@ def load() -> dict:
     return json.loads(FIXTURE.read_text(encoding="utf8"))
 
 
-def _read_registry(conn) -> Registry:
+def _read_acknowledgments(conn) -> dict[str, dict]:
+    """The recorded judgments, keyed the way lint() looks them up."""
+    return {f"{a['rule']}:{a['subject']}": dict(a) for a in conn.execute(text(
+        "SELECT rule, subject, reason, acknowledged_by, decision_id"
+        "  FROM registry_lint_acknowledgment WHERE subject LIKE :p"),
+        {"p": f"{PREFIX}%"}).mappings()}
+
+
+def _read_registry(conn, acks: dict[str, dict]) -> Registry:
     """Load what is actually stored, so lint checks the database rather than our intentions."""
     def rows(sql: str) -> list[dict]:
         return [dict(r) for r in conn.execute(text(sql), {"p": f"{PREFIX}%"}).mappings()]
@@ -76,9 +85,7 @@ def _read_registry(conn) -> Registry:
                         " WHERE site_id LIKE :p"),
         # Without this the advisory class is a warning log: lint() drops an advisory finding whose
         # "rule:subject" appears here, and nothing else populates it.
-        acknowledgments={f"{a['rule']}:{a['subject']}": a["reason"] for a in
-                         rows("SELECT rule, subject, reason FROM registry_lint_acknowledgment"
-                              " WHERE subject LIKE :p")},
+        acknowledgments={k: v["reason"] for k, v in acks.items()},
     )
 
 
@@ -141,25 +148,48 @@ def seed(prompt_versions: dict) -> dict:
             {"c": CONFIG_ID, "k": CONFIG_KEY, "m": MODEL_ID, "e": EFFORT,
              "pv": json.dumps(prompt_versions), "h": definition_hash})
 
-        findings = lint(_read_registry(conn))
+        acks = _read_acknowledgments(conn)
+        registry = _read_registry(conn, acks)
+        findings = lint(registry)
         blocked = blocks_publication(findings)
 
-        if not blocked:
+        # Lint AGAIN with no acknowledgments, to name what was cleared and by whose decision.
+        # Without this an acknowledged registry reports identically to a spotless one, which is
+        # precisely the difference the two severity classes exist to preserve: a reader must be
+        # able to see a judgment that was made rather than a check that was skipped. Storing the
+        # reason and then not showing it would be the same silence with extra steps.
+        cleared = [f for f in lint(replace(registry, acknowledgments={})) if f not in findings]
+
+        drafts = conn.execute(text(
+            "SELECT count(*) FROM registry_node_version WHERE node_id LIKE :p"
+            "   AND status = 'draft'"), {"p": f"{PREFIX}%"}).scalar_one()
+        published = 0
+        if drafts and not blocked:
             published = conn.execute(text("""
                 UPDATE registry_node_version SET status = 'published'
                  WHERE node_id LIKE :p AND status = 'draft'"""),
                 {"p": f"{PREFIX}%"}).rowcount
-        else:
-            published = 0
+
+    if blocked:
+        note = f"{drafts} version(s) left as DRAFT — the linter refused publication"
+    elif published:
+        note = f"{published} version(s) published"
+    else:
+        note = "nothing to publish — no drafts were waiting"
 
     return {
         "task": TASK_ID, "sites": [DRAFT_SITE_ID, SITE_ID], "nodes": node_ids,
         "config_key": CONFIG_KEY, "config_id": CONFIG_ID,
         "blocking": [str(f) for f in findings if f.severity == BLOCKING],
         "advisory": [str(f) for f in findings if f.severity == ADVISORY],
+        "acknowledged": [
+            {"finding": str(f),
+             "decision": acks.get(f"{f.rule}:{f.subject}", {}).get("decision_id"),
+             "by": acks.get(f"{f.rule}:{f.subject}", {}).get("acknowledged_by"),
+             "reason": acks.get(f"{f.rule}:{f.subject}", {}).get("reason")}
+            for f in cleared],
         "published": published,
-        "note": ("versions left as DRAFT — the linter refused publication" if blocked
-                 else f"{published} version(s) published after a clean lint"),
+        "note": note,
     }
 
 

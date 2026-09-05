@@ -38,14 +38,38 @@ def test_versions_are_inserted_as_draft_and_published_only_after_the_lint():
     assert "'published'" not in src.split("findings = lint(")[0], (
         "something publishes before the lint runs")
     assert src.index("findings = lint(") < src.index("status = 'published'")
-    assert "if not blocked" in src
+    assert "not blocked" in src, "publication is not gated on the lint result"
+
+
+def test_an_acknowledged_registry_does_not_report_as_a_spotless_one():
+    """The first acknowledgment cleared four findings and the output became indistinguishable from
+    a registry that never had any — advisory empty, nothing else said. That is the silence the two
+    severity classes exist to prevent: storing a reason and then not showing it is the check being
+    skipped with extra steps.
+
+    So the seed lints TWICE, once with acknowledgments and once without, and names the difference
+    with the decision that cleared it.
+    """
+    src = inspect.getsource(seed_demo.seed)
+    assert "acknowledgments={}" in src, "nothing computes what the acknowledgments suppressed"
+    assert "cleared" in src and '"acknowledged"' in src
+    assert src.index("findings = lint(") < src.index("cleared = ")
+
+
+def test_nothing_to_publish_is_not_reported_as_a_publication():
+    """`0 version(s) published after a clean lint` read like a no-op that had also passed a lint.
+    Two different states — a clean lint with drafts waiting, and no drafts at all — deserve two
+    different sentences."""
+    src = inspect.getsource(seed_demo.seed)
+    assert "nothing to publish" in src
 
 
 def test_a_blocking_finding_leaves_the_drafts_in_place():
     """A draft can be fixed; a published version cannot. Refusing publication and keeping the
     drafts is the useful failure state."""
     src = inspect.getsource(seed_demo.seed)
-    assert "published = 0" in src
+    assert "if drafts and not blocked" in src
+    assert "refused publication" in src
 
 
 def test_the_demo_nodes_are_diagnostic_only():
