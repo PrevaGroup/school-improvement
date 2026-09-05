@@ -85,7 +85,19 @@ MODULE_OF_PREFIX: dict[str, str] = {
 # the way `tests/` did when pytest.ini's `testpaths` omitted it, and just as silently.
 # `test_the_module_map_covers_every_source_file` only guards files inside these trees, so
 # it cannot catch a whole tree being missing. This tuple is the thing to keep honest.
-SOURCE_TREES = ("app", "etl", "likeschools", "public_metrics", "evals")
+# Kept honest by `test_every_module_tree_is_scanned` and `test_every_package_on_disk_is_scanned`
+# below, added 2026-09-05 after the seven writing-subsystem modules sat here UNSCANNED for
+# thirteen commits: they were in MODULE_OF_PREFIX, so the map looked complete, but their folders
+# were not in this tuple, so no file in any of them was ever walked. The comment above said
+# exactly what to do and it still did not happen — which is the argument for a test rather than
+# a comment. Third instance of this shape, after pytest.ini `testpaths` and alembic
+# `version_locations`: a path missing from a registry is an absence, and absences report green.
+SOURCE_TREES = ("app", "etl", "likeschools", "public_metrics", "evals",
+                "scoring", "roster", "measurement", "pooling", "registry", "corpus", "intake")
+
+# Package directories that are tooling rather than modules. `tests` and `scripts` reach across
+# everything by design; `migrations` is the repo-level alembic tree.
+EXEMPT_TREES = frozenset({"tests", "scripts", "migrations"})
 
 # --------------------------------------------------------------------------- #
 # Known debt: cross-module imports that exist TODAY, enumerated so the rule can be
@@ -149,6 +161,35 @@ def _source_files() -> list[pathlib.Path]:
             if "__pycache__" not in p.parts and "tests" not in p.parts
         )
     return sorted(files)
+
+
+def test_every_module_tree_is_scanned():
+    """Every module named in the map must have its folder in SOURCE_TREES.
+
+    `test_the_module_map_covers_every_source_file` cannot catch this: it only looks at files
+    inside trees that are already scanned, so a whole missing tree is invisible to it. This is
+    the check that would have caught seven dark modules.
+    """
+    declared = {prefix.split(".")[0] for prefix in MODULE_OF_PREFIX}
+    missing = sorted(declared - set(SOURCE_TREES))
+    assert not missing, (
+        f"modules are in MODULE_OF_PREFIX but their trees are not walked: {missing}. "
+        "Their imports are never checked — the boundary rule is unenforced for them.")
+
+
+def test_every_package_on_disk_is_scanned():
+    """The mirror: a new module folder that nobody remembered to declare at all.
+
+    Derived from disk rather than from the map, so a module can only escape the rule by being
+    added to EXEMPT_TREES — a visible decision — instead of by omission.
+    """
+    packages = {p.name for p in BACKEND.iterdir()
+                if p.is_dir() and (p / "__init__.py").exists()}
+    unscanned = sorted(packages - set(SOURCE_TREES) - EXEMPT_TREES)
+    assert not unscanned, (
+        f"python packages under backend/ that no tree scans: {unscanned}. "
+        "Add them to SOURCE_TREES (and MODULE_OF_PREFIX), or to EXEMPT_TREES if they are "
+        "tooling rather than modules.")
 
 
 def test_the_module_map_covers_every_source_file():
