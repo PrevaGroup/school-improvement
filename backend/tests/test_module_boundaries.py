@@ -73,6 +73,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "measurement": "measurement",  # estimation frames — engine, no serving surface (expansion plan §10)
     "pooling": "pooling",  # the ONLY module that crosses the district threshold — expansion plan §7
     "registry": "registry",  # nodes, tasks, scoring sites, scoring configuration + the linter
+    "corpus": "corpus",  # anchor papers — public reference content, bulk ETL like public_metrics
 }
 
 # Scanned trees. `tests/`, `scripts/`, and `migrations/` are tooling that legitimately
