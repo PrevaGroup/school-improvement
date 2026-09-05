@@ -89,7 +89,7 @@ class AggregationConsent(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default="now()")
 
     __table_args__ = (
-        UniqueConstraint("district_tenant_id", "scope", "effective_from", name="span"),
+        UniqueConstraint("district_tenant_id", "scope", "effective_from", name="uq_pooling_consent_span"),
         CheckConstraint(
             "scope IN (" + ",".join(f"'{s}'" for s in CONSENT_SCOPES) + ")", name="scope"),
         Index("ix_pooling_consent_district", "district_tenant_id", "scope"),

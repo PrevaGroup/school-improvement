@@ -73,6 +73,11 @@ def _read_registry(conn) -> Registry:
                    " FROM registry_scoring_site WHERE task_id LIKE :p"),
         site_nodes=rows("SELECT site_id, node_id, ordinal FROM registry_scoring_site_node"
                         " WHERE site_id LIKE :p"),
+        # Without this the advisory class is a warning log: lint() drops an advisory finding whose
+        # "rule:subject" appears here, and nothing else populates it.
+        acknowledgments={f"{a['rule']}:{a['subject']}": a["reason"] for a in
+                         rows("SELECT rule, subject, reason FROM registry_lint_acknowledgment"
+                              " WHERE subject LIKE :p")},
     )
 
 
@@ -172,8 +177,31 @@ def purge() -> dict:
     return counts
 
 
+def acknowledge(rule: str, subject: str, reason: str, by: str,
+                node_version_id: str | None = None) -> None:
+    """Record a judgment about one advisory finding.
+
+    The linter says what it cannot decide; this is where somebody decides it. The reason is stored
+    rather than the fact of an acknowledgment, because "acknowledged" alone is indistinguishable
+    from the check having been skipped — which is the whole difference the two severity classes
+    exist to preserve. A CHECK constraint refuses a reason under twelve characters.
+    """
+    with engine().begin() as conn:
+        conn.execute(text("""
+            INSERT INTO registry_lint_acknowledgment
+                (ack_id, rule, subject, node_version_id, reason, acknowledged_by)
+            VALUES (:i, :r, :s, :v, :why, :who)
+            ON CONFLICT (rule, subject) DO UPDATE
+                SET reason = EXCLUDED.reason, acknowledged_by = EXCLUDED.acknowledged_by,
+                    created_at = now()"""),
+            {"i": f"{rule}:{subject}", "r": rule, "s": subject, "v": node_version_id,
+             "why": reason, "who": by})
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--acknowledge", nargs=4, metavar=("RULE", "SUBJECT", "REASON", "BY"),
+                    help="record a judgment about one advisory finding and re-run the lint")
     ap.add_argument("--prompt-versions",
                     help='the pipeline fingerprint, as JSON. Get it with '
                          '`python -m scoring.prompts`.')
@@ -182,6 +210,12 @@ def main() -> None:
 
     if args.purge:
         print(json.dumps(purge(), indent=1))
+        return
+    if args.acknowledge:
+        rule, subject, reason, by = args.acknowledge
+        acknowledge(rule, subject, reason, by)
+        print(json.dumps({"acknowledged": f"{rule}:{subject}", "by": by, "reason": reason},
+                         indent=1))
         return
     if not args.prompt_versions:
         ap.error("--prompt-versions is required: the configuration records the prompt fingerprint "

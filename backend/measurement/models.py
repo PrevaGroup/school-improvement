@@ -96,7 +96,7 @@ class EstimationFrame(Base, TenantMixin):
         TIMESTAMP(timezone=True), nullable=False, server_default="now()")
 
     __table_args__ = (
-        UniqueConstraint("tenant_id", "frame_key", "version", name="version"),
+        UniqueConstraint("tenant_id", "frame_key", "version", name="uq_estimation_frame_version"),
         CheckConstraint(
             "status IN (" + ",".join(f"'{s}'" for s in FRAME_STATUSES) + ")", name="status"),
         Index("ix_estimation_frame_key", "tenant_id", "frame_key", "status"),

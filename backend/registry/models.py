@@ -116,7 +116,7 @@ class NodeVersion(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default="now()")
 
     __table_args__ = (
-        UniqueConstraint("node_id", "version", name="version"),
+        UniqueConstraint("node_id", "version", name="uq_registry_node_version"),
         CheckConstraint(
             "status IN (" + ",".join(f"'{s}'" for s in VERSION_STATUSES) + ")", name="status"),
         Index("ix_registry_node_version_node", "node_id", "status"),
@@ -167,7 +167,7 @@ class ScoringSite(Base):
     note: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
-        UniqueConstraint("task_id", "iteration", name="iteration"),
+        UniqueConstraint("task_id", "iteration", name="uq_registry_scoring_site_iteration"),
         Index("ix_registry_scoring_site_task", "task_id"),
     )
 
@@ -232,7 +232,7 @@ class ScoringConfiguration(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default="now()")
 
     __table_args__ = (
-        UniqueConstraint("config_key", "version", name="version"),
+        UniqueConstraint("config_key", "version", name="uq_registry_configuration_version"),
         CheckConstraint(
             "status IN ('draft','active','superseded','withdrawn')", name="status"),
         # A promotion nobody recorded a reason for is a change nobody can explain later.
@@ -244,4 +244,39 @@ class ScoringConfiguration(Base):
         # rater that cannot be named cannot have a severity estimated. Migration 0014.
         Index("uq_registry_configuration_one_active", "config_key", unique=True,
               postgresql_where=text("status = 'active'")),
+    )
+
+
+class LintAcknowledgment(Base):
+    """One recorded answer to one advisory finding.
+
+    The linter's advisory class means "a judgment the linter cannot make". `lint()` drops an
+    advisory finding whose `rule:subject` appears here, so this table is the only thing that makes
+    that class different from a warning log — the acknowledgment becomes part of the version
+    record, and the next reader sees a judgment that was made rather than a check that was skipped.
+
+    NOT the same as `NodeVersion.construct_unchanged_ack`, which answers one specific BLOCKING rule
+    about a descriptor edit. One version can carry several acknowledgments here, each with its own
+    author and reason, and folding them into a column would lose which was answered and by whom.
+
+    Public reference content, no tenancy: a judgment about a node is a judgment everywhere it
+    appears. Migration 0015.
+    """
+    __tablename__ = "registry_lint_acknowledgment"
+
+    ack_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    rule: Mapped[str] = mapped_column(Text, nullable=False)
+    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    node_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("registry_node_version.node_version_id"))
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    acknowledged_by: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default="now()")
+
+    __table_args__ = (
+        UniqueConstraint("rule", "subject", name="uq_registry_lint_ack_finding"),
+        # A reason that says nothing is the check being skipped with extra steps.
+        CheckConstraint("length(btrim(reason)) >= 12", name="reason_substantive"),
+        Index("ix_registry_lint_ack_version", "node_version_id"),
     )

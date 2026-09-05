@@ -18,8 +18,31 @@ makes cross-district anchoring possible without a cross-tenant query.
 | `registry_scoring_site_node` | The trait set: which nodes a site is scored on. Frozen at binding, before stage C |
 | `registry_scoring_configuration` | The rater, as a versioned object: model id, prompt versions, effort, normalization rules |
 
-Models: `registry/models.py`. Linter: `registry/lint.py`.
-Migrations: `0012_registry_tables.py`, `0014_one_published_version.py`.
+| `registry_lint_acknowledgment` | One recorded judgment about one advisory finding: which rule, which subject, the reason, and who |
+
+Models: `registry/models.py`. Linter: `registry/lint.py`. Seed + publication: `registry/seed_demo.py`.
+Migrations: `0012_registry_tables.py`, `0014_one_published_version.py`,
+`0015_lint_acknowledgment.py`.
+
+## Publication runs the linter
+
+Versions insert as `draft`. The registry is then read BACK OUT of the database, lint runs against
+what is actually stored, and only then do drafts become `published`. Linting the in-memory intent
+would check what we meant to write rather than what is there.
+
+Blocking findings refuse publication and leave the drafts, which is the useful failure state - a
+draft can be fixed and a published version cannot.
+
+Advisory findings clear only with a row in `registry_lint_acknowledgment`, which `lint()` reads
+through `Registry.acknowledgments`. The reason is stored rather than the fact, because
+"acknowledged" alone is indistinguishable from the check having been skipped - the difference the
+two severity classes exist to preserve. A CHECK refuses a reason under twelve characters.
+
+    python -m registry.seed_demo --acknowledge RULE SUBJECT REASON BY
+
+This is NOT `registry_node_version.construct_unchanged_ack`, which answers one specific blocking
+rule about a descriptor edit. One version can carry several acknowledgments here, each with its own
+author and reason.
 
 ## Exactly one current row, in two places
 

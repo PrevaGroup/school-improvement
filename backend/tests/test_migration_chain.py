@@ -149,3 +149,75 @@ def test_migration_check_names_are_bare():
     assert not offenders, (
         "CHECK constraints naming their own `ck_` prefix — the convention adds it: "
         + "; ".join(offenders))
+
+
+def _module_migration_text() -> tuple[str, set[str]]:
+    """The SQL of the module migrations (0008 onward), and the tables they create.
+
+    Scoped to those deliberately: the tables in 0001-0007 predate this convention, and folding
+    them in would mean either a large rename or an exemption list, both of which are separate
+    decisions rather than something to smuggle into a test.
+    """
+    bodies, tables = [], set()
+    for f in _migration_files():
+        body = f.read_text(encoding="utf8", errors="replace")
+        rev = REVISION_RE.search(body).group(1)
+        if not (rev.isdigit() and int(rev) >= 8):
+            continue
+        bodies.append(body)
+        tables.update(re.findall(r"""create_table\(\s*["']([a-z_0-9]+)["']""", body))
+        tables.update(re.findall(r"CREATE TABLE\s+([a-z_0-9]+)", body))
+    return "\n".join(bodies), tables
+
+
+def _declared_tables():
+    from app.models import Base
+    import corpus.models, measurement.models, pooling.models  # noqa: F401
+    import registry.models, roster.models, scoring.models     # noqa: F401
+    return Base.metadata.tables
+
+
+def test_every_unique_constraint_name_follows_the_convention():
+    """`uq` is the one template with no `constraint_name` token, so an explicit name passes
+    straight through instead of being expanded. That makes it the one place where a model and a
+    migration can name the same constraint two different things and nothing notices."""
+    offenders = sorted(
+        f"{t.name}.{c.name}" for t in _declared_tables().values() for c in t.constraints
+        if type(c).__name__ == "UniqueConstraint" and c.name
+        and not str(c.name).startswith("uq_"))
+    assert not offenders, (
+        f"unique constraints not named uq_*: {offenders}. Unlike `ck`, the convention cannot "
+        f"expand these — the name you write is the name you get, in both places.")
+
+
+def test_every_declared_constraint_name_exists_in_a_migration():
+    """The database and the models must agree on what a constraint is CALLED.
+
+    Found on 2026-09-05: ten of eleven unique constraints across the seven module tables had one
+    name in the models and a different one in the database — `version` against
+    `uq_registry_node_version`, and so on for the rest. Nothing raised. The next `--autogenerate`
+    would have proposed dropping and recreating all ten, and any code catching a named constraint
+    violation would have been catching a name that does not exist.
+
+    CHECK names are compared bare, because the models carry the convention-expanded form
+    (`ck_<table>_<name>`) while the migrations correctly write the bare one.
+    """
+    sql, created = _module_migration_text()
+    missing = []
+    for table in _declared_tables().values():
+        if table.name not in created:
+            continue
+        for c in table.constraints:
+            kind = type(c).__name__
+            if kind == "UniqueConstraint" and c.name:
+                needle = str(c.name)
+            elif kind == "CheckConstraint" and c.name:
+                needle = str(c.name).removeprefix(f"ck_{table.name}_")
+            else:
+                continue
+            if f'"{needle}"' not in sql and f"'{needle}'" not in sql:
+                missing.append(f"{table.name}.{c.name} (looked for {needle!r})")
+    assert not missing, (
+        "constraints declared in the models under names no migration creates:\n  "
+        + "\n  ".join(sorted(missing))
+        + "\n\nThe database and the models disagree about what these are called.")

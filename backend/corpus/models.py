@@ -121,7 +121,7 @@ class CorpusPaper(Base):
     partition: Mapped[str] = mapped_column(Text, nullable=False, server_default="unassigned")
 
     __table_args__ = (
-        UniqueConstraint("source_id", "external_id", name="external_id"),
+        UniqueConstraint("source_id", "external_id", name="uq_corpus_paper_external_id"),
         CheckConstraint(
             "partition IN (" + ",".join(f"'{p}'" for p in PARTITIONS) + ")", name="partition"),
         Index("ix_corpus_paper_hash", "text_hash"),

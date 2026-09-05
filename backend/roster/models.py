@@ -97,7 +97,7 @@ class Section(Base, TenantMixin):
 
     __table_args__ = (
         Index("ix_roster_section_school", "tenant_id", "school_id"),
-        UniqueConstraint("tenant_id", "external_key", name="external_key"),
+        UniqueConstraint("tenant_id", "external_key", name="uq_roster_section_external_key"),
     )
 
 
@@ -129,7 +129,8 @@ class Enrollment(Base, TenantMixin):
     __table_args__ = (
         Index("ix_roster_enrollment_section", "tenant_id", "section_id"),
         Index("ix_roster_enrollment_student", "tenant_id", "student_id"),
-        UniqueConstraint("section_id", "student_id", "active_from", name="span"),
+        UniqueConstraint("section_id", "student_id", "active_from",
+                         name="uq_roster_enrollment_span"),
     )
 
 
@@ -159,7 +160,8 @@ class SectionStaff(Base, TenantMixin):
     __table_args__ = (
         Index("ix_roster_section_staff_principal", "tenant_id", "principal_hash"),
         Index("ix_roster_section_staff_section", "tenant_id", "section_id"),
-        UniqueConstraint("section_id", "principal_hash", "role", "active_from", name="span"),
+        UniqueConstraint("section_id", "principal_hash", "role", "active_from",
+                         name="uq_roster_section_staff_span"),
         CheckConstraint(
             "role IN (" + ",".join(f"'{r}'" for r in STAFF_ROLES) + ")", name="role"),
     )
