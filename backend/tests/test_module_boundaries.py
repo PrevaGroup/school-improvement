@@ -68,6 +68,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "likeschools": "likeschools",
     "public_metrics": "public_metrics",
     "evals": "evals",  # trace store + eval loop (owns 5 tables) — eval-trace-system.md phase 2
+    "scoring": "scoring",  # the writing subsystem's record (artifact, score_event) — expansion plan §6
 }
 
 # Scanned trees. `tests/`, `scripts/`, and `migrations/` are tooling that legitimately

@@ -52,6 +52,7 @@ from app.models import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
 import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
 import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback
+import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_state_transition
 
 # table -> the module that DECLARES it (whose models.py the class lives in). That's what this
 # file can actually check: Base.metadata is built from declarations, not from who writes rows.
@@ -103,6 +104,13 @@ EXPECTED_TABLES: dict[str, str] = {
     "eval_run": "evals",
     "eval_result": "evals",
     "feedback": "evals",
+    # --- scoring's tables — declared in scoring/models.py. Hold identifiable student
+    #     writing and carry tenant_id, but are NOT in PRIVATE_TABLES: turning RLS on is a
+    #     deliberate core move made when the subsystem first holds real student work, not
+    #     a side effect of the module existing. Same posture as evals. ---
+    "artifact": "scoring",
+    "score_event": "scoring",
+    "artifact_state_transition": "scoring",
 }
 
 
@@ -153,6 +161,9 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "eval_run": "0006_eval_tables.py",
     "eval_result": "0006_eval_tables.py",
     "feedback": "0006_eval_tables.py",
+    "artifact": "0008_scoring_tables.py",
+    "score_event": "0008_scoring_tables.py",
+    "artifact_state_transition": "0008_scoring_tables.py",
 }
 
 

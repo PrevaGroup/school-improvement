@@ -29,6 +29,7 @@ from app.models import Base      # noqa: E402
 import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
 import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
 import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback
+import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_state_transition
 
 target_metadata = Base.metadata
 config = context.config
