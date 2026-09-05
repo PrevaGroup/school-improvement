@@ -74,6 +74,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "pooling": "pooling",  # the ONLY module that crosses the district threshold — expansion plan §7
     "registry": "registry",  # nodes, tasks, scoring sites, scoring configuration + the linter
     "corpus": "corpus",  # anchor papers — public reference content, bulk ETL like public_metrics
+    "intake": "intake",  # folder -> manifest; roster reconciliation as one assignment
 }
 
 # Scanned trees. `tests/`, `scripts/`, and `migrations/` are tooling that legitimately
