@@ -49,7 +49,7 @@ class FactMetric(TenantMixin, Base):
     )
     # measured (§5.4 missingness)
     value: Mapped[float | None] = mapped_column(Numeric)
-    value_status: Mapped[str | None] = mapped_column(Text)   # reported|suppressed|no_students|not_applicable|not_collected|not_loaded|unknown
+    value_status: Mapped[str | None] = mapped_column(Text)   # vocab.VALUE_STATUSES
     n_size: Mapped[int | None] = mapped_column(Integer)
     is_suppressed: Mapped[bool | None] = mapped_column(Boolean)
     is_unmapped: Mapped[bool | None] = mapped_column(Boolean)
