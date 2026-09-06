@@ -12,7 +12,7 @@ import pytest
 from scoring.feedback import (EMPTY_DRAFT, MENTIONS_CONVENTIONS, OVERLONG_DRAFT, STATES_A_LEVEL,
                               UNDECLARED_QUOTATION, UNVERIFIED_QUOTATION, Draft, build_prompt,
                               check, draft, findings_for_prompt, first_name)
-from scoring.prompts import feedback_fingerprint
+from scoring.prompts import FEEDBACK_PROMPT, feedback_fingerprint
 from scoring.rater import RaterIdentity, Usage
 
 PAPER = (
@@ -170,3 +170,39 @@ def test_the_draft_carries_its_own_versioned_identity():
     assert d.composer_version == "fb.1"
     assert d.fingerprint == feedback_fingerprint()
     assert usage.calls == 1
+
+
+# ------------------------------------------------------------------ the checker vs the prompt
+
+
+def test_the_prompts_own_mandated_phrases_pass_every_check():
+    """A checker that forbids what the prompt mandates blocks every draft that obeys it.
+
+    That is not hypothetical: the first real run held BOTH papers, and one hold on each was the
+    off-rubric note the prompt requires it to open with — "so it does not change your score" —
+    matching the pattern for stating a grade. Neither the prompt nor the check looked wrong on its
+    own, and they were written far enough apart that nothing put them side by side.
+
+    This does. Every phrase the prompt tells the composer to begin with is run through the checks,
+    so the next contradiction of this kind fails here instead of in Cloud Shell.
+    """
+    import re
+    mandated = re.findall(r'beginning "([^"]+)"', FEEDBACK_PROMPT)
+    assert mandated, "the extraction stopped matching the prompt — this test now proves nothing"
+    for phrase in mandated:
+        holds = check(make(f"Maya, one thing. {phrase} Answer it in your own words."), PAPER)
+        assert holds == [], (
+            f"the prompt instructs the composer to write {phrase!r} and the checks then hold it: "
+            f"{[h.code for h in holds]}")
+
+
+def test_the_exemption_is_the_clause_and_not_the_words():
+    """Removing the sanctioned clause before scanning, rather than whitelisting a draft that
+    contains it, is what keeps this from being a hole: a message may say both."""
+    d = make("Maya. One thing outside the rubric, so it does not change your score: nice work. "
+             "You scored a 4 for the controlling idea.")
+    assert STATES_A_LEVEL in [h.code for h in check(d, PAPER)]
+
+
+def test_stating_a_grade_in_words_is_still_held():
+    assert STATES_A_LEVEL in [h.code for h in check(make("Maya, your score is strong."), PAPER)]

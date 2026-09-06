@@ -65,6 +65,14 @@ _STATES_LEVEL = re.compile(
     r"\b(level\s*\d|score[ds]?\s*(a|an)?\s*\d|\d\s*(out\s*of|/)\s*\d|"
     r"(your|a)\s+(score|grade|mark)\b|scored\s+(a|an)\b)", re.I)
 
+# The one place the prompt REQUIRES the words "your score" — and the first real run held both
+# papers because of it. The off-rubric note must open "so it does not change your score", which the
+# pattern above matched. A checker that forbids what the prompt mandates blocks every draft that
+# follows its instructions, and the two were written far enough apart that neither looked wrong on
+# its own. `test_the_prompts_own_mandated_phrases_pass_every_check` now runs the instructions
+# through the checks, so the next contradiction of this kind fails a test rather than a run.
+_SANCTIONED = re.compile(r"so it does(?: not|n't) change your score", re.I)
+
 # Quoted runs, straight or curly. Four characters minimum: shorter than that is punctuation noise
 # rather than a claim about what the student wrote.
 _QUOTED = re.compile(r'"([^"\n]{4,})"|“([^”\n]{4,})”')
@@ -156,7 +164,9 @@ def check(d: Draft, paper_text: str) -> list[Hold]:
         holds.append(Hold(MENTIONS_CONVENTIONS,
                           f"raises conventions ({m.group(0)!r}), which is not in the trait set"))
 
-    if m := _STATES_LEVEL.search(d.message):
+    # The sanctioned clause is REMOVED before scanning rather than whitelisted afterwards: a draft
+    # that says both "does not change your score" and "you scored a 4" must still be held.
+    if m := _STATES_LEVEL.search(_SANCTIONED.sub(" ", d.message)):
         holds.append(Hold(STATES_A_LEVEL,
                           f"states a level or grade ({m.group(0)!r}); the number is the teacher's "
                           f"to hand back, not the message's to announce"))
