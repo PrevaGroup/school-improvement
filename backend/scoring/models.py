@@ -63,7 +63,9 @@ ARTIFACT_STATES: tuple[str, ...] = (
     "bound",          # binding key resolved
     "not_scorable",   # a defined non-attempt against the bound task — never a low score
     "scored",         # every criterion has an outcome, including abstentions
-    "composed",       # rationale packet built (student feedback is composed after review)
+    "composed",       # review packet built: scores, evidence, priors AND the drafted
+                      # student feedback. The teacher reviews the two together — a score
+                      # approved without seeing the message it produces is half a review
     "blocked",        # output safety held the student-facing draft
     "in_review",      # with the teacher
     "released",       # terminal — teacher-only

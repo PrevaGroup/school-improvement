@@ -30,7 +30,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .prompts import (EVIDENCE_SCHEMA, SCORE_SCHEMA)
+from .prompts import EVIDENCE_SCHEMA, FEEDBACK_SCHEMA, SCORE_SCHEMA
 
 SECRET_NAME = "anthropic-api-key"
 
@@ -91,6 +91,10 @@ class Rater(Protocol):
 
     def assign_level(self, prompt: str) -> tuple[dict, Usage]: ...
 
+    # Stage E. Named rather than folded into a generic call so a fake rater has to be explicit
+    # about which stage it is answering, and a test cannot accidentally answer the wrong one.
+    def write_feedback(self, prompt: str) -> tuple[dict, Usage]: ...
+
 
 class AnthropicRater:
     """The real rater.
@@ -115,6 +119,9 @@ class AnthropicRater:
 
     def assign_level(self, prompt: str) -> tuple[dict, Usage]:
         return self._call(prompt, SCORE_SCHEMA)
+
+    def write_feedback(self, prompt: str) -> tuple[dict, Usage]:
+        return self._call(prompt, FEEDBACK_SCHEMA)
 
     def _call(self, prompt: str, schema: dict) -> tuple[dict, Usage]:
         r = self._client.messages.create(

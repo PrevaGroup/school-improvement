@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from scoring.compose import (COMPOSER_VERSION, _PRIOR, build_packet, configuration_of,
-                             prior_for_node)
+                             next_state, prior_for_node)
 
 T0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
@@ -170,3 +170,26 @@ def test_the_packet_records_which_assembler_built_it():
     """A packet's shape is part of what a teacher saw, so it is stamped like the rater is."""
     p = build_packet(ARTIFACT, [event()], LABELS, [])
     assert p["composer_version"] == COMPOSER_VERSION
+
+
+# ------------------------------------------------------------------ where a composed artifact goes
+
+
+def test_a_clean_draft_goes_to_the_teacher():
+    assert next_state([]) == "in_review"
+
+
+def test_any_hold_at_all_routes_to_blocked():
+    """No severity ladder. A held draft costs a teacher one click; a draft that goes out having
+    misquoted a student costs something that cannot be clicked back."""
+    from scoring.feedback import Hold
+    assert next_state([Hold("mentions_conventions", "x")]) == "blocked"
+    assert next_state([Hold("a", "x"), Hold("b", "y")]) == "blocked"
+
+
+def test_blocked_is_a_state_a_teacher_can_leave():
+    """A one-way hold would be a queue that fills up. The state machine has to allow the rescue,
+    and only a teacher may make it."""
+    from scoring.models import ARTIFACT_TRANSITIONS
+    assert ARTIFACT_TRANSITIONS["blocked"]["in_review"] == "teacher"
+    assert ARTIFACT_TRANSITIONS["composed"]["blocked"] == "machine"

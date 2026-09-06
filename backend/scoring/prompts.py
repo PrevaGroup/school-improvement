@@ -75,6 +75,52 @@ Judge only this criterion. Say nothing about spelling, grammar or punctuation: t
 scale, and the paper must not move up or down for them. The reason should be one or two sentences a
 teacher could check against the evidence above."""
 
+FEEDBACK_VERSION = "fb.1"
+
+# Versioned SEPARATELY from the scoring prompts, and stamped on the composition rather than on
+# score_event. A configuration is the RATER: what produced a level. Feedback wording does not
+# produce a level, and folding it into the rater identity would mean every improvement to a
+# sentence invalidated a term of scores and forced a re-promotion — which would make better
+# feedback expensive, and the freeze is not there to do that.
+FEEDBACK_PROMPT = """You are drafting formative feedback for ONE student on ONE piece of their writing.
+A teacher will read it, edit it if they choose, and decide whether it goes out. Write for the
+student, not for the teacher.
+
+STUDENT'S FIRST NAME: {first_name}
+
+THEIR WRITING:
+<text>
+{text}
+</text>
+
+WHAT THE SCORING FOUND, criterion by criterion:
+{findings}
+
+Write three short parts.
+
+1. One or two sentences naming the strongest thing in this piece, specifically. Point at something
+   they actually did — a move, a sentence, a choice — not a quality they possess.
+
+2. ONE revision move, beginning "One revision move." Name the passage, say what it currently does,
+   and say what doing more would get them. One. A list of five is a list nobody acts on.
+
+3. OPTIONAL, and only if there is something worth saying: one observation outside the rubric,
+   beginning "One thing outside the rubric, so it does not change your score:". Leave it out
+   entirely if you would be manufacturing something to fill it.
+
+RULES, all of them firm:
+
+- Quote the student's own words EXACTLY when you refer to their text, and list every quotation you
+  used in the `quotations` field, character for character as it appears above. A quotation that
+  does not appear in their writing will hold this message back from being sent.
+- Do NOT state a level, a score, a grade, or a number of any kind about their performance.
+- Say NOTHING about spelling, grammar, punctuation or formatting. They are not on this scale and
+  the piece is not being judged on them.
+- Say nothing about any criterion the scoring could not reach. Those go to the teacher, not to the
+  student.
+- Do not compare this student to anyone else, and do not refer to a class.
+- Address them by first name once, at the start. No sign-off."""
+
 # --------------------------------------------------------------------------- #
 # Structured output schemas.
 #
@@ -98,6 +144,19 @@ SCORE_SCHEMA: dict = {
         "reason": {"type": "string"},
     },
     "required": ["level", "abstain", "confidence", "reason"],
+    "additionalProperties": False,
+}
+
+
+FEEDBACK_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "message": {"type": "string"},
+        # Declared separately so verification is exact rather than a guess at where a quotation
+        # started. Same trick as stage C: make the model name what it claims, then check it.
+        "quotations": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["message", "quotations"],
     "additionalProperties": False,
 }
 
@@ -126,6 +185,15 @@ def render_scale(criterion_label: str, descriptors: dict, categories: list) -> s
         else:
             lines.append(f"Level {cat}: {d}")
     return "\n".join(lines)
+
+
+def feedback_fingerprint() -> dict:
+    """The feedback composer's identity, stamped on the composition.
+
+    Deliberately not part of `fingerprint()`. That one identifies the RATER, and a score's meaning
+    does not change because a sentence in a feedback prompt was improved.
+    """
+    return {"feedback": {"version": FEEDBACK_VERSION, "sha256": _sha(FEEDBACK_PROMPT)}}
 
 
 def fingerprint() -> dict:

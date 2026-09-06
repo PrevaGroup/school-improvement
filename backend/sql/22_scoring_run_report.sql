@@ -101,6 +101,28 @@ SELECT c.artifact_id, c.composer_version, c.needs_human, c.prior_rater_mismatch,
  ORDER BY c.artifact_id;
 
 \echo ''
+\echo '=== the drafted feedback, and whether it cleared its checks ==='
+SELECT c.artifact_id,
+       a.state,
+       c.packet->'feedback'->>'composer_version'                       AS composer,
+       jsonb_array_length(c.packet->'feedback'->'quotations')          AS quotations,
+       jsonb_array_length(c.packet->'feedback'->'holds')               AS holds,
+       length(c.packet->'feedback'->>'message')                        AS chars
+  FROM artifact_composition c JOIN artifact a USING (artifact_id)
+ ORDER BY c.artifact_id;
+
+\echo ''
+\echo '=== every hold, with what tripped it ==='
+SELECT c.artifact_id, h->>'code' AS code, h->>'detail' AS detail
+  FROM artifact_composition c, jsonb_array_elements(c.packet->'feedback'->'holds') h
+ ORDER BY c.artifact_id;
+
+\echo ''
+\echo '=== the message a student would read ==='
+SELECT c.artifact_id, c.packet->'feedback'->>'message' AS message
+  FROM artifact_composition c ORDER BY c.artifact_id;
+
+\echo ''
 \echo '=== no dropped span reaches the packet as evidence ==='
 SELECT CASE WHEN count(*) = 0
             THEN 'ok — every span shown to a teacher survived verification'

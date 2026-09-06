@@ -1,6 +1,9 @@
-"""Assemble what a teacher reviews, and move the artifact from `scored` to `composed`.
+"""Assemble what a teacher reviews, draft the message a student will read, and hand it over.
 
-    python -m scoring.compose --tenant public [--limit N]
+    python -m scoring.compose --tenant public [--limit N] [--dry-run]
+
+`scored` -> `composed` -> `in_review`, or `composed` -> `blocked` when the draft failed a check.
+All three are machine moves; only a teacher moves it out of `in_review` or `blocked`.
 
 THE RULE THIS FILE FOLLOWS: compose what cannot be derived, and store what was seen. Nearly all of
 the packet IS derivable from score_event, and a stored copy of derivable data is usually a second
@@ -8,6 +11,13 @@ source of truth waiting to drift. It is not here, because score_event is append-
 override APPENDS, so re-deriving after a review yields a different packet than the one the teacher
 was looking at when they decided. What was in front of a person at the moment of judgment is not
 derivable from anything.
+
+## The teacher reviews the scores and the drafted message together
+
+A score approved without seeing the message it produces is half a review, so stage E runs here
+rather than after approval. Blind scoring and other bias reducers are a later question — this is a
+teacher productivity tool first, and `score_event.human_blind` is already there for when it becomes
+one.
 
 ## The prior-observations panel, which is where the care goes
 
@@ -30,13 +40,6 @@ it does not hold, so two prior levels can come from two raters. Raw levels from 
 directly comparable; the comparison that survives lives on the person metric, through an anchored
 frame. This module cannot do that arithmetic and does not pretend to. It reports the mismatch and
 says what it means, which is the honest available move.
-
-## Where this stops
-
-At `composed`. The student-facing feedback draft is not built here: it is a model call against the
-highest-stakes surface in the system, `blocked` exists for the safety check that gates it, and
-`models.py` and the review console disagree about whether that draft exists before or after review.
-That is a question for a person.
 """
 from __future__ import annotations
 
@@ -46,8 +49,11 @@ import logging
 
 from sqlalchemy import bindparam, text
 
+from . import feedback
 from ._db import engine
 from ._ids import uuid7
+from .rater import AnthropicRater, RaterIdentity
+from .run_scoring import read_text
 
 log = logging.getLogger("scoring.compose")
 
@@ -58,7 +64,7 @@ NEEDS_HUMAN = ("abstained", "no_verified_evidence")
 
 _PENDING = text("""
     SELECT artifact_id, run_id, student_id, section_id, task_id, iteration, window_label,
-           tenant_id, visibility
+           source_uri, tenant_id, visibility
       FROM artifact
      WHERE tenant_id = :tenant AND state = 'scored'
      ORDER BY created_at
@@ -95,6 +101,17 @@ _PRIOR = text("""
      ORDER BY node_id, created_at
 """).bindparams(bindparam("nodes", expanding=True))
 
+_STUDENT = text("SELECT display_name FROM roster_student WHERE student_id = :student_id")
+
+# model_id and effort come from the configuration the SCORES were produced under, so one artifact
+# is one model's work end to end. `check_configuration` is deliberately NOT run here: the scores
+# are already written, and refusing to compose them because a scoring prompt has since moved would
+# strand finished work behind a check about producing levels rather than describing them.
+_CONFIG = text("""
+    SELECT config_id, model_id, effort, prompt_versions, normalization_version
+      FROM registry_scoring_configuration WHERE config_id = :config_id
+""")
+
 _INSERT = text("""
     INSERT INTO artifact_composition
         (composition_id, artifact_id, composer_version, packet, needs_human,
@@ -104,8 +121,8 @@ _INSERT = text("""
 """)
 
 _SET_STATE = text("""
-    UPDATE artifact SET state = 'composed'
-     WHERE artifact_id = :artifact_id AND state = 'scored'
+    UPDATE artifact SET state = :state, state_reason_code = :reason_code
+     WHERE artifact_id = :artifact_id AND state = :from_state
 """)
 
 
@@ -134,14 +151,13 @@ def prior_for_node(rows: list[dict], node_id: str, current_config: str | None) -
     for r in rows:
         if r["node_id"] != node_id:
             continue
-        same = r.get("scoring_configuration_id") == current_config
         out.append({
             "task_id": r["task_id"],
             "iteration": r["iteration"],
             "window_label": r.get("window_label"),
             "level": float(r["level"]) if r["level"] is not None else None,
             "scoring_configuration_id": r.get("scoring_configuration_id"),
-            "same_rater": same,
+            "same_rater": r.get("scoring_configuration_id") == current_config,
             "when": r["created_at"].isoformat() if r.get("created_at") else None,
         })
     return out
@@ -211,12 +227,24 @@ def build_packet(artifact: dict, events: list[dict], labels: dict[str, dict],
     }
 
 
+def next_state(holds: list) -> str:
+    """Where a composed artifact goes.
+
+    A held draft costs a teacher one click — `blocked` -> `in_review` is a move a teacher may
+    make. A draft that goes out having misquoted a student costs something that cannot be clicked
+    back. So any hold at all routes to `blocked`, and there is no severity ladder here to argue
+    about at three in the afternoon.
+    """
+    return "blocked" if holds else "in_review"
+
+
 # ------------------------------------------------------------------ the loop
 
 
-def compose_pending(*, tenant: str, limit: int = 100, dry_run: bool = False) -> dict:
+def compose_pending(*, tenant: str, limit: int = 100, dry_run: bool = False,
+                    rater_factory=AnthropicRater) -> dict:
     eng = engine()
-    composed, failed = 0, []
+    composed, held, failed = 0, 0, []
 
     with eng.connect() as conn:
         conn.execute(text("SELECT set_config('app.tenant', :t, true)"), {"t": tenant})
@@ -226,21 +254,27 @@ def compose_pending(*, tenant: str, limit: int = 100, dry_run: bool = False) -> 
 
     for artifact in pending:
         try:
-            _compose_one(eng, artifact, tenant=tenant, dry_run=dry_run)
+            state = _compose_one(eng, artifact, tenant=tenant, dry_run=dry_run,
+                                 rater_factory=rater_factory)
         except Exception as exc:
             log.error("artifact %s: %s", artifact["artifact_id"], exc)
             failed.append({"artifact_id": artifact["artifact_id"], "error": str(exc)})
             continue
         composed += 1
+        held += state == "blocked"
 
-    return {"pending": len(pending), "composed": composed, "failed": failed}
+    return {"pending": len(pending), "composed": composed, "held_for_safety": held,
+            "failed": failed}
 
 
-def _compose_one(eng, artifact: dict, *, tenant: str, dry_run: bool) -> None:
+def _compose_one(eng, artifact: dict, *, tenant: str, dry_run: bool, rater_factory) -> str:
     aid = artifact["artifact_id"]
-    with eng.begin() as conn:
+
+    # Read, then call the model, then write — the same shape as run_scoring and for the same
+    # reason: a transaction held open across a model call holds a connection for minutes and
+    # loses the work anyway when the process dies.
+    with eng.connect() as conn:
         conn.execute(text("SELECT set_config('app.tenant', :t, true)"), {"t": tenant})
-        conn.execute(text("SELECT set_config('app.actor_type', 'machine', true)"))
 
         events = [dict(r) for r in conn.execute(_EVENTS, {"artifact_id": aid}).mappings()]
         if not events:
@@ -254,14 +288,44 @@ def _compose_one(eng, artifact: dict, *, tenant: str, dry_run: bool) -> None:
         prior = [dict(r) for r in conn.execute(
             _PRIOR, {"tenant": tenant, "student_id": artifact.get("student_id"),
                      "nodes": nodes, "artifact_id": aid}).mappings()]
-
         packet = build_packet(artifact, events, labels, prior)
+        student_name = conn.execute(
+            _STUDENT, {"student_id": artifact.get("student_id")}).scalar()
+        cfg = conn.execute(
+            _CONFIG, {"config_id": packet["stamp"]["scoring_configuration_id"]}).mappings().first()
 
-        if dry_run:
-            log.info("%s (dry run): %d criteria, %d need a human, prior mismatch=%s",
-                     aid, len(packet["criteria"]), len(packet["needs_human"]),
-                     packet["prior_rater_mismatch"])
-            return
+    if cfg is None:
+        raise RuntimeError(
+            f"{aid} was scored under configuration "
+            f"{packet['stamp']['scoring_configuration_id']!r}, which is not in the registry. "
+            f"The scores name a rater that does not exist.")
+
+    body = read_text(artifact)
+    identity = RaterIdentity(config_id=cfg["config_id"], model_id=cfg["model_id"],
+                             effort=cfg["effort"], prompt_versions=dict(cfg["prompt_versions"]),
+                             normalization_version=cfg["normalization_version"])
+    drafted, usage = feedback.draft(body, packet, rater_factory(identity), student_name)
+    holds = feedback.check(drafted, body)
+
+    packet["feedback"] = {
+        "message": drafted.message,
+        "quotations": drafted.quotations,
+        "composer_version": drafted.composer_version,
+        "fingerprint": drafted.fingerprint,
+        "holds": [{"code": h.code, "detail": h.detail} for h in holds],
+    }
+    state = next_state(holds)
+
+    if dry_run:
+        log.info("%s (dry run): %d criteria, %d need a human, prior mismatch=%s, "
+                 "%d hold(s) -> %s, %d call(s)",
+                 aid, len(packet["criteria"]), len(packet["needs_human"]),
+                 packet["prior_rater_mismatch"], len(holds), state, usage.calls)
+        return state
+
+    with eng.begin() as conn:
+        conn.execute(text("SELECT set_config('app.tenant', :t, true)"), {"t": tenant})
+        conn.execute(text("SELECT set_config('app.actor_type', 'machine', true)"))
 
         conn.execute(_INSERT, {
             "composition_id": uuid7(), "artifact_id": aid,
@@ -270,21 +334,33 @@ def _compose_one(eng, artifact: dict, *, tenant: str, dry_run: bool) -> None:
             "prior_rater_mismatch": packet["prior_rater_mismatch"],
             "tenant_id": artifact["tenant_id"], "visibility": artifact["visibility"]})
 
-        moved = conn.execute(_SET_STATE, {"artifact_id": aid}).rowcount
+        moved = conn.execute(_SET_STATE, {
+            "artifact_id": aid, "from_state": "scored", "state": "composed",
+            "reason_code": None}).rowcount
         if moved != 1:
             raise RuntimeError(
                 f"{aid} was not in `scored` when the transition ran ({moved} rows). Another "
                 f"worker has it; rolling back rather than storing a second packet.")
 
-    log.info("%s -> composed: %d criteria, %d need a human", aid, len(packet["criteria"]),
-             len(packet["needs_human"]))
+        # Two transitions, both recorded, because they are two facts: the packet was built, and
+        # the draft did or did not clear its checks. Collapsing them into one move would lose
+        # which of the two a `blocked` artifact failed.
+        conn.execute(_SET_STATE, {
+            "artifact_id": aid, "from_state": "composed", "state": state,
+            "reason_code": holds[0].code if holds else None})
+
+    log.info("%s -> %s: %d criteria, %d need a human, %d hold(s), %d call(s)",
+             aid, state, len(packet["criteria"]), len(packet["needs_human"]),
+             len(holds), usage.calls)
+    return state
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tenant", default="public")
     ap.add_argument("--limit", type=int, default=100)
-    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="call the model and check the draft, write nothing")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
