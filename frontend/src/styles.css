@@ -366,3 +366,17 @@
   .rv-empty { padding: 40px; max-width: 560px; }
   .rv-empty h2 { margin: 0 0 8px; font-size: 18px; }
   .rv-empty p { color: var(--muted); }
+  .rv-feedback h3 { display: flex; align-items: center; gap: 8px; }
+  .rv-edit { width: 100%; font: inherit; line-height: 1.55; padding: 14px 16px; border: 1px solid var(--green); border-radius: 8px; background: var(--panel); color: var(--ink); resize: vertical; }
+  .rv-editbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .rv-editbar button { font: inherit; font-size: 13px; padding: 6px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer; }
+  .rv-editbar .rv-primary { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+  .rv-editbar button:disabled { opacity: .5; cursor: default; }
+  .rv-editbar small { color: var(--muted); font-size: 11px; }
+  .rv-note ul { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+  .rv-note code { font-size: 12px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  /* The machine's draft, kept and collapsed: available when someone asks how much editing the
+     drafts need, out of the way when they are just doing the work. */
+  .rv-original { margin-top: 12px; }
+  .rv-original summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+  .rv-original pre { white-space: pre-wrap; font: inherit; font-size: 13px; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 8px 0 0; }

@@ -37,6 +37,10 @@ TEACHER_STATES = ("in_review", "blocked", "released", "withheld", "not_scorable"
 _QUEUE = text("""
     SELECT a.artifact_id, a.state, a.state_reason_code, a.student_id, a.section_id,
            a.task_id, a.iteration, a.window_label, a.created_at,
+           -- The roster's name when there is one. Falling back to the identifier is honest: it
+           -- shows a key, which is what an unrostered student IS, rather than a tidied-up key that
+           -- looks like a name.
+           s.display_name,
            c.composition_id, c.needs_human, c.prior_rater_mismatch,
            jsonb_array_length(coalesce(c.packet->'feedback'->'holds', '[]'::jsonb)) AS holds,
            jsonb_array_length(coalesce(c.packet->'criteria', '[]'::jsonb))          AS criteria
@@ -47,6 +51,7 @@ _QUEUE = text("""
            WHERE x.artifact_id = a.artifact_id
            ORDER BY created_at DESC LIMIT 1
       ) c ON true
+      LEFT JOIN roster_student s ON s.student_id = a.student_id
      WHERE a.state = ANY(:states)
      ORDER BY a.state, a.created_at
      LIMIT :limit

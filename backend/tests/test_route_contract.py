@@ -67,6 +67,7 @@ EXPECTED: dict[str, set[str]] = {
     "/api/review/artifact/{artifact_id}": {"GET"},
     "/api/review/{artifact_id}/state": {"POST"},
     "/api/review/{artifact_id}/override": {"POST"},
+    "/api/review/{artifact_id}/feedback": {"POST"},
 }
 
 

@@ -61,6 +61,12 @@ type Packet = {
     quotations: string[];
     composer_version: string;
     holds: { code: string; detail: string }[];
+    // Set once a teacher has edited. The machine's original is kept beside it — "what the model
+    // drafted" and "what the teacher sent" are two different facts, and only one of them tells you
+    // how much editing the drafts actually need.
+    edited_by?: string;
+    machine_draft?: string;
+    holds_are_advisory?: boolean;
   };
 };
 
@@ -71,6 +77,7 @@ type QueueRow = {
   student_id: string | null;
   task_id: string | null;
   iteration: string | null;
+  display_name: string | null;
   needs_human: number | null;
   holds: number | null;
   criteria: number | null;
@@ -100,6 +107,7 @@ type Transition = {
 
 type Detail = {
   artifact_id: string;
+  composition_id: string;
   state: string;
   state_reason_code: string | null;
   packet: Packet;
@@ -127,9 +135,11 @@ const NO_NUMBER: Record<string, string> = {
   unbound: "Not bound",
 };
 
-function shortId(id: string | null): string {
-  if (!id) return "—";
-  return id.replace(/^demo-(art-|stu-)?/, "");
+// A name when the roster has one, the identifier when it does not. Deliberately no prettifying
+// regex: a key tidied up to look like a name is worse than a key, because it hides that nobody
+// knows who this is. `unbound` is a real state and it should look like one.
+function who(name: string | null | undefined, id: string | null): string {
+  return (name && name.trim()) || id || "—";
 }
 
 export function ReviewConsole() {
@@ -185,6 +195,21 @@ export function ReviewConsole() {
     }
   }
 
+  async function saveFeedback(message: string) {
+    if (!detail) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post(`/review/${encodeURIComponent(detail.artifact_id)}/feedback`, { message });
+      const d = await api.get<Detail>(`/review/artifact/${encodeURIComponent(detail.artifact_id)}`);
+      setDetail(d);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function override(ev: ScoreEvent, level: number | null, status: string, reason: string) {
     if (!detail) return;
     setBusy(true);
@@ -228,7 +253,7 @@ export function ReviewConsole() {
             <li key={r.artifact_id}
                 className={r.artifact_id === selected ? "rv-sel" : ""}
                 onClick={() => setSelected(r.artifact_id)}>
-              <b>{shortId(r.student_id)}</b>
+              <b>{who(r.display_name, r.student_id)}</b>
               <span className={`rv-state rv-${r.state}`}>{STATE_LABEL[r.state] ?? r.state}</span>
               <small>
                 {r.criteria ?? 0} criteria
@@ -244,16 +269,18 @@ export function ReviewConsole() {
       <section className="rv-paper">
         {error && <div className="rv-err">{error}</div>}
         {!detail && <p className="rv-mut">Select a paper.</p>}
-        {detail && <Paper d={detail} busy={busy} onMove={move} onOverride={override} />}
+        {detail && <Paper d={detail} busy={busy} onMove={move} onOverride={override}
+                          onSaveFeedback={saveFeedback} />}
       </section>
     </div>
   );
 }
 
-function Paper({ d, busy, onMove, onOverride }: {
+function Paper({ d, busy, onMove, onOverride, onSaveFeedback }: {
   d: Detail; busy: boolean;
   onMove: (s: string) => void;
   onOverride: (ev: ScoreEvent, level: number | null, status: string, reason: string) => void;
+  onSaveFeedback: (message: string) => void;
 }) {
   const p = d.packet;
   const holds = p.feedback?.holds ?? [];
@@ -263,7 +290,7 @@ function Paper({ d, busy, onMove, onOverride }: {
     <>
       <header className="rv-head">
         <div>
-          <h2>{shortId(p.student_id)}</h2>
+          <h2>{who(null, p.student_id)}</h2>
           <small>{p.task_id} · {p.iteration} · {p.window_label}</small>
         </div>
         <div className="rv-actions">
@@ -298,15 +325,8 @@ function Paper({ d, busy, onMove, onOverride }: {
       {p.prior_note && <div className="rv-note">{p.prior_note}</div>}
 
       {p.feedback?.message && (
-        <section className="rv-feedback">
-          <h3>Drafted for the student</h3>
-          <pre>{p.feedback.message}</pre>
-          <small>
-            Composer {p.feedback.composer_version} ·{" "}
-            {p.feedback.quotations.length} quotation{p.feedback.quotations.length === 1 ? "" : "s"},
-            each verified against this student's own writing
-          </small>
-        </section>
+        <FeedbackPanel key={d.composition_id} fb={p.feedback} busy={busy}
+                       onSave={onSaveFeedback} />
       )}
 
       <section className="rv-criteria">
@@ -429,5 +449,78 @@ function CriterionRow({ c, ev, busy, onOverride }: {
         </div>
       )}
     </div>
+  );
+}
+
+
+// The message a student will read. Editable, because a teacher edits it every time — and the edit
+// APPENDS: a new composition row pointing at the one it replaces, so the machine's draft survives
+// beside the version that went out.
+//
+// The safety checks re-run on an edit and are shown, but they do not block. The gate exists to stop
+// a machine's draft reaching a person unexamined, and by the time somebody is typing here it has
+// already done that. A teacher who has read the paper and written their own sentence is the
+// authority; holding it would be the tool overruling them.
+function FeedbackPanel({ fb, busy, onSave }: {
+  fb: NonNullable<Packet["feedback"]>; busy: boolean; onSave: (m: string) => void;
+}) {
+  const [draft, setDraft] = useState(fb.message);
+  const [editing, setEditing] = useState(false);
+  const dirty = draft.trim() !== fb.message.trim();
+
+  return (
+    <section className="rv-feedback">
+      <h3>
+        {fb.edited_by ? "Your message to the student" : "Drafted for the student"}
+        {fb.edited_by && <span className="rv-badge">edited by you</span>}
+      </h3>
+
+      {editing ? (
+        <>
+          <textarea className="rv-edit" value={draft} rows={12}
+                    onChange={(e) => setDraft(e.target.value)} />
+          <div className="rv-editbar">
+            <button className="rv-primary" disabled={busy || !dirty}
+                    onClick={() => { onSave(draft); setEditing(false); }}>
+              Save the message
+            </button>
+            <button disabled={busy}
+                    onClick={() => { setDraft(fb.message); setEditing(false); }}>
+              Cancel
+            </button>
+            <small>
+              Saving keeps the original beside your version. Nothing is overwritten.
+            </small>
+          </div>
+        </>
+      ) : (
+        <>
+          <pre>{fb.message}</pre>
+          <div className="rv-editbar">
+            <button disabled={busy} onClick={() => setEditing(true)}>Edit the message</button>
+            <small>
+              Composer {fb.composer_version} ·{" "}
+              {fb.quotations.length} quotation{fb.quotations.length === 1 ? "" : "s"}, each
+              verified against this student's own writing
+            </small>
+          </div>
+        </>
+      )}
+
+      {fb.holds_are_advisory && fb.holds.length > 0 && (
+        <div className="rv-note">
+          <b>Worth a look, not a block.</b>
+          <ul>{fb.holds.map((h, i) => <li key={i}><code>{h.code}</code> {h.detail}</li>)}</ul>
+          <small>Your words, your call — this is recorded, not enforced.</small>
+        </div>
+      )}
+
+      {fb.machine_draft && fb.machine_draft !== fb.message && (
+        <details className="rv-original">
+          <summary>What the model drafted</summary>
+          <pre>{fb.machine_draft}</pre>
+        </details>
+      )}
+    </section>
   );
 }

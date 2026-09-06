@@ -27,6 +27,21 @@ with it. That is the honest record and it matters later — an informed second r
 an independent one in a calibration design, and a column that quietly said otherwise would corrupt
 the analysis rather than the interface.
 
+## A teacher's edit appends, like everything else here
+
+The drafted message is the machine's proposal. A teacher edits it and sends what they wrote, and
+BOTH survive: the edit writes a new `artifact_composition` row pointing at the one it replaces, so
+the packet as reviewed stays intact beside the version that went out. "What the machine drafted"
+and "what the teacher sent" are two different facts, and a system that overwrote the first could
+never answer how much editing its drafts actually need — which is the main thing anyone would want
+to know about a drafting model a year from now.
+
+The safety checks re-run on the edited text, and they do NOT block it. The gate exists to catch a
+machine's draft before a person has seen it; once a teacher has read it and written their own
+words, they are the authority and holding their sentence back would be the tool overruling them.
+The findings are recorded on the new row so a reviewer can see what was flagged and that a person
+went ahead anyway, which is a different fact from nothing having been flagged.
+
 ## What is NOT here yet
 
 Section scoping. `roster_visible_sections()` exists, is tested, and fails closed, and nothing calls
@@ -38,6 +53,7 @@ because a gap nobody wrote down is a gap somebody will assume was closed.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
@@ -48,6 +64,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db_public
 from app.security import get_current_principal
 
+from . import feedback
 from ._ids import uuid7
 
 log = logging.getLogger("scoring.review")
@@ -88,6 +105,23 @@ _INSERT_OVERRIDE = text("""
         'teacher', :scorer_id, false, 1, :status, :level, NULL, :reason,
         'teacher_override', NULL, :is_measurement_occasion, false,
         :supersedes_event_id, :set_override_id, :idempotency_key, :tenant_id, :visibility)
+""")
+
+
+_LATEST_COMPOSITION = text("""
+    SELECT composition_id, packet, composer_version, needs_human, prior_rater_mismatch,
+           tenant_id, visibility
+      FROM artifact_composition
+     WHERE artifact_id = :artifact_id
+     ORDER BY created_at DESC LIMIT 1
+""")
+
+_INSERT_COMPOSITION = text("""
+    INSERT INTO artifact_composition
+        (composition_id, artifact_id, composer_version, packet, needs_human,
+         prior_rater_mismatch, supersedes_composition_id, tenant_id, visibility)
+    VALUES (:composition_id, :artifact_id, :composer_version, CAST(:packet AS jsonb),
+            :needs_human, :prior_rater_mismatch, :supersedes, :tenant_id, :visibility)
 """)
 
 
@@ -202,6 +236,62 @@ def override(artifact_id: str, payload: dict = Body(...), db: Session = Depends(
     return {"event_id": event_id, "supersedes_event_id": prior_id,
             "node_id": prior["node_id"], "status": new_status, "level": level,
             "scorer_id": actor_id}
+
+
+@router.post("/{artifact_id}/feedback")
+def edit_feedback(artifact_id: str, payload: dict = Body(...),
+                  db: Session = Depends(get_db_public),
+                  principal: dict = Depends(get_current_principal)) -> dict:
+    """Replace the drafted message with the teacher's own, as a new composition."""
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "an empty message is not an edit — use `do not send` instead")
+
+    row = db.execute(_LATEST_COMPOSITION, {"artifact_id": artifact_id}).mappings().first()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no review packet for this artifact")
+
+    actor_id = _bind_teacher(db, principal)
+    packet = dict(row["packet"])
+    prior = dict(packet.get("feedback") or {})
+
+    # Checked, recorded, not enforced. A teacher who has read the paper and written their own
+    # sentence is the authority; the gate exists to stop a machine's draft reaching a person
+    # unexamined, and it has already done that job by the time anyone is editing.
+    draft = feedback.Draft(message=message, quotations=list(prior.get("quotations") or []),
+                           composer_version=prior.get("composer_version") or "unknown",
+                           fingerprint=prior.get("fingerprint") or {})
+    holds = feedback.check(draft, packet.get("text") or "")
+
+    packet["feedback"] = {
+        **prior,
+        "message": message,
+        "edited_by": actor_id,
+        "machine_draft": prior.get("machine_draft", prior.get("message")),
+        "holds": [{"code": h.code, "detail": h.detail} for h in holds],
+        "holds_are_advisory": True,
+    }
+
+    composition_id = uuid7()
+    try:
+        db.execute(_INSERT_COMPOSITION, {
+            "composition_id": composition_id, "artifact_id": artifact_id,
+            "composer_version": row["composer_version"], "packet": json.dumps(packet),
+            "needs_human": row["needs_human"],
+            "prior_rater_mismatch": row["prior_rater_mismatch"],
+            "supersedes": row["composition_id"],
+            "tenant_id": row["tenant_id"], "visibility": row["visibility"]})
+        db.commit()
+    except DBAPIError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, _trigger_message(exc)) from exc
+
+    log.info("feedback edited on %s by %s (%d advisory finding(s))",
+             artifact_id, actor_id, len(holds))
+    return {"composition_id": composition_id, "supersedes": row["composition_id"],
+            "edited_by": actor_id,
+            "advisory": [{"code": h.code, "detail": h.detail} for h in holds]}
 
 
 def _trigger_message(exc: DBAPIError) -> str:
