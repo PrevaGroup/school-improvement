@@ -39,11 +39,28 @@ def test_no_identifier_carries_a_lifecycle_word():
     assert not offenders, f"identifiers carrying a lifecycle word: {offenders}"
 
 
-def test_every_artifact_belongs_to_the_run_the_purge_scopes_by():
-    """The scope is the run, so an artifact minted outside it would survive a purge."""
+def test_the_fixture_writes_files_and_creates_no_artifacts():
+    """It used to insert artifacts directly, which meant the fixture exercised a path no real
+    paper takes. Papers now arrive through `intake.read_folder` and become artifacts through
+    `scoring.bind`, so the fixture's only job is to put files somewhere."""
     src = inspect.getsource(seed_demo.seed)
-    assert 'aid = f"{RUN_ID}:{key}"' in src
-    assert '"r": RUN_ID' in src
+    assert "INSERT INTO artifact" not in src
+    assert "write_text" in src
+
+
+def test_the_filenames_are_the_ones_students_actually_use():
+    """The filename IS the matching signal when a local folder carries no owner metadata. A
+    fixture writing `maya.txt` would test nothing about the reconciliation that matters."""
+    for paper in seed_demo.load()["papers"].values():
+        assert paper.get("filename"), "every fixture paper needs the name a student would give it"
+
+
+def test_the_folder_holds_more_than_submissions():
+    """Two essays is not a folder. The assignment prompt must be recognised and not scored, and a
+    document with nothing to match on must reach the stuck queue rather than being guessed at."""
+    names = [p["filename"].lower() for p in seed_demo.load()["papers"].values()]
+    assert any("prompt" in n for n in names), "no assignment in the folder"
+    assert any("untitled" in n for n in names), "no unresolvable file in the folder"
 
 
 def test_the_purge_is_scoped_to_one_run():
