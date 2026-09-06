@@ -31,7 +31,6 @@ identity of an operational row may say what produced it.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import pathlib
 import tempfile
@@ -43,7 +42,7 @@ from ._db import engine
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "freespeech_papers.json"
 
 RUN_ID = "fixture-run-1"
-SECTION_ID = "fixture-section-1"
+SECTION_ID = "section-11b-period4"
 # Duplicated from registry.seed_demo rather than imported — the boundary rule, and the same honest
 # duplication `_db.py` and `_ids.py` already carry. A binding key NAMES a task; it does not import
 # one. `tests/test_seed_demo.py` asserts the two files still agree.
@@ -56,42 +55,28 @@ def load() -> dict:
 
 
 def seed(text_dir: pathlib.Path) -> dict:
+    """Write the fixture papers into a folder, named the way students name things.
+
+    NO DATABASE WRITES. This used to create artifacts directly, which meant the fixture exercised
+    a path no real paper takes. Papers now arrive through `intake.read_folder` and become artifacts
+    through `scoring.bind`, so the fixture's only job is to put files somewhere — and the filenames
+    matter, because the filename is the matching signal when a local folder carries no owner.
+
+    The folder deliberately contains more than submissions: the assignment prompt, which must be
+    recognised and not scored, and a document with no name in it at all, which must land in the
+    stuck queue rather than being dropped or guessed at.
+    """
     fx = load()
     text_dir.mkdir(parents=True, exist_ok=True)
-    artifacts = []
-
-    with engine().begin() as conn:
-        conn.execute(text("SELECT set_config('app.tenant', 'public', true)"))
-        conn.execute(text("SELECT set_config('app.actor_type', 'teacher', true)"))
-        conn.execute(text("SELECT set_config('app.actor_id', 'fixture-seed', true)"))
-
-        for key, paper in fx["papers"].items():
-            body = paper["text"]
-            path = text_dir / f"{key}.txt"
-            path.write_text(body, encoding="utf8")
-            aid = f"{RUN_ID}:{key}"
-            conn.execute(text("""
-                INSERT INTO artifact (artifact_id, run_id, student_id, section_id, task_id,
-                                      iteration, window_label, content_hash, source_uri,
-                                      resolution_path, state, tenant_id, visibility)
-                VALUES (:a, :r, :s, :sec, :t, 'final', 'fall 2026', :h, :uri,
-                        CAST(:rp AS jsonb), 'unbound', 'public', 'public')
-                ON CONFLICT (artifact_id) DO NOTHING"""),
-                {"a": aid, "r": RUN_ID, "s": f"student-{key}", "sec": SECTION_ID,
-                 "t": TASK_ID, "h": hashlib.sha256(body.encode("utf8")).hexdigest(),
-                 "uri": str(path),
-                 "rp": json.dumps({k: "looked_up" for k in
-                                   ("student", "section", "task", "iteration")})})
-            # unbound -> bound as a TEACHER, through the trigger, rather than inserting straight
-            # into `bound`. The transition trigger is BEFORE UPDATE, so an INSERT bypasses the
-            # state machine entirely — seeding the end state would have the demo exercising a path
-            # no real artifact takes, and producing no audit row.
-            conn.execute(text(
-                "UPDATE artifact SET state = 'bound' WHERE artifact_id = :a AND state = 'unbound'"),
-                {"a": aid})
-            artifacts.append(aid)
-
-    return {"artifacts": artifacts, "text_dir": str(text_dir), "config_key": CONFIG_KEY}
+    written = []
+    for key, paper in fx["papers"].items():
+        name = paper.get("filename") or f"{key}.txt"
+        (text_dir / name).write_text(paper["text"], encoding="utf8")
+        written.append(name)
+    return {"folder": str(text_dir), "files": sorted(written),
+            "next": f"python -m intake.read_folder --folder {text_dir} "
+                    f"--section {SECTION_ID} --task {TASK_ID} --iteration final "
+                    f"--window 'fall 2026'"}
 
 
 # Children before the parent. Every table that references `artifact` has to be listed, and

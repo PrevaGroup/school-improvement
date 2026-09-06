@@ -56,6 +56,19 @@ log = logging.getLogger("intake.read_folder")
 # Files a folder holds that are nobody's submission and not an error either.
 IGNORED_NAMES = {".ds_store", "thumbs.db", "desktop.ini"}
 
+# Below this, a name similarity is coincidence rather than a lead. Calibrated against the roster
+# and filenames this actually sees: genuine near-misses — a transposed letter, an initial, a
+# dropped hyphen or accent, a surname alone — score 0.74 to 1.0, while "Untitled document",
+# "final draft v3" and "copy of essay" score 0.40 to 0.42 against whichever name they happen to
+# share letters with. The gap is wide, so the exact value is not delicate.
+#
+# This matters more than it looks. `reconcile.NAME_FLOOR` (0.72) decides a MATCH; this decides
+# what a teacher is SHOWN when nothing matched, and three wrong names offered as candidates are
+# worse than none — a rushed teacher accepts one, and the paper is filed under a student who did
+# not write it. An empty candidate list is the honest answer to "nothing in this file says whose
+# it is", and it is a different problem from "it might be one of these three".
+CANDIDATE_FLOOR = 0.60
+
 _ROSTER = text("""
     SELECT s.student_id, s.display_name
       FROM roster_student s
@@ -224,7 +237,7 @@ def candidates_for(f: SourceFile, roster: list[dict], names: dict,
     for s in roster:
         best = max((name_similarity(sig, s.get("display_name") or "")
                     for sig in name_signals(f.name)), default=0.0)
-        if best > 0:
+        if best >= CANDIDATE_FLOOR:
             scored.append({"student_id": s["student_id"],
                            "display_name": names.get(s["student_id"]),
                            "score": round(best, 3)})
