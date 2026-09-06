@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import pytest
 
-from scoring.prompts import (EVIDENCE_SCHEMA, EVIDENCE_VERSION, SCORE_SCHEMA, SCORE_VERSION,
-                             fingerprint, render_scale)
+from scoring.prompts import (EVIDENCE_SCHEMA, EVIDENCE_VERSION, FEEDBACK_VERSION,
+                             SCORE_SCHEMA, SCORE_VERSION, feedback_fingerprint, fingerprint,
+                             render_scale)
 
 PINNED = {
     "evidence": {"version": "ev.1", "sha256": "05264504a54983f7"},
@@ -27,6 +28,26 @@ def test_the_prompt_fingerprint_is_pinned():
         "a prompt changed. That is a change to the rater, not to a string: bump the version in "
         "prompts.py, update PINNED here, and promote a new scoring configuration. Scores written "
         "either side of this edit are not from the same rater.")
+
+
+PINNED_FEEDBACK = {"feedback": {"version": "fb.2", "sha256": "e5228cdca96513a8"}}
+
+
+def test_the_feedback_prompt_is_pinned_too():
+    """It had no pin when it was written, which was an omission rather than a decision — the
+    scoring prompts had one from the start and this is the same discipline. A composition stamps
+    this fingerprint, so an edit without a bump makes every stored stamp a claim about text that
+    no longer exists."""
+    assert feedback_fingerprint() == PINNED_FEEDBACK, (
+        "the feedback prompt changed. Bump FEEDBACK_VERSION and update PINNED_FEEDBACK — messages "
+        "drafted either side of this edit were not written by the same composer.")
+
+
+def test_the_feedback_prompt_is_versioned_apart_from_the_rater():
+    """A score's meaning does not change because a sentence in a feedback prompt improved. Folding
+    the two together would make every wording fix invalidate a term of scores."""
+    assert FEEDBACK_VERSION not in str(fingerprint())
+    assert "evidence" not in feedback_fingerprint()
 
 
 def test_the_version_travels_with_the_hash():

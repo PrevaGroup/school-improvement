@@ -75,7 +75,7 @@ Judge only this criterion. Say nothing about spelling, grammar or punctuation: t
 scale, and the paper must not move up or down for them. The reason should be one or two sentences a
 teacher could check against the evidence above."""
 
-FEEDBACK_VERSION = "fb.1"
+FEEDBACK_VERSION = "fb.2"
 
 # Versioned SEPARATELY from the scoring prompts, and stamped on the composition rather than on
 # score_event. A configuration is the RATER: what produced a level. Feedback wording does not
@@ -110,9 +110,15 @@ Write three short parts.
 
 RULES, all of them firm:
 
-- Quote the student's own words EXACTLY when you refer to their text, and list every quotation you
-  used in the `quotations` field, character for character as it appears above. A quotation that
-  does not appear in their writing will hold this message back from being sent.
+- Double quotation marks are reserved for the student's OWN words, copied exactly, and every one
+  you use must also appear in the `quotations` field character for character. Anything in double
+  quotes is checked against their writing and will hold this message back if it is not there.
+- To suggest wording of your own, write it WITHOUT quotation marks. Say: two sentences on what
+  Breyer actually required. Not: two sentences on "what Breyer actually required". The marks are
+  how a reader tells their sentence from yours, and borrowing them for a suggestion takes that
+  distinction away.
+- Keep the whole message under 250 words. Three short parts, not an essay — a student who stops
+  reading halfway has received nothing.
 - Do NOT state a level, a score, a grade, or a number of any kind about their performance.
 - Say NOTHING about spelling, grammar, punctuation or formatting. They are not on this scale and
   the piece is not being judged on them.

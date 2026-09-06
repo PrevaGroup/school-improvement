@@ -12,7 +12,7 @@ import pytest
 from scoring.feedback import (EMPTY_DRAFT, MENTIONS_CONVENTIONS, OVERLONG_DRAFT, STATES_A_LEVEL,
                               UNDECLARED_QUOTATION, UNVERIFIED_QUOTATION, Draft, build_prompt,
                               check, draft, findings_for_prompt, first_name)
-from scoring.prompts import FEEDBACK_PROMPT, feedback_fingerprint
+from scoring.prompts import FEEDBACK_PROMPT, FEEDBACK_VERSION, feedback_fingerprint
 from scoring.rater import RaterIdentity, Usage
 
 PAPER = (
@@ -34,7 +34,7 @@ PACKET = {"student_id": "stu-1", "criteria": CRITERIA}
 
 def make(message: str, quotations=None) -> Draft:
     return Draft(message=message, quotations=list(quotations or []),
-                 composer_version="fb.1", fingerprint=feedback_fingerprint())
+                 composer_version=FEEDBACK_VERSION, fingerprint=feedback_fingerprint())
 
 
 class FakeRater:
@@ -128,8 +128,15 @@ def test_an_empty_draft_is_held_and_nothing_else_is_reported():
     assert [h.code for h in holds] == [EMPTY_DRAFT]
 
 
-def test_an_overlong_draft_is_held():
-    assert OVERLONG_DRAFT in [h.code for h in check(make("Maya. " + "x" * 2100), PAPER)]
+def test_a_draft_that_has_genuinely_run_away_is_held():
+    """The cap is a runaway guard, not a style rule. The first run held a 2042-character message
+    against a 2000-character cap — a 2% overshoot, on a message nothing was wrong with, against a
+    number the prompt had never told the composer about. Length is the prompt's business now."""
+    assert OVERLONG_DRAFT in [h.code for h in check(make("Maya. " + "x" * 4100), PAPER)]
+
+
+def test_a_long_but_reasonable_draft_is_not_held():
+    assert check(make("Maya. " + "words and words " * 100), PAPER) == []
 
 
 # ------------------------------------------------------------------ what the composer is shown
@@ -167,7 +174,7 @@ def test_the_draft_carries_its_own_versioned_identity():
     sentence in a feedback prompt was improved."""
     d, usage = draft(PAPER, PACKET, FakeRater(
         {"message": "Maya, the last line is the best thing here.", "quotations": []}), "Maya O")
-    assert d.composer_version == "fb.1"
+    assert d.composer_version == FEEDBACK_VERSION
     assert d.fingerprint == feedback_fingerprint()
     assert usage.calls == 1
 

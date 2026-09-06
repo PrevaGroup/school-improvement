@@ -51,7 +51,13 @@ STATES_A_LEVEL = "states_a_level"
 EMPTY_DRAFT = "empty_draft"
 OVERLONG_DRAFT = "overlong_draft"
 
-MAX_CHARS = 2000
+# A RUNAWAY GUARD, not a style rule. The first run held a 2042-character draft against a
+# 2000-character cap, which is a 2% overshoot on a message nothing was wrong with — and the prompt
+# had never told the composer a limit at all, so it was being held to a number it could not see.
+#
+# The checker's job is catching failure, not enforcing taste. Length is now the prompt's business
+# (250 words, stated), and this is only here to stop something that has genuinely run away.
+MAX_CHARS = 4000
 
 # Conventions is not in the trait set. A feedback message that comments on it puts it back through
 # the side door, and the paper is not being judged on it — so the message must not raise it either.
