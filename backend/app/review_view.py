@@ -57,14 +57,44 @@ _QUEUE = text("""
      LIMIT :limit
 """)
 
+# ARTIFACT-first, composition optional. An `unbound` paper has no packet — nothing has scored it
+# and nothing can until a person says whose it is — and 404-ing on it would hide the one artifact a
+# teacher most needs to open. That was the shape of this query until the stuck queue existed to
+# look at.
 _PACKET = text("""
-    SELECT c.composition_id, c.packet, c.needs_human, c.prior_rater_mismatch, c.created_at,
-           a.state, a.state_reason_code
-      FROM artifact_composition c
-      JOIN artifact a USING (artifact_id)
-     WHERE c.artifact_id = :artifact_id
-     ORDER BY c.created_at DESC
-     LIMIT 1
+    SELECT a.state, a.state_reason_code, a.student_id, a.section_id, a.task_id, a.iteration,
+           a.window_label, a.intake_file_id,
+           c.composition_id, c.packet, c.needs_human, c.prior_rater_mismatch, c.created_at
+      FROM artifact a
+      LEFT JOIN LATERAL (
+          SELECT composition_id, packet, needs_human, prior_rater_mismatch, created_at
+            FROM artifact_composition x
+           WHERE x.artifact_id = a.artifact_id
+           ORDER BY created_at DESC LIMIT 1
+      ) c ON true
+     WHERE a.artifact_id = :artifact_id
+""")
+
+# What intake made of the file, for a paper nobody could be matched to. `candidates` is the near
+# misses; an EMPTY list is a different answer from three names, and the console has to be able to
+# say "we have nothing to go on" rather than implying a shortlist exists.
+_INTAKE = text("""
+    SELECT f.name, f.status, f.reason_code, f.candidates, f.word_count, f.text,
+           f.resolution_basis, f.resolution_path, m.source_ref AS folder, m.read_at
+      FROM intake_file f
+      JOIN intake_manifest m ON m.manifest_id = f.manifest_id
+     WHERE f.file_id = :file_id
+""")
+
+# The class, for the picker. A teacher resolving by hand needs the whole roster, not just the near
+# misses — the right answer is routinely somebody the filename gave no hint of.
+_SECTION_ROSTER = text("""
+    SELECT s.student_id, s.display_name
+      FROM roster_student s
+      JOIN roster_enrollment e ON e.student_id = s.student_id
+     WHERE e.tenant_id = :tenant AND e.section_id = :section_id
+       AND (e.active_to IS NULL OR e.active_to > now())
+     ORDER BY s.display_name
 """)
 
 # The live scores, which are NOT the packet's copy. After an override the packet still holds what
@@ -116,8 +146,12 @@ def artifact(artifact_id: str, db: Session = Depends(get_db_public),
     try:
         row = db.execute(_PACKET, {"artifact_id": artifact_id}).mappings().first()
         if row is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND,
-                                "no review packet for this artifact yet")
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no such artifact")
+        intake = db.execute(
+            _INTAKE, {"file_id": row["intake_file_id"]}).mappings().first()             if row["intake_file_id"] else None
+        roster = ([dict(r) for r in db.execute(
+            _SECTION_ROSTER, {"tenant": "public", "section_id": row["section_id"]}).mappings()]
+            if row["state"] == "unbound" and row["section_id"] else [])
         events = [dict(e) for e in db.execute(
             _EVENTS, {"artifact_id": artifact_id}).mappings()]
         transitions = [dict(t) for t in db.execute(
@@ -144,11 +178,18 @@ def artifact(artifact_id: str, db: Session = Depends(get_db_public),
         "artifact_id": artifact_id,
         "state": row["state"],
         "state_reason_code": row["state_reason_code"],
+        "student_id": row["student_id"],
         "composition_id": row["composition_id"],
         "composed_at": row["created_at"].isoformat() if row["created_at"] else None,
         "needs_human": row["needs_human"],
         "prior_rater_mismatch": row["prior_rater_mismatch"],
         "packet": row["packet"],
+        # Present for an unbound paper, absent otherwise: the file it came from, what intake made
+        # of it, and the class to choose from.
+        "intake": ({**dict(intake),
+                    "read_at": intake["read_at"].isoformat() if intake["read_at"] else None}
+                   if intake else None),
+        "roster": roster,
         "events": events,
         "transitions": transitions,
     }

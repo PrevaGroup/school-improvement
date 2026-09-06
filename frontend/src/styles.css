@@ -380,3 +380,6 @@
   .rv-original { margin-top: 12px; }
   .rv-original summary { font-size: 12px; color: var(--muted); cursor: pointer; }
   .rv-original pre { white-space: pre-wrap; font: inherit; font-size: 13px; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 8px 0 0; }
+  .rv-state.rv-unbound { border-color: var(--accent); color: var(--accent); }
+  .rv-holds p { margin: 6px 0; font-size: 13px; }
+  .rv-editbar select { font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }

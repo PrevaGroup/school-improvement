@@ -105,12 +105,28 @@ type Transition = {
   created_at: string | null;
 };
 
+type IntakeFile = {
+  name: string;
+  status: string;
+  reason_code: string | null;
+  candidates: { student_id: string; display_name: string | null; score: number }[] | null;
+  word_count: number | null;
+  text: string | null;
+  folder: string | null;
+  read_at: string | null;
+};
+
+type RosterEntry = { student_id: string; display_name: string | null };
+
 type Detail = {
   artifact_id: string;
   composition_id: string;
   state: string;
   state_reason_code: string | null;
-  packet: Packet;
+  student_id: string | null;
+  intake: IntakeFile | null;
+  roster: RosterEntry[];
+  packet: Packet | null;
   events: ScoreEvent[];
   transitions: Transition[];
   needs_human: number;
@@ -195,6 +211,22 @@ export function ReviewConsole() {
     }
   }
 
+  async function resolveTo(student_id: string) {
+    if (!detail) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post(`/review/${encodeURIComponent(detail.artifact_id)}/resolve`, { student_id });
+      const d = await api.get<Detail>(`/review/artifact/${encodeURIComponent(detail.artifact_id)}`);
+      setDetail(d);
+      await loadQueue();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveFeedback(message: string) {
     if (!detail) return;
     setBusy(true);
@@ -269,10 +301,102 @@ export function ReviewConsole() {
       <section className="rv-paper">
         {error && <div className="rv-err">{error}</div>}
         {!detail && <p className="rv-mut">Select a paper.</p>}
-        {detail && <Paper d={detail} busy={busy} onMove={move} onOverride={override}
-                          onSaveFeedback={saveFeedback} />}
+        {detail && detail.state === "unbound"
+          ? <Stuck d={detail} busy={busy} onResolve={resolveTo} />
+          : detail && <Paper d={detail} busy={busy} onMove={move} onOverride={override}
+                             onSaveFeedback={saveFeedback} />}
       </section>
     </div>
+  );
+}
+
+// A paper that exists in a folder and belongs to nobody yet. It became an artifact rather than
+// being dropped — a file that exists in a folder and nowhere in the system is the failure the
+// intake statuses exist to prevent — and this is where a person answers the question the matching
+// could not.
+//
+// The candidate list may be EMPTY, and that is a real answer rather than a missing one: nothing in
+// this file says whose it is. Showing three low-scoring names instead would be worse than showing
+// none, because a rushed teacher accepts one and the paper is filed under a student who did not
+// write it.
+function Stuck({ d, busy, onResolve }: {
+  d: Detail; busy: boolean; onResolve: (student_id: string) => void;
+}) {
+  const [picked, setPicked] = useState("");
+  const f = d.intake;
+  const candidates = f?.candidates ?? [];
+  const named = new Set(candidates.map((c) => c.student_id));
+
+  return (
+    <>
+      <header className="rv-head">
+        <div>
+          <h2>{f?.name ?? d.artifact_id}</h2>
+          <small>
+            {f?.word_count != null ? `${f.word_count} words` : "—"}
+            {f?.folder && <> · from {f.folder}</>}
+          </small>
+        </div>
+        <span className="rv-state rv-unbound">{STATE_LABEL.unbound}</span>
+      </header>
+
+      <div className="rv-holds">
+        <b>This paper is not attached to anyone yet.</b>
+        <p>
+          Nothing in the file said whose it is, so it is waiting rather than guessed at. Nobody is
+          scored until you say.
+        </p>
+        {f?.reason_code && <small><code>{f.reason_code}</code></small>}
+      </div>
+
+      <section className="rv-criteria">
+        <h3>Whose is it?</h3>
+        {candidates.length > 0 ? (
+          <>
+            <p className="rv-mut">Closest matches on the filename:</p>
+            <div className="rv-editbar">
+              {candidates.map((c) => (
+                <button key={c.student_id} className="rv-primary" disabled={busy}
+                        onClick={() => onResolve(c.student_id)}>
+                  {c.display_name ?? c.student_id}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="rv-mut">
+            Nothing in the filename points at anyone on this roster, so there is no shortlist to
+            offer — pick from the class below.
+          </p>
+        )}
+
+        <div className="rv-editbar" style={{ marginTop: 14 }}>
+          <select value={picked} disabled={busy}
+                  onChange={(e) => setPicked(e.target.value)}>
+            <option value="">{candidates.length ? "Someone else…" : "Choose a student…"}</option>
+            {d.roster.filter((r) => !named.has(r.student_id)).map((r) => (
+              <option key={r.student_id} value={r.student_id}>
+                {r.display_name ?? r.student_id}
+              </option>
+            ))}
+          </select>
+          <button disabled={busy || !picked} onClick={() => onResolve(picked)}>
+            Attach it
+          </button>
+          <small>
+            Once attached this cannot be reassigned — a paper that already carries scores and
+            feedback describes one student's writing.
+          </small>
+        </div>
+      </section>
+
+      {f?.text && (
+        <section className="rv-text">
+          <h3>What it says</h3>
+          <pre>{f.text}</pre>
+        </section>
+      )}
+    </>
   );
 }
 
@@ -283,6 +407,7 @@ function Paper({ d, busy, onMove, onOverride, onSaveFeedback }: {
   onSaveFeedback: (message: string) => void;
 }) {
   const p = d.packet;
+  if (!p) return <p className="rv-mut">This paper has not been scored yet.</p>;
   const holds = p.feedback?.holds ?? [];
   const current = new Map(d.events.filter((e) => e.current).map((e) => [e.node_id, e]));
 

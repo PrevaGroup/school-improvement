@@ -108,6 +108,14 @@ _INSERT_OVERRIDE = text("""
 """)
 
 
+# Setting the student and binding in ONE statement, so an artifact can never sit named-but-unbound.
+# Both guards see it: the rebind trigger checks the student change, the transition trigger checks
+# unbound -> bound and refuses a machine.
+_RESOLVE = text("""
+    UPDATE artifact SET student_id = :student_id, state = 'bound', state_reason_code = NULL
+     WHERE artifact_id = :artifact_id AND state = 'unbound' AND student_id IS NULL
+""")
+
 _LATEST_COMPOSITION = text("""
     SELECT composition_id, packet, composer_version, needs_human, prior_rater_mismatch,
            tenant_id, visibility
@@ -236,6 +244,50 @@ def override(artifact_id: str, payload: dict = Body(...), db: Session = Depends(
     return {"event_id": event_id, "supersedes_event_id": prior_id,
             "node_id": prior["node_id"], "status": new_status, "level": level,
             "scorer_id": actor_id}
+
+
+@router.post("/{artifact_id}/resolve")
+def resolve(artifact_id: str, payload: dict = Body(...), db: Session = Depends(get_db_public),
+            principal: dict = Depends(get_current_principal)) -> dict:
+    """Say whose an unbound paper is.
+
+    The one legitimate way `student_id` gets filled. A file nobody could be matched to became an
+    artifact rather than being dropped — a paper that exists in a folder and nowhere in the system
+    is the failure the intake statuses exist to prevent — and this is a person answering the
+    question the matching could not.
+
+    Naming and binding happen in one statement. An artifact that carried a student while still
+    `unbound` would be a paper attributed to someone and visible to nobody, which is a worse state
+    than either end of the move.
+    """
+    student_id = str(payload.get("student_id") or "")
+    if not student_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "resolving means naming a student — there is no other kind")
+
+    artifact = _artifact_or_404(db, artifact_id)
+    if artifact["state"] != "unbound":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"this paper is in `{artifact['state']}`, not `unbound`. A student may only be named "
+            f"while nobody has been named yet — reassigning a paper that already carries scores "
+            f"would manufacture a false record for two people at once.")
+
+    actor_id = _bind_teacher(db, principal)
+    try:
+        moved = db.execute(_RESOLVE, {"artifact_id": artifact_id,
+                                      "student_id": student_id}).rowcount
+        db.commit()
+    except DBAPIError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, _trigger_message(exc)) from exc
+
+    if moved != 1:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "somebody resolved this while you were looking at it — reload")
+    log.info("%s resolved to %s by %s", artifact_id, student_id, actor_id)
+    return {"artifact_id": artifact_id, "student_id": student_id, "state": "bound",
+            "resolved_by": actor_id}
 
 
 @router.post("/{artifact_id}/feedback")

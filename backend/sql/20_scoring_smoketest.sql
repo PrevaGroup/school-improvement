@@ -149,6 +149,29 @@ BEGIN
     END IF;
 END $$;
 
+-- The rebind rule (0023). A teacher may name the author of a paper nobody was matched to, and
+-- may not change that answer once the paper carries scores, a review and a delivery record —
+-- pointing that history at a different person manufactures a false record for two people at once.
+INSERT INTO artifact (artifact_id, run_id, content_hash, state, tenant_id, visibility)
+VALUES ('sm-art-4', 'sm-run', 'hash-4', 'unbound', 'public', 'public');
+
+SELECT set_config('app.actor_type', 'teacher', true);
+SELECT pg_temp.expect_ok(
+  $$UPDATE artifact SET student_id='sm-stu-1', state='bound' WHERE artifact_id='sm-art-4'$$,
+  'a teacher may name the author of an unbound paper');
+
+SELECT pg_temp.expect_fail(
+  $$UPDATE artifact SET student_id='sm-stu-2' WHERE artifact_id='sm-art-4'$$,
+  'a bound paper cannot be reassigned to a different student');
+
+INSERT INTO artifact (artifact_id, run_id, content_hash, state, student_id, tenant_id, visibility)
+VALUES ('sm-art-5', 'sm-run', 'hash-5', 'bound', 'sm-stu-3', 'public', 'public');
+SELECT pg_temp.expect_fail(
+  $$UPDATE artifact SET student_id='sm-stu-4' WHERE artifact_id='sm-art-5'$$,
+  'naming a student is refused outside `unbound`, whatever the current value');
+
+SELECT set_config('app.actor_type', 'machine', true);
+
 -- --------------------------------------------------------------------------- --
 -- 2. Scores append; they never change.
 -- --------------------------------------------------------------------------- --
