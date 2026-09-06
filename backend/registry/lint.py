@@ -58,6 +58,12 @@ class Finding:
 @dataclass
 class Registry:
     """The slice of registry content a lint pass reads. Plain dicts, loaded by the caller."""
+    # standard -> skill -> rubric -> trait -> criteria. Skills and rubrics arrived in 0019; the
+    # defaults keep every caller that predates them working, and a registry with no rubrics simply
+    # produces no rubric findings rather than crashing.
+    skills: Sequence[Mapping[str, Any]] = field(default_factory=list)
+    rubrics: Sequence[Mapping[str, Any]] = field(default_factory=list)
+    rubric_traits: Sequence[Mapping[str, Any]] = field(default_factory=list)
     nodes: Sequence[Mapping[str, Any]] = field(default_factory=list)
     versions: Sequence[Mapping[str, Any]] = field(default_factory=list)
     tasks: Sequence[Mapping[str, Any]] = field(default_factory=list)
@@ -306,8 +312,86 @@ def check_grade_band_coherence(r: Registry) -> list[Finding]:
     return out
 
 
+def check_rubric_has_traits(r: Registry) -> list[Finding]:
+    """A published rubric with no traits cannot score anything.
+
+    It is not a harmless empty container: a scoring site pointing at it resolves to an empty trait
+    set, and an artifact scored on nothing reaches `scored` with no observations at all — a paper
+    that looks processed and measured nobody.
+    """
+    used = {t["rubric_id"] for t in r.rubric_traits}
+    return [Finding("rubric_has_traits", BLOCKING, rb["rubric_id"],
+                    f"rubric {rb.get('name')!r} is {rb.get('status')} and has no traits — a site "
+                    f"pointing at it would score an artifact on nothing.")
+            for rb in r.rubrics
+            if rb.get("status") == "published" and rb["rubric_id"] not in used]
+
+
+def check_rubric_trait_grade_band(r: Registry) -> list[Finding]:
+    """A trait's grade band is part of its identity, so it cannot differ from its rubric's.
+
+    If an 11-12 trait appears in a 6-8 rubric, one of the two is wrong and no amount of downstream
+    care recovers which. Blocking, because it is decidable without judgment.
+    """
+    band = {n["node_id"]: n.get("grade_band") for n in r.nodes}
+    rband = {rb["rubric_id"]: rb.get("grade_band") for rb in r.rubrics}
+    out = []
+    for t in r.rubric_traits:
+        nb, rb = band.get(t["node_id"]), rband.get(t["rubric_id"])
+        if nb and rb and nb != rb:
+            out.append(Finding(
+                "rubric_trait_grade_band", BLOCKING, t["node_id"],
+                f"trait is grade band {nb} but rubric {t['rubric_id']} is {rb}. The band is part "
+                f"of the trait's identity — one of the two is wrong."))
+    return out
+
+
+def check_trait_crosses_standards(r: Registry) -> list[Finding]:
+    """A trait used by rubrics assigned to skills under DIFFERENT standards.
+
+    This is the one place the many-to-many earns its advisory. Reusing a trait identifier across
+    rubrics is how commonality is declared, and a trait shared across standards may be exactly the
+    anchor that links them onto one metric — deliberate and valuable. It may equally be somebody
+    reaching for a trait that looked close enough.
+
+    The linter cannot tell those apart, and neither can a rule. It can refuse to let the question
+    go unasked, which is what the advisory class is for.
+    """
+    rubric_standard: dict[str, set[str]] = {}
+    for sk in r.skills:
+        if sk.get("rubric_id"):
+            rubric_standard.setdefault(sk["rubric_id"], set()).add(sk.get("standard_code"))
+
+    by_trait: dict[str, set[str]] = {}
+    for t in r.rubric_traits:
+        by_trait.setdefault(t["node_id"], set()).update(
+            rubric_standard.get(t["rubric_id"], set()))
+
+    return [Finding("trait_crosses_standards", ADVISORY, node_id,
+                    f"used by rubrics assigned to {len(stds)} different standards "
+                    f"({', '.join(sorted(s for s in stds if s))}). If that is an anchor, say so; "
+                    f"if it is a trait that looked close enough, it is a construct error.")
+            for node_id, stds in sorted(by_trait.items()) if len({s for s in stds if s}) > 1]
+
+
+def check_skill_unscored(r: Registry) -> list[Finding]:
+    """A skill with no rubric is taught and not measured.
+
+    Legitimate and common — the review console says so outright. Advisory rather than silent,
+    because the alternative is a coverage table that quietly counts it as covered.
+    """
+    return [Finding("skill_unscored", ADVISORY, sk["skill_id"],
+                    f"{sk.get('standard_code')}{sk.get('sub_code') or ''} has no rubric, so "
+                    f"nothing about it is measured.")
+            for sk in r.skills if not sk.get("rubric_id")]
+
+
 RULES = (
     check_identifier_integrity,
+    check_rubric_has_traits,
+    check_rubric_trait_grade_band,
+    check_trait_crosses_standards,
+    check_skill_unscored,
     check_scale_declared,
     check_strand_substitution,
     check_anchor_coverage,

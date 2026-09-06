@@ -18,8 +18,8 @@ workstation — this connects as the migrator role, like every producer job.
 cd backend
 python -m registry.seed_demo --prompt-versions "$(python -m scoring.prompts)"  # author + lint
 python -m scoring.seed_demo --text-dir /tmp/sip-demo                # 2 synthetic papers, bound
-python -m scoring.run_scoring --config-key demo-writing --dry-run   # calls the model, writes nothing
-python -m scoring.run_scoring --config-key demo-writing             # scores, writes, transitions
+python -m scoring.run_scoring --config-key writing-default --dry-run   # calls the model, writes nothing
+python -m scoring.run_scoring --config-key writing-default             # scores, writes, transitions
 python -m scoring.compose                                           # packet + draft, -> in_review
 python -m scoring.seed_demo --purge && python -m registry.seed_demo --purge
 ```

@@ -2,7 +2,7 @@
 
     python -m registry.seed_demo --prompt-versions "$(python -m scoring.prompts)"   # the rubric
     python -m scoring.seed_demo --text-dir /tmp/sip-demo                            # the papers
-    python -m scoring.run_scoring --config-key demo-writing                         # score
+    python -m scoring.run_scoring --config-key writing-default                         # score
     python -m scoring.seed_demo --purge && python -m registry.seed_demo --purge     # clean up
 
 TWO COMMANDS, NOT ONE, AND THAT IS THE POINT. This file used to seed the rubric too — six
@@ -17,7 +17,16 @@ job and scoring may read it, so the seed is split the same way the modules are.
 The papers are synthetic — written for the slice-1 prototype, not handed in by anyone. There is no
 real student writing in this subsystem and there will not be until a hardening phase.
 
-The `demo-` prefix is a safety property rather than a naming convention: `--purge` deletes by it.
+## Identifiers here name a RUN, and that is a different thing from a trait identifier
+
+`registry/seed_demo.py` explains why reference identifiers are meaningless UUIDs: a trait
+identifier that spells `demo-ci` puts a lifecycle fact inside an identity, and identities have to
+outlive the facts that were true when they were minted.
+
+Artifacts are not reference content. An artifact belongs to a RUN, a run legitimately has a name,
+and naming it is the point rather than a leak — so `--purge` scopes by `run_id` and the ids stay
+readable. The distinction is worth holding onto: identity of reference content must mean nothing,
+identity of an operational row may say what produced it.
 """
 from __future__ import annotations
 
@@ -31,16 +40,15 @@ from sqlalchemy import text
 
 from ._db import engine
 
-FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "demo_freespeech_papers.json"
+FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "freespeech_papers.json"
 
-PREFIX = "demo-"
-RUN_ID = f"{PREFIX}run-1"
-SECTION_ID = f"{PREFIX}sec-1"
+RUN_ID = "fixture-run-1"
+SECTION_ID = "fixture-section-1"
 # Duplicated from registry.seed_demo rather than imported — the boundary rule, and the same honest
-# duplication `_db.py` and `_ids.py` already carry. A binding key names a task; it does not import
+# duplication `_db.py` and `_ids.py` already carry. A binding key NAMES a task; it does not import
 # one. `tests/test_seed_demo.py` asserts the two files still agree.
-TASK_ID = f"{PREFIX}fs10-oped"
-CONFIG_KEY = f"{PREFIX}writing"
+TASK_ID = "fs10-oped"
+CONFIG_KEY = "writing-default"
 
 
 def load() -> dict:
@@ -55,13 +63,13 @@ def seed(text_dir: pathlib.Path) -> dict:
     with engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', 'public', true)"))
         conn.execute(text("SELECT set_config('app.actor_type', 'teacher', true)"))
-        conn.execute(text("SELECT set_config('app.actor_id', 'demo-seed', true)"))
+        conn.execute(text("SELECT set_config('app.actor_id', 'fixture-seed', true)"))
 
         for key, paper in fx["papers"].items():
             body = paper["text"]
-            path = text_dir / f"{PREFIX}{key}.txt"
+            path = text_dir / f"{key}.txt"
             path.write_text(body, encoding="utf8")
-            aid = f"{PREFIX}art-{key}"
+            aid = f"{RUN_ID}:{key}"
             conn.execute(text("""
                 INSERT INTO artifact (artifact_id, run_id, student_id, section_id, task_id,
                                       iteration, window_label, content_hash, source_uri,
@@ -69,7 +77,7 @@ def seed(text_dir: pathlib.Path) -> dict:
                 VALUES (:a, :r, :s, :sec, :t, 'final', 'fall 2026', :h, :uri,
                         CAST(:rp AS jsonb), 'unbound', 'public', 'public')
                 ON CONFLICT (artifact_id) DO NOTHING"""),
-                {"a": aid, "r": RUN_ID, "s": f"{PREFIX}stu-{key}", "sec": SECTION_ID,
+                {"a": aid, "r": RUN_ID, "s": f"student-{key}", "sec": SECTION_ID,
                  "t": TASK_ID, "h": hashlib.sha256(body.encode("utf8")).hexdigest(),
                  "uri": str(path),
                  "rp": json.dumps({k: "looked_up" for k in
@@ -91,12 +99,19 @@ def seed(text_dir: pathlib.Path) -> dict:
 # models rather than trusting this one — `artifact_composition` arrived in migration 0017 and this
 # function was not updated, so the next purge failed on a foreign key with two papers already
 # scored. A tuple that has to be remembered is a tuple that will be forgotten.
+#
+# The scope column differs: score_event and artifact carry `run_id` directly, while the two audit
+# tables only reference the artifact. Scoping those by a subquery keeps one run's rows together
+# even when another run's artifacts exist beside them.
 _PURGE_ORDER = (
-    ("artifact_composition", "artifact_id"),
-    ("score_event", "artifact_id"),
-    ("artifact_state_transition", "artifact_id"),
-    ("artifact", "artifact_id"),
+    ("artifact_composition", "artifact"),
+    ("score_event", "run"),
+    ("artifact_state_transition", "artifact"),
+    ("artifact", "run"),
 )
+
+_BY_RUN = "run_id = :run"
+_BY_ARTIFACT = "artifact_id IN (SELECT artifact_id FROM artifact WHERE run_id = :run)"
 
 # Both are append-only by trigger, so the triggers come off for this transaction. That is why
 # purging is a maintenance script and not something the pipeline can reach: the append-only rule
@@ -107,7 +122,7 @@ _APPEND_ONLY = (("score_event", "trg_score_event_append_only"),
 
 
 def purge() -> dict:
-    """Remove the demo artifacts, their events and their review packets.
+    """Remove one run's artifacts, their events and their review packets.
 
     No try/finally around the trigger disable. ALTER TABLE is transactional in Postgres, so a
     failure rolls the DISABLE back with everything else and the triggers are never left off. The
@@ -120,10 +135,10 @@ def purge() -> dict:
         for table, trigger in _APPEND_ONLY:
             conn.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {trigger}"))
 
-        for table, column in _PURGE_ORDER:
+        for table, scope in _PURGE_ORDER:
+            where = _BY_RUN if scope == "run" else _BY_ARTIFACT
             counts[table] = conn.execute(
-                text(f"DELETE FROM {table} WHERE {column} LIKE :p"),
-                {"p": f"{PREFIX}%"}).rowcount
+                text(f"DELETE FROM {table} WHERE {where}"), {"run": RUN_ID}).rowcount
 
         for table, trigger in _APPEND_ONLY:
             conn.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER {trigger}"))
@@ -135,8 +150,8 @@ def main() -> None:
     ap.add_argument("--text-dir", default=None,
                     help="where to write the papers (default: a temp directory)")
     ap.add_argument("--purge", action="store_true",
-                    help="remove the demo artifacts and their events (the rubric is "
-                         "`python -m registry.seed_demo --purge`)")
+                    help=f"remove run {RUN_ID} and everything it produced (the rubric is "
+                         f"`python -m registry.seed_demo --purge`)")
     args = ap.parse_args()
 
     if args.purge:

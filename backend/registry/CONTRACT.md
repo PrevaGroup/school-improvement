@@ -11,7 +11,10 @@ makes cross-district anchoring possible without a cross-tenant query.
 
 | Table | Role |
 |---|---|
-| `registry_node` | **THE unit.** One item: a standard, one criterion, one scale, one grade band. The identifier is the identity; the composite is the integrity constraint |
+| `registry_skill` | A SUB-STANDARD: a lettered part (X.1a) or a clause somebody split out of a compound standard. `derivation` says which, and a `clause` split names who made it |
+| `registry_rubric` | One named instrument, with an identifier of its own. Until 0019 this was a prose string repeated on every trait |
+| `registry_rubric_trait` | Which traits a rubric is made of. **Many-to-many** |
+| `registry_node` | **THE trait.** One standard, one criterion, one scale, one grade band. The identifier is the identity; the composite is the integrity constraint |
 | `registry_node_version` | Descriptors at a version. Frozen once published |
 | `registry_task` | A thing students hand in. `ordinal` is taught position - an annotation, never an ordering principle for difficulty |
 | `registry_scoring_site` | WHICH iterations of a task are scored, and whether each is the measurement occasion |
@@ -66,6 +69,32 @@ The scoring driver reads `registry_scoring_site`, `registry_scoring_site_node`, 
 `registry_node_version` and `registry_scoring_configuration` **with SQL and never by import** - a
 produced table is the contract. Those five table shapes are therefore load-bearing for the pipeline;
 changing a column name in them breaks a consumer that no import graph will show you.
+
+## The shape
+
+    standard  ->  skill  ->  rubric  ->  trait  ->  criteria
+
+A skill is a sub-standard. Either the document carries lettered parts and the skill is one of them
+(a fact), or a compound standard was split into clauses by a person (a judgment, attributed). A
+skill with no rubric is taught and NOT scored - `rubric_id` is nullable so the unscored case is
+representable, or somebody invents a placeholder rubric and every coverage count is wrong.
+
+**Rubric-to-trait is many-to-many, and that is load-bearing.** A trait is not owned by a rubric.
+The same trait identifier appearing in two rubrics is how commonality gets DECLARED, and a trait
+shared between rubrics is the anchor that places both on one metric. Own a trait to one rubric and
+every rubric floats on its own scale.
+
+## Identifiers mean nothing
+
+`registry_skill.skill_id`, `registry_rubric.rubric_id` and `registry_node.node_id` are UUIDs, with a
+CHECK. An identifier that encodes facts - `demo-ci` - invites people to read the facts off it, and
+then the fact changes and the identifier is left asserting something false about a row nobody can
+safely rename.
+
+The readable name is `criterion_label`. The publisher's own short code is `external_ref`, so
+CoreTools' `ci` never has to become an identity. The column stays `text` rather than `uuid` because
+`score_event.node_id` holds millions of stamps eventually and the guarantee belongs where
+identifiers are AUTHORED, not where they are recorded.
 
 ## The node rule
 

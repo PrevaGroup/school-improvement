@@ -145,6 +145,9 @@ EXPECTED_TABLES: dict[str, str] = {
     "registry_scoring_site_node": "registry",
     "registry_scoring_configuration": "registry",
     "registry_lint_acknowledgment": "registry",
+    "registry_skill": "registry",
+    "registry_rubric": "registry",
+    "registry_rubric_trait": "registry",
     # --- corpus tables — declared in corpus/models.py. Public reference content:
     #     the anchor papers, identical for every district. ---
     "corpus_source": "corpus",
@@ -222,6 +225,9 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "registry_scoring_site_node": "0012_registry_tables.py",
     "registry_scoring_configuration": "0012_registry_tables.py",
     "registry_lint_acknowledgment": "0015_lint_acknowledgment.py",
+    "registry_skill": "0019_rubric_and_uuids.py",
+    "registry_rubric": "0019_rubric_and_uuids.py",
+    "registry_rubric_trait": "0019_rubric_and_uuids.py",
     "corpus_source": "0013_corpus_tables.py",
     "corpus_paper": "0013_corpus_tables.py",
     "corpus_score": "0013_corpus_tables.py",

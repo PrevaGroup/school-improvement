@@ -1,7 +1,8 @@
 """The demo seed must not be able to touch anything real, and must agree with registry's half.
 
-`--purge` deletes by prefix, so an id that escaped the prefix would be both created and left
-behind. That makes "every id starts with demo-" a safety property rather than a naming convention.
+`--purge` scopes by `run_id`, so an artifact that escaped that scope would be both created and left
+behind. Identifiers here NAME a run, which is different from a trait identifier: reference content
+must have an identity that means nothing, while an operational row may say what produced it.
 
 The cross-file agreement test is the price of the honest duplication: `scoring.seed_demo` names a
 task that `registry.seed_demo` authors, and it may not import it (modules integrate through
@@ -19,26 +20,36 @@ from scoring import seed_demo
 from scoring.prompts import render_scale
 from scoring.score import Criterion, build_evidence_prompt
 
-ID_CONSTANTS = ("RUN_ID", "SECTION_ID", "TASK_ID", "CONFIG_KEY")
+LIFECYCLE_WORDS = ("demo", "test", "temp", "tmp", "sample", "dummy", "fake")
 
 
-def test_every_seeded_identifier_carries_the_prefix():
-    for name in ID_CONSTANTS:
-        value = getattr(seed_demo, name)
-        assert value.startswith(seed_demo.PREFIX), f"{name}={value!r} would survive --purge"
-
-
-def test_the_two_halves_of_the_demo_agree_on_the_binding():
-    """The duplication is deliberate — this is what keeps it honest."""
+def test_the_two_halves_of_the_fixture_agree_on_the_binding():
+    """The duplication is deliberate — registry may not be imported here — and this is what keeps
+    it honest. A binding key naming a task that does not exist is the run failing at the trait-set
+    read with nothing useful to say about why."""
     assert seed_demo.TASK_ID == registry_seed.TASK_ID
     assert seed_demo.CONFIG_KEY == registry_seed.CONFIG_KEY
-    assert seed_demo.PREFIX == registry_seed.PREFIX
 
 
-def test_the_purge_deletes_by_prefix_and_only_by_prefix():
+def test_no_identifier_carries_a_lifecycle_word():
+    """`demo-` put a lifecycle fact inside an identity, and `--purge` then matched on it, which
+    made deletion depend on identity. A run id may name its run; nothing may be called demo."""
+    ids = [seed_demo.RUN_ID, seed_demo.SECTION_ID, seed_demo.TASK_ID, seed_demo.CONFIG_KEY]
+    offenders = [i for i in ids if any(w in i.lower() for w in LIFECYCLE_WORDS)]
+    assert not offenders, f"identifiers carrying a lifecycle word: {offenders}"
+
+
+def test_every_artifact_belongs_to_the_run_the_purge_scopes_by():
+    """The scope is the run, so an artifact minted outside it would survive a purge."""
+    src = inspect.getsource(seed_demo.seed)
+    assert 'aid = f"{RUN_ID}:{key}"' in src
+    assert '"r": RUN_ID' in src
+
+
+def test_the_purge_is_scoped_to_one_run():
     src = inspect.getsource(seed_demo)
-    assert "LIKE :p" in src
-    assert 'f"{PREFIX}%"' in src
+    assert "run_id = :run" in src
+    assert "LIKE" not in src, "a name match is what scoping by the run was supposed to remove"
     assert "WHERE 1=1" not in src
 
 
@@ -92,7 +103,7 @@ def test_the_trigger_restore_does_not_rely_on_a_finally():
 def _criteria():
     out = []
     for node in registry_seed.load()["nodes"]:
-        nid = f"{registry_seed.PREFIX}{node['id']}"
+        nid = registry_seed.trait_id(node["id"])
         cats = sorted(float(k) if "." in k else int(k) for k in node["levels"])
         out.append(Criterion(node_id=nid, criterion_label=node["name"], categories=cats,
                              descriptors=node["levels"], node_version_id=f"{nid}-v1"))
