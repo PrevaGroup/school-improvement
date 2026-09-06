@@ -86,32 +86,47 @@ def seed(text_dir: pathlib.Path) -> dict:
     return {"artifacts": artifacts, "text_dir": str(text_dir), "config_key": CONFIG_KEY}
 
 
-def purge() -> dict:
-    """Remove the demo artifacts and their events.
+# Children before the parent. Every table that references `artifact` has to be listed, and
+# `test_the_purge_deletes_every_table_that_references_an_artifact` derives that list from the
+# models rather than trusting this one — `artifact_composition` arrived in migration 0017 and this
+# function was not updated, so the next purge failed on a foreign key with two papers already
+# scored. A tuple that has to be remembered is a tuple that will be forgotten.
+_PURGE_ORDER = (
+    ("artifact_composition", "artifact_id"),
+    ("score_event", "artifact_id"),
+    ("artifact_state_transition", "artifact_id"),
+    ("artifact", "artifact_id"),
+)
 
-    score_event is append-only by trigger for UPDATE and DELETE, so the trigger is disabled for
-    this transaction. That is why this is a maintenance script and not something the pipeline can
-    reach: the append-only rule is not negotiable from inside the pipeline, and a cleanup path that
-    the scorer could call would make it so.
+# Both are append-only by trigger, so the triggers come off for this transaction. That is why
+# purging is a maintenance script and not something the pipeline can reach: the append-only rule
+# must not be negotiable from inside the pipeline, and a cleanup path the scorer could call would
+# make it so.
+_APPEND_ONLY = (("score_event", "trg_score_event_append_only"),
+                ("artifact_composition", "trg_artifact_composition_append_only"))
+
+
+def purge() -> dict:
+    """Remove the demo artifacts, their events and their review packets.
+
+    No try/finally around the trigger disable. ALTER TABLE is transactional in Postgres, so a
+    failure rolls the DISABLE back with everything else and the triggers are never left off. The
+    finally that used to be here could not have run anyway — the transaction was already aborted,
+    so it raised InFailedSqlTransaction on top of the real error and buried it.
     """
+    counts = {}
     with engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', 'public', true)"))
-        conn.execute(text("ALTER TABLE score_event DISABLE TRIGGER trg_score_event_append_only"))
-        try:
-            counts = {
-                "score_event": conn.execute(text(
-                    "DELETE FROM score_event WHERE artifact_id LIKE :p"), {"p": f"{PREFIX}%"}
-                ).rowcount,
-                "artifact_state_transition": conn.execute(text(
-                    "DELETE FROM artifact_state_transition WHERE artifact_id LIKE :p"),
-                    {"p": f"{PREFIX}%"}).rowcount,
-                "artifact": conn.execute(text(
-                    "DELETE FROM artifact WHERE artifact_id LIKE :p"), {"p": f"{PREFIX}%"}
-                ).rowcount,
-            }
-        finally:
-            conn.execute(text(
-                "ALTER TABLE score_event ENABLE TRIGGER trg_score_event_append_only"))
+        for table, trigger in _APPEND_ONLY:
+            conn.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {trigger}"))
+
+        for table, column in _PURGE_ORDER:
+            counts[table] = conn.execute(
+                text(f"DELETE FROM {table} WHERE {column} LIKE :p"),
+                {"p": f"{PREFIX}%"}).rowcount
+
+        for table, trigger in _APPEND_ONLY:
+            conn.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER {trigger}"))
     return counts
 
 

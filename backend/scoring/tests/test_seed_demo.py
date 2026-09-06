@@ -36,18 +36,54 @@ def test_the_two_halves_of_the_demo_agree_on_the_binding():
 
 
 def test_the_purge_deletes_by_prefix_and_only_by_prefix():
-    src = inspect.getsource(seed_demo.purge)
+    src = inspect.getsource(seed_demo)
     assert "LIKE :p" in src
-    assert src.count('{"p": f"{PREFIX}%"}') >= 2
+    assert 'f"{PREFIX}%"' in src
     assert "WHERE 1=1" not in src
 
 
-def test_the_purge_restores_the_append_only_trigger_even_when_the_delete_fails():
-    """It disables a trigger to remove demo events. Leaving score_event mutable afterwards would
-    turn a cleanup script into a silent hole in the record's central invariant."""
+def test_the_purge_deletes_every_table_that_references_an_artifact():
+    """Derived from the models, not from the purge list — which is the point.
+
+    `artifact_composition` arrived in migration 0017 and nobody updated `purge()`. The next purge
+    failed on a foreign key with two papers already scored, and no test could have caught it,
+    because both sides of the omission were the same omission. This reads the FKs and asks the
+    purge whether it knows about each one.
+    """
+    from app.models import Base
+    import scoring.models  # noqa: F401
+
+    referencing = sorted(
+        t.name for t in Base.metadata.tables.values()
+        for fk in t.foreign_keys if fk.column.table.name == "artifact")
+    assert referencing, "no table references artifact — the derivation has stopped working"
+
+    listed = {t for t, _ in seed_demo._PURGE_ORDER}
+    missing = [t for t in referencing if t not in listed]
+    assert not missing, (
+        f"tables referencing artifact that the purge does not delete: {missing}. The DELETE on "
+        f"artifact will fail on a foreign key.")
+
+
+def test_the_purge_deletes_children_before_the_parent():
+    order = [t for t, _ in seed_demo._PURGE_ORDER]
+    assert order[-1] == "artifact", "the parent has to go last"
+
+
+def test_every_append_only_table_has_its_trigger_taken_off_and_put_back():
+    """A cleanup script that left either table mutable would be a silent hole in the record's
+    central invariant."""
     src = inspect.getsource(seed_demo.purge)
-    assert "finally:" in src
-    assert src.index("ENABLE TRIGGER") > src.index("finally:")
+    tables = {t for t, _ in seed_demo._APPEND_ONLY}
+    assert tables == {"score_event", "artifact_composition"}
+    assert src.index("DISABLE TRIGGER") < src.index("ENABLE TRIGGER")
+
+
+def test_the_trigger_restore_does_not_rely_on_a_finally():
+    """ALTER TABLE is transactional in Postgres, so a failure rolls the DISABLE back with
+    everything else. The finally that used to be here could not run — the transaction was already
+    aborted — so it raised InFailedSqlTransaction on top of the real error and buried it."""
+    assert "finally:" not in inspect.getsource(seed_demo.purge)
 
 
 # ------------------------------------------------------------------ the fixture is scorable
