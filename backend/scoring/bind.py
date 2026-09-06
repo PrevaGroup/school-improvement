@@ -235,7 +235,11 @@ def _bind_one(eng, row: dict, *, tenant: str, run_id: str | None, dry_run: bool)
         # `unbound` until a person says whose it is.
         if student:
             conn.execute(_BIND, {"artifact_id": artifact_id})
+            state = "bound"
 
+    # The FINAL state, not the initial one. The first version logged `state` before the bind and
+    # reported every artifact as `unbound`, including the two that were bound a line earlier —
+    # a log that quietly disagreed with the database about what had just happened.
     log.info("%s -> %s %s (%s)", row["name"], action, artifact_id, reason or state)
     return "created" if action == "create" else "superseded"
 
