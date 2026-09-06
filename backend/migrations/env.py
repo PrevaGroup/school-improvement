@@ -33,7 +33,8 @@ import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_st
 import roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
 import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
 import pooling.models  # noqa: E402,F401  — pooling_aggregation_consent, pooling_aggregate_run
-import registry.models  # noqa: E402,F401  — registry_node, registry_task, registry_scoring_* (6)
+import intake.models  # noqa: E402,F401  — intake_manifest, intake_file (2)
+import registry.models  # noqa: E402,F401  — registry_node, registry_task, registry_scoring_*, rubric, skill, lint ack
 import corpus.models  # noqa: E402,F401  — corpus_source, corpus_paper, corpus_score, corpus_discourse_span
 
 target_metadata = Base.metadata
