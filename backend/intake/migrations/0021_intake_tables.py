@@ -111,11 +111,18 @@ def upgrade() -> None:
         sa.Column("visibility", sa.Text(), nullable=False, server_default="public"),
         sa.CheckConstraint(
             "status IN (" + ",".join(f"'{s}'" for s in STATUSES) + ")", name="status"),
-        # Resolved means a person was named. Anything else must not carry one, or a half-matched
-        # file quietly becomes somebody's paper.
+        # `resolved` must name a person, and the three statuses that mean "this cannot become a
+        # paper" must not. `empty` sits deliberately in neither: a blank document we CAN attribute
+        # is a non-attempt by a named student — which becomes a `not_scorable` artifact, a real
+        # outcome on that student's record — while a blank document we cannot attribute names
+        # nobody. Forcing one rule on both would have thrown away the attributable case.
         sa.CheckConstraint(
-            "(status = 'resolved') = (resolved_student_id IS NOT NULL)",
+            "status <> 'resolved' OR resolved_student_id IS NOT NULL",
             name="resolved_names_a_student"),
+        sa.CheckConstraint(
+            "status NOT IN ('unresolved','not_student_work','unreadable') "
+            "OR resolved_student_id IS NULL",
+            name="only_an_attributable_file_names_a_student"),
         sa.UniqueConstraint("manifest_id", "source_ref", name="uq_intake_file_source_ref"),
     )
     op.create_index("ix_intake_file_manifest", "intake_file", ["manifest_id", "status"])

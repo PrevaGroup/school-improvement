@@ -101,12 +101,14 @@ _PINNED_CONFIG = text("""
 # statement with `could not determine data type of parameter $2` — at execution, against a real
 # server, which is the one place none of the unit tests look. Naming the type once fixes it.
 _PENDING = text("""
-    SELECT artifact_id, run_id, student_id, section_id, task_id, iteration, window_label,
-           content_hash, source_uri, tenant_id, visibility
-      FROM artifact
-     WHERE tenant_id = :tenant AND state = 'bound'
-       AND (CAST(:run_id AS text) IS NULL OR run_id = CAST(:run_id AS text))
-     ORDER BY created_at
+    SELECT a.artifact_id, a.run_id, a.student_id, a.section_id, a.task_id, a.iteration,
+           a.window_label, a.content_hash, a.source_uri, a.intake_file_id, f.text AS intake_text,
+           a.tenant_id, a.visibility
+      FROM artifact a
+      LEFT JOIN intake_file f ON f.file_id = a.intake_file_id
+     WHERE a.tenant_id = :tenant AND a.state = 'bound'
+       AND (CAST(:run_id AS text) IS NULL OR a.run_id = CAST(:run_id AS text))
+     ORDER BY a.created_at
      LIMIT :limit
 """)
 
@@ -415,13 +417,15 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
 
 
 def read_text(artifact: dict) -> str:
-    """The artifact's text.
+    """The artifact's text, from the intake row it was bound from.
 
-    A seam, not an implementation. Extraction is `intake`'s job (the manifest and the folder), and
-    what lands here is whatever that module produced. Until the two are wired, a run supplies text
-    through `source_uri` pointing at a local file, which is enough to exercise the whole path
-    end to end against real papers.
+    `intake` extracts once at read time and stores it, so this is a column rather than a file. The
+    local-path branch below is what the fixture seeder used before intake existed, and it stays
+    only until that seeder is retired — a batch job had a filesystem and the review console, which
+    reads the same text through the packet, does not.
     """
+    if artifact.get("intake_text"):
+        return artifact["intake_text"]
     uri = artifact.get("source_uri")
     if not uri:
         raise RuntimeError(

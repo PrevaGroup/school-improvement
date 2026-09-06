@@ -63,11 +63,13 @@ COMPOSER_VERSION = "c.1"
 NEEDS_HUMAN = ("abstained", "no_verified_evidence")
 
 _PENDING = text("""
-    SELECT artifact_id, run_id, student_id, section_id, task_id, iteration, window_label,
-           source_uri, tenant_id, visibility
-      FROM artifact
-     WHERE tenant_id = :tenant AND state = 'scored'
-     ORDER BY created_at
+    SELECT a.artifact_id, a.run_id, a.student_id, a.section_id, a.task_id, a.iteration,
+           a.window_label, a.source_uri, a.intake_file_id, f.text AS intake_text,
+           a.tenant_id, a.visibility
+      FROM artifact a
+      LEFT JOIN intake_file f ON f.file_id = a.intake_file_id
+     WHERE a.tenant_id = :tenant AND a.state = 'scored'
+     ORDER BY a.created_at
      LIMIT :limit
 """)
 

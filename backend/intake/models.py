@@ -114,10 +114,15 @@ class File(Base, TenantMixin):
     __table_args__ = (
         CheckConstraint(
             "status IN (" + ",".join(f"'{s}'" for s in FILE_STATUSES) + ")", name="status"),
-        # Resolved means a person was named. Anything else must not carry one, or a half-matched
-        # file quietly becomes somebody's paper.
-        CheckConstraint("(status = 'resolved') = (resolved_student_id IS NOT NULL)",
+        # `resolved` must name a person; the three statuses meaning "this cannot become a paper"
+        # must not. `empty` is deliberately in neither: a blank document we CAN attribute is a
+        # non-attempt by a named student — a `not_scorable` artifact, which is a real outcome on
+        # that student's record — while a blank document we cannot attribute names nobody.
+        CheckConstraint("status <> 'resolved' OR resolved_student_id IS NOT NULL",
                         name="resolved_names_a_student"),
+        CheckConstraint("status NOT IN ('unresolved','not_student_work','unreadable') "
+                        "OR resolved_student_id IS NULL",
+                        name="only_an_attributable_file_names_a_student"),
         UniqueConstraint("manifest_id", "source_ref", name="uq_intake_file_source_ref"),
         Index("ix_intake_file_manifest", "manifest_id", "status"),
         Index("ix_intake_file_hash", "text_hash"),
