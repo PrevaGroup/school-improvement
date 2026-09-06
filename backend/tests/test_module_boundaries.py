@@ -64,6 +64,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "app.marts": "serving",
     "app.chat": "serving",
     "app.evals_view": "serving",  # read-only admin view over the evals `trace` table (SQL, no import)
+    "app.review_view": "serving",  # the teacher review queue — reads scoring's tables with SQL
     "app.traces": "serving",  # trace EMISSION (GCS, no tables) — eval-trace-system.md phase 1
     "likeschools": "likeschools",
     "public_metrics": "public_metrics",

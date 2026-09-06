@@ -4,6 +4,7 @@ import { fmtNum, fmtPct } from "./format";
 import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
 import { EvalWorkbench, type EvalSection } from "./components/EvalDashboard";
+import { ReviewConsole } from "./components/ReviewConsole";
 import { applyChatWorkspace, defaultSpecForLevel } from "./workspace";
 import {
   byRecency, createSession, forkSession, loadStore, reconcileSchoolChange, relTime, saveStore,
@@ -15,11 +16,13 @@ import type {
   WorkspaceData, WorkspaceSpec,
 } from "./types";
 
-// The screen has one section at a time: the workspace (everyone), or an eval section (admins).
-type Section = "workspace" | EvalSection;
-const SECTIONS: Section[] = ["workspace", "traces", "evals", "results", "graders"];
+// The screen has one section at a time: the workspace (everyone), the teacher review console,
+// or an eval section (admins).
+type Section = "workspace" | "review" | EvalSection;
+const SECTIONS: Section[] = ["workspace", "review", "traces", "evals", "results", "graders"];
 const SECTION_LABEL: Record<Section, string> = {
-  workspace: "Workspace", traces: "Traces", evals: "Evals", results: "Results", graders: "Graders",
+  workspace: "Workspace", review: "Student work", traces: "Traces", evals: "Evals",
+  results: "Results", graders: "Graders",
 };
 
 const DEMO_DISTRICT = "0622500"; // Long Beach Unified (NCES LEAID) — the demo default
@@ -498,6 +501,8 @@ export default function App() {
         />
       </div>
         </div>
+      ) : section === "review" ? (
+        <ReviewConsole />
       ) : (
         <EvalWorkbench section={section} />
       )}

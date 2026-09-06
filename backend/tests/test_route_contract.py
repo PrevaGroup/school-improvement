@@ -60,6 +60,13 @@ EXPECTED: dict[str, set[str]] = {
     "/api/evals/runs": {"GET"},
     "/api/evals/runs/{run_id}/results": {"GET"},
     "/api/evals/graders/{name}": {"GET"},
+    # --- the writing subsystem's review surface, split the way the modules are ---
+    # serving reads (app/review_view.py); scoring owns the writes because it owns the tables.
+    # Both mount under /api/review at the composition root — neither module knows the other.
+    "/api/review/queue": {"GET"},
+    "/api/review/artifact/{artifact_id}": {"GET"},
+    "/api/review/{artifact_id}/state": {"POST"},
+    "/api/review/{artifact_id}/override": {"POST"},
 }
 
 

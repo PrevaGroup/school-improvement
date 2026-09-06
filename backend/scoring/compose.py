@@ -307,6 +307,13 @@ def _compose_one(eng, artifact: dict, *, tenant: str, dry_run: bool, rater_facto
     drafted, usage = feedback.draft(body, packet, rater_factory(identity), student_name)
     holds = feedback.check(drafted, body)
 
+    # The paper itself is part of what the teacher saw. Stored with the packet rather than fetched
+    # from `source_uri` at read time: the review console runs as the API role on Cloud Run, which
+    # cannot reach a batch job's local file, and a source that has moved would leave a reviewed
+    # artifact with no readable text. Duplication of student writing is a deliberate prototype
+    # tradeoff — a real deployment points this at a text store instead.
+    packet["text"] = body
+
     packet["feedback"] = {
         "message": drafted.message,
         "quotations": drafted.quotations,
