@@ -160,6 +160,59 @@ this form must re-add (values from the `describe` above, not from memory):
   eval runs are indistinguishable from prod (`source="prod"`), quietly corrupting the eval
   loop's mined-case source.
 
+### Who may use the app — Workspace group `ACCESS_GROUP` (one-time setup)
+
+The invite list for PEOPLE. `_assert_invited` checks membership live via Cloud Identity, so
+adding or removing a reviewer is a Workspace console change with no deploy, and a removal takes
+effect within the 5-minute TTL rather than at the next release.
+
+Fails closed: any error withholds access. That is deliberate — this is admission — but it means
+a setup problem looks like "the reviewer cannot get in", never like "everyone can get in".
+
+1. **Create the group** (Admin console → Directory → Groups). Access type Restricted, "Who can
+   join" = only invited users.
+2. **Allow external members**, which is TWO settings and the first is easy to miss:
+   - Domain: Admin console → Apps → Google Workspace → Groups for Business → Sharing settings →
+     adding external members = on. Off by default. While it is off, the per-group toggle looks
+     like it saves and has no effect, and adds fail with *"doesn't meet the group's required
+     conditions"*.
+   - Group: the group's own "Allow members outside your organization".
+   Enabling the domain setting adds nobody to anything — each group's own toggle stays off. To
+   narrow it, set group creation to admins-only on the same page.
+3. **Point the app at it**:
+   `gcloud run services update sip-api --region us-central1 --update-env-vars ACCESS_GROUP=sipusers@prevagroup.com`
+4. **Let the runtime service account read the group.** Same grant and same service account as
+   `ADMIN_GROUP`, so doing it once covers both. Find the account:
+
+   ```bash
+   gcloud run services describe sip-api --region us-central1      --format='value(spec.template.spec.serviceAccountName)'
+   ```
+
+   Empty means the default compute SA, `PROJECT_NUMBER-compute@developer.gserviceaccount.com`
+   (today: `1013838667941-compute@developer.gserviceaccount.com`). Then, as a Workspace super
+   admin: **admin.google.com → Account → Admin roles → Groups Reader → Admins → assign the
+   SERVICE ACCOUNT** (not a user), pasting that address. Least privilege: read-only, groups only.
+
+   Also enable the API, or every lookup fails before permissions are even consulted:
+
+   ```bash
+   gcloud services enable cloudidentity.googleapis.com --project school-improvement-501916
+   ```
+
+> **⚠️ THE STEP NOBODY REMEMBERS.** The API call is made by the Cloud Run service account, not by
+> you. Being a Workspace super admin grants that service account nothing — Cloud IAM and
+> Workspace admin are separate systems, and `roles/editor` on the project confers no Workspace
+> permission whatsoever. Without the grant in step 4 every lookup returns **403** and every
+> member is refused.
+>
+> The tell is the status code: `403` on `groups:lookup` means the group was found and the caller
+> may not read it — a permission problem. `404` would mean a wrong group address. Since #108 the
+> log line carries both, e.g.
+> `access group check failed for x@y.com against sipusers@prevagroup.com … HTTPStatusError: 403`.
+
+Verify by removing yourself from `SYSTEM_EMAILS` and signing in. Both paths admit you otherwise,
+so that is the only test that distinguishes them.
+
 ### Administrators — Workspace group `ADMIN_GROUP` (one-time GCP setup)
 
 `is_admin` (app/security.py) checks the caller's verified email against membership in the
@@ -419,13 +472,17 @@ The older `ALLOWED_EMAIL_DOMAINS=prevagroup.com,...` still works and maps every 
 domain to `google.com` — correct for the preva-only era, so a redeploy from old shell
 history stays safe. Prefer the map for anything new.
 
-### Inviting any individual — magic link + `SYSTEM_EMAILS`
+### Inviting any individual — magic link + `ACCESS_GROUP`
 
-For people who aren't in a member org (investors, individual testers), sign-in is a
-**passwordless email link**, and access is two independent gates — both required:
+For people who aren't in a member org (investors, individual testers, reviewers at other
+organizations), sign-in is a **passwordless email link**, and access is two independent gates —
+both required:
 
-1. **`SYSTEM_EMAILS`** (env var, in the one `--set-env-vars` flag) — *authorization*. The exact
-   address must be listed. e.g. `SYSTEM_EMAILS=investor@acme.com,someone@gmail.com`.
+1. **Membership of `ACCESS_GROUP`** — *authorization*. Add the address to the Workspace group
+   (setup below). Google groups admit external members, so any domain works. Do NOT use
+   `SYSTEM_EMAILS` for a person: that variable is for service identities, and putting people in
+   it makes the invite list a deploy artifact — unrevocable without a release, invisible to
+   anyone auditing access, edited by whoever last ran gcloud.
 2. **The magic link** — *ownership*. They type their email on the sign-in screen; Identity
    Platform emails a one-time link to that exact address; clicking it verifies the mailbox
    (`email_verified: true`) and signs them in. Owning the mailbox is necessary, not sufficient —

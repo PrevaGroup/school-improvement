@@ -17,13 +17,19 @@ import type {
   WorkspaceData, WorkspaceSpec,
 } from "./types";
 
-// The screen has one section at a time: the workspace (everyone), the teacher review console,
+// The screen has one section at a time: the workspace and the teacher's own screens (everyone),
 // or an eval section (admins).
 type Section = "workspace" | "folders" | "review" | EvalSection;
 // Folders sits BEFORE student work, because that is the order the work happens in:
 // a folder is read and confirmed, and only then is there anything to review.
-const SECTIONS: Section[] = ["workspace", "folders", "review", "traces", "evals",
-                             "results", "graders"];
+//
+// TEACHER SECTIONS ARE NOT ADMIN-GATED. They were, by accident: the nav exists for the eval
+// workbenches, which are admin-only, and the writing screens were added to the same list and
+// swept behind the same gate. The effect was that a signed-in teacher saw only the workspace and
+// no way to reach their own students' work — the product's whole point, invisible, with nothing
+// on screen suggesting anything was missing.
+const TEACHER_SECTIONS: Section[] = ["workspace", "folders", "review"];
+const ADMIN_SECTIONS: Section[] = ["traces", "evals", "results", "graders"];
 const SECTION_LABEL: Record<Section, string> = {
   workspace: "Workspace", folders: "Folders", review: "Student work",
   traces: "Traces", evals: "Evals", results: "Results", graders: "Graders",
@@ -132,7 +138,11 @@ export default function App() {
   }, []);
 
   // If admin is lost (e.g. a session change), fall back to the workspace so no eval section lingers.
-  useEffect(() => { if (!isAdmin) setSection("workspace"); }, [isAdmin]);
+  // Losing admin drops you out of an ADMIN section only. Bouncing a teacher out of their own
+  // review screen because they are not an administrator is the bug this pair of lines caused.
+  useEffect(() => {
+    if (!isAdmin && ADMIN_SECTIONS.includes(section)) setSection("workspace");
+  }, [isAdmin, section]);
 
   // Every selection resolves to a scoped backend query — no "fetch everything, filter
   // client-side". See ../CLAUDE.md: the browser never receives data outside the current scope.
@@ -380,14 +390,15 @@ export default function App() {
 
   return (
     <div className="app">
-      {isAdmin ? (
+      {/* The nav is always shown: everyone has somewhere to go. Admins get more entries. */}
+      {(
         <nav className="appnav">
-          {SECTIONS.map((k) => (
+          {[...TEACHER_SECTIONS, ...(isAdmin ? ADMIN_SECTIONS : [])].map((k) => (
             <button key={k} className={"appnav-i" + (section === k ? " on" : "")}
                     onClick={() => setSection(k)}>{SECTION_LABEL[k]}</button>
           ))}
         </nav>
-      ) : null}
+      )}
 
       {section === "workspace" ? (
         <div className="cols">
