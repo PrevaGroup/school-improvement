@@ -6,6 +6,14 @@
 product stopped one step short of its purpose: feedback that is correct, signed off, and never
 read by the student it was written for.
 
+## An edited message is a new thing to deliver
+
+The queue asks whether THIS composition has been sent, not whether the artifact ever has. A
+teacher who edits after delivery has written a new composition and the student is holding the old
+one — excluding the artifact would mean the edit never reached anybody while the console showed
+the new text as the message. Both attempts stay in the record, with different hashes, which is
+what answers "which version did the student actually read".
+
 ## Failures are rows, not silence
 
 A delivery that quietly did not happen is indistinguishable from one that did, on every screen a
@@ -66,9 +74,17 @@ _PENDING = text("""
       LEFT JOIN intake_file f ON f.file_id = a.intake_file_id
       LEFT JOIN intake_manifest m ON m.manifest_id = f.manifest_id
      WHERE a.tenant_id = :tenant AND a.state = 'released'
+       -- Nothing sent for THIS composition. Not "nothing sent for this artifact": a teacher who
+       -- edits a message after it went out has written a new composition, and the student is
+       -- holding the old one. Excluding the artifact would mean the edit silently never
+       -- reached anybody while the console showed the new text as the message.
+       --
+       -- This is what `message_hash` was for and the queue was never re-offering.
        AND NOT EXISTS (
            SELECT 1 FROM artifact_delivery d
-            WHERE d.artifact_id = a.artifact_id AND d.status = 'sent')
+            WHERE d.artifact_id = a.artifact_id
+              AND d.composition_id = c.composition_id
+              AND d.status = 'sent')
      ORDER BY a.created_at
      LIMIT :limit
 """)

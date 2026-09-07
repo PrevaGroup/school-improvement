@@ -157,3 +157,33 @@ def test_only_implemented_channels_can_be_asked_for():
     rather than at the point of asking."""
     for name in CHANNELS:
         assert name in MODEL_CHANNELS
+
+
+# ------------------------------------------------------------------ editing after delivery
+
+
+def test_the_queue_asks_whether_this_composition_was_sent():
+    """Not whether the artifact ever was. A teacher who edits a message after it went out has
+    written a new composition and the student is holding the old one — so excluding the artifact
+    would mean the edit silently never reached anybody, while the console showed the new text as
+    "the message".
+
+    That was the behaviour until the first real hand-back demonstrated it, and it made
+    `message_hash` decorative: two versions could never both exist.
+    """
+    from delivery.deliver import _PENDING
+
+    sql = str(_PENDING)
+    assert "d.composition_id = c.composition_id" in sql, (
+        "the queue is keyed on the artifact, so an edited message is never re-sent")
+    assert "d.status = 'sent'" in sql
+
+
+def test_a_failed_attempt_does_not_take_a_paper_out_of_the_queue():
+    """A retry is the normal response to a failure. Excluding on any attempt rather than a SENT
+    one would mean a single transient error meant a student never got their feedback."""
+    from delivery.deliver import _PENDING
+
+    sql = str(_PENDING)
+    assert "d.status = 'sent'" in sql
+    assert "d.status = 'failed'" not in sql
