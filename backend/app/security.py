@@ -209,6 +209,16 @@ def _assert_invited(claims: dict) -> None:
     if email in settings.allowed_emails:
         return
 
+    # The same question asked of Google instead of of an env var: is this verified address a
+    # member of the group that may use this application? Live, so removing somebody takes effect
+    # within the TTL rather than at the next deploy, and auditable in one place a person can look
+    # at — which an env var on a Cloud Run revision is not.
+    #
+    # Admits external members, which is the whole reason it replaces `allowed_emails` rather than
+    # sitting beside it: a Google group can contain an address from any domain.
+    if is_access_group_member(email):
+        return
+
     # Fails closed: an unset map admits nobody. See config.allowed_domain_providers.
     required_provider = settings.domain_providers.get(email.rsplit("@", 1)[1])
     if required_provider is None:
@@ -329,6 +339,37 @@ def _is_group_member(email: str, group: str) -> bool:
         )
         chk.raise_for_status()
         return bool(chk.json().get("hasMembership"))
+
+
+_access_cache: dict[str, tuple[bool, float]] = {}
+
+
+def is_access_group_member(email: str) -> bool:
+    """Is this verified address in the group that may use the application?
+
+    Same mechanism as `is_admin` and the same failure posture, for the same reason: this is
+    ADMISSION, so every unhappy path (no group configured, no email, API unreachable) withholds
+    it. A membership check that ERRORS is not cached, so a transient Cloud Identity outage retries
+    on the next request rather than locking a user out for the whole TTL.
+
+    Note what this does NOT do: it never widens to a domain, and it never bypasses
+    `email_verified`. Group membership answers "may this person use it"; it does not answer "is
+    this person who they say they are", and that stays with the identity provider.
+    """
+    group = (settings.access_group or "").strip().lower()
+    if not group or "@" not in email:
+        return False
+    now = time.time()
+    hit = _access_cache.get(email)
+    if hit and now - hit[1] < _ADMIN_TTL_S:
+        return hit[0]
+    try:
+        member = _is_group_member(email, group)
+    except Exception:
+        log.warning("access group check failed for %s — withholding access (fails closed)", email)
+        return False   # deliberately NOT cached
+    _access_cache[email] = (member, now)
+    return member
 
 
 def is_admin(principal: dict) -> bool:

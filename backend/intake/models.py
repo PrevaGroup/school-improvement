@@ -143,10 +143,10 @@ class DriveConnection(Base, TenantMixin):
     would make "whose Drive did this folder come from" unanswerable — the question asked when a
     paper turns out to be somebody else's, or when a person leaves and their access must go too.
 
-    THIS ROW IS A CREDENTIAL. `refresh_token` is long-lived. It is never selected by a serving
-    query and never returned by an endpoint; `drive_view` returns the email and the status. Cloud
-    SQL encrypts at rest. That is the honest floor for a POC and it is not a secrets manager —
-    written here so nobody later assumes hardening already happened. Migration 0029.
+    THIS ROW HOLDS NO CREDENTIALS. `token_secret_name` points into Secret Manager, where the rest
+    of this system's secrets already live, so the token is under IAM rather than a table grant —
+    auditable per read, revocable without a deploy, and invisible to a `pg_dump`. Migration 0029;
+    `intake/token_store.py` is the other half.
     """
     __tablename__ = "intake_drive_connection"
 
@@ -155,7 +155,7 @@ class DriveConnection(Base, TenantMixin):
     principal_email: Mapped[str | None] = mapped_column(Text)
     google_email: Mapped[str] = mapped_column(Text, nullable=False)    # whose Drive it reaches
 
-    refresh_token: Mapped[str] = mapped_column(Text, nullable=False)
+    token_secret_name: Mapped[str] = mapped_column(Text, nullable=False)
     # As Google RETURNED them, not as we asked. A user who unticked a scope grants less than was
     # requested, and the failure should say "you did not grant Docs" rather than surfacing a 403.
     granted_scopes: Mapped[str] = mapped_column(Text, nullable=False)

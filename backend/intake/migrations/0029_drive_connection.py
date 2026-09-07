@@ -17,17 +17,20 @@ go with them.
 So `principal_sub` is who connected it (the verified subject from the console's own sign-in, never
 a client-supplied field) and `google_email` is whose Drive it reaches.
 
-## What is stored, and what that obliges
+## This table holds no credentials
 
-A refresh token is a long-lived credential. Cloud SQL encrypts at rest, the column is never
-selected by any serving query, and no API returns it — `intake/drive_view.py` returns the
-connection's EMAIL and status, never its secrets. That is the honest floor for a POC and it is not
-the same as a secrets manager; hardening is where that changes, and this note is here so nobody
-later assumes it already did.
+`token_secret_name` is a POINTER into Secret Manager, where every other secret this system holds
+already lives. The first draft of this migration put the refresh token in a column and explained
+that Cloud SQL encrypts at rest and no query selects it — which describes a mitigation rather than
+a place for a credential, and left a live token visible to a `pg_dump`, a debugging session, a
+migration, or a future serving query written by somebody who did not read the comment.
 
-Access tokens are deliberately NOT stored. They live ~1 hour, so a stored one is stale far more
-often than it is useful, and keeping a second credential to save one refresh round-trip is a poor
-trade in a table that is already a credential store.
+With a pointer, the token is under IAM instead of a table grant: auditable per read in Cloud Audit
+Logs, revocable without a deploy, and grantable to exactly the service account that needs it. A
+`GRANT SELECT` expresses none of that.
+
+Access tokens are not stored anywhere. They live about an hour, so a stored one is stale far more
+often than useful.
 
 ## Revocation is a row, not a delete
 
@@ -61,7 +64,8 @@ def upgrade() -> None:
         # account and authorises another, which is the pilot's actual shape.
         sa.Column("google_email", sa.Text(), nullable=False),
 
-        sa.Column("refresh_token", sa.Text(), nullable=False),
+        # A Secret Manager secret id, never the credential. See `intake/token_store.py`.
+        sa.Column("token_secret_name", sa.Text(), nullable=False),
         # Exactly what was granted, as Google returned it — not as we asked for it. A consent
         # screen where the user unticked a scope returns less than was requested, and an
         # enumeration that then fails should say "you did not grant Docs" rather than 403.
@@ -104,6 +108,8 @@ def upgrade() -> None:
     # NOT get DELETE: a connection is revoked by setting a column, so the provenance of papers read
     # through it survives.
     op.execute("GRANT SELECT, INSERT ON intake_drive_connection TO sip_app;")
+    # Nothing here is sensitive to read, which is the point: the row names a secret, and reading
+    # the secret is an IAM decision made in Secret Manager rather than a table grant made here.
     op.execute("GRANT UPDATE (last_used_at, failed_at, failure_detail, revoked_at, revoked_by) "
                "ON intake_drive_connection TO sip_app;")
 
