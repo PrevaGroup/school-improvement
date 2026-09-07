@@ -383,3 +383,16 @@
   .rv-state.rv-unbound { border-color: var(--accent); color: var(--accent); }
   .rv-holds p { margin: 6px 0; font-size: 13px; }
   .rv-editbar select { font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+
+  /* --- confirming a folder --------------------------------------------------------------- */
+  /* All five counts, always, even at zero — a folder must never quietly become a smaller
+     number of papers, and a count that disappears when it hits zero does exactly that. */
+  .fc-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; margin-top: 20px; }
+  .fc-count { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px; display: flex; flex-direction: column; gap: 1px; }
+  .fc-count b { font-size: 21px; line-height: 1.1; }
+  .fc-count span { font-size: 12px; font-weight: 600; }
+  .fc-count small { font-size: 10.5px; color: var(--muted); line-height: 1.35; }
+  .fc-count.zero { opacity: .5; }
+  .fc-missing { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fc-missing span { font-size: 12.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
+  .fc-who { font-size: 14px; font-weight: 600; }

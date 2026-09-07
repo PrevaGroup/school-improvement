@@ -99,6 +99,23 @@ def test_the_inferred_rate_travels_with_the_folder():
     assert "inferred_rate" in str(review._ONE)
 
 
+def test_reading_a_folder_cannot_confirm_it():
+    """The reader must not open its own gate. A `--confirm` flag on `read_folder` would recreate
+    exactly the thing this replaces — a script with arguments, agreed to by whoever typed them —
+    and it would be reached for the first time somebody wanted to automate a nightly sync."""
+    from intake import read_folder
+    src = inspect.getsource(read_folder)
+    assert "confirmed_at" not in src, "read_folder can set the gate it is supposed to be behind"
+    assert "confirmed_by" not in src
+
+
+def test_a_read_starts_unconfirmed():
+    """Nothing in the INSERT names the confirmation columns, so a fresh manifest is a proposal by
+    construction rather than by a default somebody could change."""
+    from intake import read_folder
+    assert "confirmed" not in str(read_folder._INSERT_MANIFEST)
+
+
 def test_intake_writes_no_artifacts():
     """`artifact` belongs to scoring. Confirming a manifest is what LETS bind make them; it does
     not make them. Two writers to one table is not a contract."""
