@@ -206,7 +206,9 @@ def test_any_gmail_is_rejected(verified):
     with pytest.raises(HTTPException) as e:
         _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
     assert e.value.status_code == 403
-    assert "invite list" in e.value.detail
+    # The message names the ways IN rather than the fact of being out, because a person reading
+    # it is about to ask somebody for access and should know what to ask for.
+    assert "not a member of the group" in e.value.detail
 
 
 def test_allowed_emails_hatch_admits_an_exact_address(verified, monkeypatch):
@@ -605,3 +607,34 @@ def test_group_membership_never_bypasses_email_verification(monkeypatch):
 
     src = inspect.getsource(sec._assert_invited)
     assert src.index("email_verified") < src.index("is_access_group_member")
+
+
+def test_a_failed_group_check_says_what_failed(caplog):
+    """A failure that does not name its cause makes a permissions problem, a disabled API and a
+    missing group indistinguishable from each other and from "not a member" — which is exactly
+    the silence every other failure record in this system is built to avoid. The first version of
+    this logged only that the check failed, and cost an hour of guessing."""
+    import logging
+
+    import app.security as sec
+
+    sec._access_cache.clear()
+    original = sec.settings.access_group
+    try:
+        sec.settings.access_group = "sipusers@prevagroup.com"
+        real = sec._is_group_member
+
+        def boom(email, group):
+            raise PermissionError("403 caller does not have permission")
+
+        sec._is_group_member = boom
+        with caplog.at_level(logging.WARNING):
+            assert not sec.is_access_group_member("someone@gmail.com")
+    finally:
+        sec._is_group_member = real
+        sec.settings.access_group = original
+
+    text = caplog.text
+    assert "PermissionError" in text, "the exception type is not in the log"
+    assert "does not have permission" in text, "the exception message is not in the log"
+    assert "sipusers@prevagroup.com" in text, "the group being checked is not in the log"

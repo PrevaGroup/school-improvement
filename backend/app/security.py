@@ -222,9 +222,15 @@ def _assert_invited(claims: dict) -> None:
     # Fails closed: an unset map admits nobody. See config.allowed_domain_providers.
     required_provider = settings.domain_providers.get(email.rsplit("@", 1)[1])
     if required_provider is None:
+        # Name the ways IN, not the fact of being out. There are three of them and a person
+        # reading this is usually about to ask somebody for access — so the message should tell
+        # them what to ask for. "Not on the invite list" describes a data structure they cannot
+        # see and names none of the routes into it.
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            f"{email} is not on the invite list for this application",
+            f"{email} is not in an invited organization's domain, and is not a member of the "
+            f"group that may use this application. Ask whoever sent you here to add you to that "
+            f"group.",
         )
 
     actual_provider = str((claims.get("firebase") or {}).get("sign_in_provider") or "").lower()
@@ -365,8 +371,13 @@ def is_access_group_member(email: str) -> bool:
         return hit[0]
     try:
         member = _is_group_member(email, group)
-    except Exception:
-        log.warning("access group check failed for %s — withholding access (fails closed)", email)
+    except Exception as exc:
+        # SAY WHAT FAILED. The first version of this logged that the check failed and not why,
+        # which made a permissions problem, a disabled API and a missing group indistinguishable
+        # from each other and from "not a member" — and cost an hour of guessing. Every other
+        # failure record in this system carries its reason; this one has no excuse not to.
+        log.warning("access group check failed for %s against %s — withholding access "
+                    "(fails closed): %s: %s", email, group, type(exc).__name__, exc)
         return False   # deliberately NOT cached
     _access_cache[email] = (member, now)
     return member
@@ -397,8 +408,9 @@ def is_admin(principal: dict) -> bool:
         return hit[0]
     try:
         member = _is_group_member(email, group)
-    except Exception:
-        log.warning("admin group check failed for %s — withholding admin (fails closed)", email)
+    except Exception as exc:
+        log.warning("admin group check failed for %s against %s — withholding admin "
+                    "(fails closed): %s: %s", email, group, type(exc).__name__, exc)
         return False  # deliberately NOT cached — retry next request
     _admin_cache[email] = (member, now)
     return member
