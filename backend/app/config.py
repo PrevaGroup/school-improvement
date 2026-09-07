@@ -186,24 +186,32 @@ class Settings(BaseSettings):
     admin_emails: Annotated[set[str], NoDecode] = set()
     admin_domains: Annotated[set[str], NoDecode] = set()
 
-    # Per-EMAIL invite hatch, UNIONed with the domain->provider allowlist (_assert_invited).
+    # SYSTEM identities only — a service or job that signs in as itself, never a person.
+    #
+    # Renamed from ALLOWED_EMAILS, and the rename is the control. Under the old name this was
+    # reached for whenever somebody needed access in a hurry, which put HUMANS in a deploy
+    # artifact: an invite list that cannot be revoked without a release, is invisible to anyone
+    # auditing who has access, and is edited by whoever last ran gcloud. People belong in
+    # `access_group`, where removing one takes effect in minutes and there is one place to look.
+    #
     # An exact match here is admitted (still requiring `email_verified`) and SKIPS the
-    # domain/provider binding — that is deliberately a hole in "access must ride a revocable
-    # org identity", so it is per-email (never per-domain) to keep the blast radius to exactly
-    # the listed address. Its reason for existing is testing (e.g. a personal gmail); remove
-    # before relying on the org-identity guarantee in production.
-    allowed_emails: Annotated[set[str], NoDecode] = set()
+    # domain/provider binding, which is what a non-Workspace service identity needs and what
+    # makes this dangerous if it drifts back to holding people. Per-email, never per-domain, so
+    # the blast radius is exactly the listed address.
+    #
+    # Before adding an address here, ask whether it is a person. If it is, it goes in the group.
+    system_emails: Annotated[set[str], NoDecode] = set()
 
     # THE INVITE LIST, held in Google rather than here. A Workspace group whose members may use
     # the application, checked live against Cloud Identity exactly as `admin_group` is — so adding
     # a reviewer is a Workspace console change with no deploy, and removing one takes effect
     # within the membership TTL rather than at the next release.
     #
-    # It exists because `allowed_emails` is an env var, which makes the invite list a deploy
+    # It exists because `system_emails` is an env var, which makes the invite list a deploy
     # artifact: it cannot be revoked without a release, it is invisible to anyone auditing who has
     # access, and it is edited by whoever last ran gcloud. A group is the account system's own
     # answer to "who may use this", and Google groups admit external members, which is what makes
-    # it usable for reviewers outside the domain — the case `allowed_emails` was reached for.
+    # it usable for reviewers outside the domain — the case `system_emails` was reached for.
     #
     # Unset admits nobody through this path and leaves the other two untouched, so turning it on
     # is additive and turning it off cannot lock anyone out mid-pilot.
@@ -214,10 +222,10 @@ class Settings(BaseSettings):
     # from real use in the trace store — a SERVER-side decision keyed on the authenticated
     # principal, never a client-supplied field, so it can't be spoofed. Unset (default) → every
     # turn is `source="prod"`, today's behavior. The address still needs its own invite
-    # (allowed_emails) to sign in at all.
+    # (system_emails) to sign in at all.
     eval_principal_email: str = ""
 
-    @field_validator("admin_emails", "admin_domains", "allowed_emails", mode="before")
+    @field_validator("admin_emails", "admin_domains", "system_emails", mode="before")
     @classmethod
     def _split_lower_set(cls, v):
         """Comma-separated (or JSON list) -> lowercased set. Same NoDecode/comma reasoning as

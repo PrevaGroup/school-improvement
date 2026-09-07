@@ -25,12 +25,16 @@ from .plans import router as plans_router
 from delivery.view import router as delivery_router
 from intake.review import router as intake_router
 from scoring.review import router as review_actions_router
-from .security import assert_dev_mode_not_in_production, get_current_principal, is_admin
+from .security import (assert_dev_mode_not_in_production, assert_no_retired_invite_list,
+                       get_current_principal, is_admin)
 
 # Fail the deploy, not the security model: DEV_MODE + a production environment means the
 # unverified X-Dev-Tenant header would let any caller impersonate any district. Crash loudly at
 # import (= container fails to start) rather than serve a silent impersonation hole.
 assert_dev_mode_not_in_production()
+# A renamed env var that is still set and no longer read is a shorter invite list
+# nobody notices. Fail the deploy instead.
+assert_no_retired_invite_list()
 
 app = FastAPI(title="School Improvement Platform API", version="0.1.0")
 

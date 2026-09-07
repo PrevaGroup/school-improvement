@@ -70,7 +70,7 @@ changing config or just code.
 
 > **⚠️ `--set-env-vars` REPLACES the entire env set; `--update-env-vars` MERGES.** This is
 > the single biggest deploy footgun here. The live service carries vars the full command
-> below **does not list** — `ALLOWED_EMAILS` (the eval runner + individual testers sign in
+> below **does not list** — `SYSTEM_EMAILS` (the eval runner + individual testers sign in
 > through it) and `EVAL_PRINCIPAL_EMAIL` (stamps eval traffic `source="eval"`). Copy the
 > full `--set-env-vars` command for a routine redeploy and you silently **drop both** — the
 > eval runner loses sign-in and eval runs start polluting the prod trace stream. For a
@@ -150,7 +150,7 @@ gcloud run deploy sip-api \
 The command above shows the infra + preva-only auth vars. **The live service also has**, and
 this form must re-add (values from the `describe` above, not from memory):
 
-- **`ALLOWED_EMAILS=…`** — per-email invite hatch. The eval runner
+- **`SYSTEM_EMAILS=…`** — per-email invite hatch. The eval runner
   (`eval-runner@prevagroup.com`) signs in through this, as do any individual/magic-link
   testers (see the invite-list section). Multiple addresses are comma-separated, which
   collides with gcloud's own comma parsing — use the `^@^` delimiter trick (below).
@@ -159,6 +159,59 @@ this form must re-add (values from the `describe` above, not from memory):
   `source="eval"` so eval traffic is separable from real use in the trace store. Drop it and
   eval runs are indistinguishable from prod (`source="prod"`), quietly corrupting the eval
   loop's mined-case source.
+
+### Who may use the app — Workspace group `ACCESS_GROUP` (one-time setup)
+
+The invite list for PEOPLE. `_assert_invited` checks membership live via Cloud Identity, so
+adding or removing a reviewer is a Workspace console change with no deploy, and a removal takes
+effect within the 5-minute TTL rather than at the next release.
+
+Fails closed: any error withholds access. That is deliberate — this is admission — but it means
+a setup problem looks like "the reviewer cannot get in", never like "everyone can get in".
+
+1. **Create the group** (Admin console → Directory → Groups). Access type Restricted, "Who can
+   join" = only invited users.
+2. **Allow external members**, which is TWO settings and the first is easy to miss:
+   - Domain: Admin console → Apps → Google Workspace → Groups for Business → Sharing settings →
+     adding external members = on. Off by default. While it is off, the per-group toggle looks
+     like it saves and has no effect, and adds fail with *"doesn't meet the group's required
+     conditions"*.
+   - Group: the group's own "Allow members outside your organization".
+   Enabling the domain setting adds nobody to anything — each group's own toggle stays off. To
+   narrow it, set group creation to admins-only on the same page.
+3. **Point the app at it**:
+   `gcloud run services update sip-api --region us-central1 --update-env-vars ACCESS_GROUP=sipusers@prevagroup.com`
+4. **Let the runtime service account read the group.** Same grant and same service account as
+   `ADMIN_GROUP`, so doing it once covers both. Find the account:
+
+   ```bash
+   gcloud run services describe sip-api --region us-central1      --format='value(spec.template.spec.serviceAccountName)'
+   ```
+
+   Empty means the default compute SA, `PROJECT_NUMBER-compute@developer.gserviceaccount.com`
+   (today: `1013838667941-compute@developer.gserviceaccount.com`). Then, as a Workspace super
+   admin: **admin.google.com → Account → Admin roles → Groups Reader → Admins → assign the
+   SERVICE ACCOUNT** (not a user), pasting that address. Least privilege: read-only, groups only.
+
+   Also enable the API, or every lookup fails before permissions are even consulted:
+
+   ```bash
+   gcloud services enable cloudidentity.googleapis.com --project school-improvement-501916
+   ```
+
+> **⚠️ THE STEP NOBODY REMEMBERS.** The API call is made by the Cloud Run service account, not by
+> you. Being a Workspace super admin grants that service account nothing — Cloud IAM and
+> Workspace admin are separate systems, and `roles/editor` on the project confers no Workspace
+> permission whatsoever. Without the grant in step 4 every lookup returns **403** and every
+> member is refused.
+>
+> The tell is the status code: `403` on `groups:lookup` means the group was found and the caller
+> may not read it — a permission problem. `404` would mean a wrong group address. Since #108 the
+> log line carries both, e.g.
+> `access group check failed for x@y.com against sipusers@prevagroup.com … HTTPStatusError: 403`.
+
+Verify by removing yourself from `SYSTEM_EMAILS` and signing in. Both paths admit you otherwise,
+so that is the only test that distinguishes them.
 
 ### Administrators — Workspace group `ADMIN_GROUP` (one-time GCP setup)
 
@@ -185,7 +238,7 @@ These need no Cloud Identity setup — a match is admin immediately.
 
 **Testing admin with a personal account** — a `@gmail.com` normally can't sign in (the invite
 gate is domain-bound), so two env vars are needed together:
-- `ALLOWED_EMAILS=you@gmail.com` — lets that EXACT address through the invite gate (still
+- `SYSTEM_EMAILS=you@gmail.com` — lets that EXACT address through the invite gate (still
   requires `email_verified`; skips the domain/provider binding — a deliberate hole, per-email
   only). ⚠️ This bypasses "access must ride a revocable org identity"; it is a TEST hatch —
   remove it before relying on that guarantee.
@@ -419,13 +472,17 @@ The older `ALLOWED_EMAIL_DOMAINS=prevagroup.com,...` still works and maps every 
 domain to `google.com` — correct for the preva-only era, so a redeploy from old shell
 history stays safe. Prefer the map for anything new.
 
-### Inviting any individual — magic link + `ALLOWED_EMAILS`
+### Inviting any individual — magic link + `ACCESS_GROUP`
 
-For people who aren't in a member org (investors, individual testers), sign-in is a
-**passwordless email link**, and access is two independent gates — both required:
+For people who aren't in a member org (investors, individual testers, reviewers at other
+organizations), sign-in is a **passwordless email link**, and access is two independent gates —
+both required:
 
-1. **`ALLOWED_EMAILS`** (env var, in the one `--set-env-vars` flag) — *authorization*. The exact
-   address must be listed. e.g. `ALLOWED_EMAILS=investor@acme.com,someone@gmail.com`.
+1. **Membership of `ACCESS_GROUP`** — *authorization*. Add the address to the Workspace group
+   (setup below). Google groups admit external members, so any domain works. Do NOT use
+   `SYSTEM_EMAILS` for a person: that variable is for service identities, and putting people in
+   it makes the invite list a deploy artifact — unrevocable without a release, invisible to
+   anyone auditing access, edited by whoever last ran gcloud.
 2. **The magic link** — *ownership*. They type their email on the sign-in screen; Identity
    Platform emails a one-time link to that exact address; clicking it verifies the mailbox
    (`email_verified: true`) and signs them in. Owning the mailbox is necessary, not sufficient —
@@ -442,7 +499,7 @@ Identity Platform console → **Providers** → **Email/Password** → toggle **
 email never sends.
 
 > **Abuse note:** anyone can *request* a link to any address (that's inherent to passwordless),
-> but only `ALLOWED_EMAILS` / member-domain identities get **in**. Identity Platform rate-limits
+> but only `SYSTEM_EMAILS` / member-domain identities get **in**. Identity Platform rate-limits
 > link sends; fine at demo volume.
 
 ### Adding an Entra org (Phase B checklist, in order)
@@ -480,15 +537,15 @@ email never sends.
 > ```
 >
 > **The delimiter must be a character the VALUE does not contain**, and `@` is the wrong choice
-> for `ALLOWED_EMAILS` — every address in it contains one, so `^@^` splits the list into
+> for `SYSTEM_EMAILS` — every address in it contains one, so `^@^` splits the list into
 > fragments and gcloud rejects the whole flag with `Bad syntax for dict arg: [gmail.com,...]`.
 > Use `:`, which an email address never contains:
 >
 > ```bash
-> gcloud run services update sip-api --region us-central1 >   --update-env-vars '^:^ALLOWED_EMAILS=a@one.com,b@two.com,eval-runner@prevagroup.com'
+> gcloud run services update sip-api --region us-central1 >   --update-env-vars '^:^SYSTEM_EMAILS=a@one.com,b@two.com,eval-runner@prevagroup.com'
 > ```
 >
-> `ALLOWED_EMAILS` replaces wholesale even under `--update-env-vars`, so list everyone who is
+> `SYSTEM_EMAILS` replaces wholesale even under `--update-env-vars`, so list everyone who is
 > already on it — dropping `eval-runner@prevagroup.com` costs the eval runner its sign-in.
 >
 > Without the alternate delimiter you get `ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com` plus a bogus

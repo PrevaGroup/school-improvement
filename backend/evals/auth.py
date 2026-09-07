@@ -2,7 +2,7 @@
 
 The chat endpoint accepts only Firebase/Identity Platform ID tokens (there is no
 service-account path), so the eval runner signs in as a dedicated Identity Platform user whose
-email is in ALLOWED_EMAILS and whose email is `EVAL_PRINCIPAL_EMAIL` (which makes the server
+email is in SYSTEM_EMAILS and whose email is `EVAL_PRINCIPAL_EMAIL` (which makes the server
 stamp its turns `source="eval"`). We exchange email+password for an ID token via the public
 Identity Toolkit REST API — the same call a browser SDK makes.
 
