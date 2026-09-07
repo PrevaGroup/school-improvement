@@ -4,6 +4,7 @@ import { fmtNum, fmtPct } from "./format";
 import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
 import { EvalWorkbench, type EvalSection } from "./components/EvalDashboard";
+import { FolderConfirm } from "./components/FolderConfirm";
 import { ReviewConsole } from "./components/ReviewConsole";
 import { applyChatWorkspace, defaultSpecForLevel } from "./workspace";
 import {
@@ -18,11 +19,14 @@ import type {
 
 // The screen has one section at a time: the workspace (everyone), the teacher review console,
 // or an eval section (admins).
-type Section = "workspace" | "review" | EvalSection;
-const SECTIONS: Section[] = ["workspace", "review", "traces", "evals", "results", "graders"];
+type Section = "workspace" | "folders" | "review" | EvalSection;
+// Folders sits BEFORE student work, because that is the order the work happens in:
+// a folder is read and confirmed, and only then is there anything to review.
+const SECTIONS: Section[] = ["workspace", "folders", "review", "traces", "evals",
+                             "results", "graders"];
 const SECTION_LABEL: Record<Section, string> = {
-  workspace: "Workspace", review: "Student work", traces: "Traces", evals: "Evals",
-  results: "Results", graders: "Graders",
+  workspace: "Workspace", folders: "Folders", review: "Student work",
+  traces: "Traces", evals: "Evals", results: "Results", graders: "Graders",
 };
 
 const DEMO_DISTRICT = "0622500"; // Long Beach Unified (NCES LEAID) — the demo default
@@ -501,6 +505,8 @@ export default function App() {
         />
       </div>
         </div>
+      ) : section === "folders" ? (
+        <FolderConfirm />
       ) : section === "review" ? (
         <ReviewConsole />
       ) : (

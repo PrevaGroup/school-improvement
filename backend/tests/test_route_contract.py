@@ -69,6 +69,11 @@ EXPECTED: dict[str, set[str]] = {
     "/api/review/{artifact_id}/override": {"POST"},
     "/api/review/{artifact_id}/feedback": {"POST"},
     "/api/review/{artifact_id}/resolve": {"POST"},
+    # --- intake: the manifest gate. One confirmation for a folder, not one per paper. ---
+    "/api/intake/manifests": {"GET"},
+    "/api/intake/manifest/{manifest_id}": {"GET"},
+    "/api/intake/manifest/{manifest_id}/confirm": {"POST"},
+    "/api/intake/file/{file_id}/assign": {"POST"},
 }
 
 
