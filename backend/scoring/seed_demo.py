@@ -198,5 +198,8 @@ def verify(include_intake_derived: bool = False) -> dict:
             "artifact_composition": conn.execute(text(
                 "SELECT count(*) FROM artifact_composition c JOIN artifact a USING (artifact_id) "
                 f"WHERE {scope}"), {"run": RUN_ID}).scalar_one(),
+            "artifact_delivery": conn.execute(text(
+                "SELECT count(*) FROM artifact_delivery d JOIN artifact a USING (artifact_id) "
+                f"WHERE {scope}"), {"run": RUN_ID}).scalar_one(),
         }
     return left

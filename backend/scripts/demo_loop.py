@@ -179,8 +179,20 @@ def main() -> None:
     out["steps"] = steps
     out["ok"] = all(s["ok"] for s in steps)
     out["seconds"] = round(sum(s["seconds"] for s in steps), 1)
-    spent = [s["stage"] for s in steps if s["stage"] in COSTS_MONEY and s["ok"]]
-    out["stages_that_cost_money"] = spent or "none — nothing called a model"
+    # What was actually SPENT, not which stages ran. The first version listed `score` and
+    # `compose` whenever they executed — including a run where both found nothing to do and made
+    # zero calls, which reported a cost that had not happened. A summary that cannot tell "ran"
+    # from "spent" is the same defect as a bind log that cannot tell bound from unbound.
+    calls = sum((s["result"] or {}).get("calls", 0) for s in steps
+                if s["ok"] and s["stage"] in COSTS_MONEY and isinstance(s.get("result"), dict))
+    tokens_in = sum((s["result"] or {}).get("input_tokens", 0) for s in steps
+                    if s["ok"] and isinstance(s.get("result"), dict))
+    tokens_out = sum((s["result"] or {}).get("output_tokens", 0) for s in steps
+                     if s["ok"] and isinstance(s.get("result"), dict))
+    out["model_calls"] = calls
+    out["cost_usd_estimate"] = round(tokens_in / 1e6 * 5 + tokens_out / 1e6 * 25, 3)
+    if not calls:
+        out["cost_note"] = "nothing called a model"
     print(json.dumps(out, indent=1, default=str))
     if not out["ok"]:
         raise SystemExit(1)

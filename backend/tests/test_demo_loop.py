@@ -94,11 +94,15 @@ def test_a_failing_stage_stops_the_loop():
     assert 'if not step["ok"]:' in src and "break" in src
 
 
-def test_the_summary_says_whether_anything_spent_money():
-    """So a run you thought was free and was not is visible at the bottom of the output rather
-    than at the end of the month."""
+def test_the_summary_reports_what_was_spent_not_which_stages_ran():
+    """It listed `score` and `compose` whenever they executed — including a run where both found
+    nothing to do and made zero calls, reporting a cost that had not happened.
+
+    Counting the calls cannot make that mistake, and the estimate is the thing somebody actually
+    wants at the bottom of a run they thought was free."""
     src = inspect.getsource(demo_loop.main)
-    assert "stages_that_cost_money" in src
+    assert "model_calls" in src and "cost_usd_estimate" in src
+    assert "stages_that_cost_money" not in src
 
 
 def test_the_teardown_checks_what_is_left_rather_than_what_it_deleted():
@@ -119,3 +123,22 @@ def test_the_teardown_covers_artifacts_bind_created():
     files as unchanged with nothing to explain why."""
     src = inspect.getsource(demo_loop.reset)
     assert "include_intake_derived=True" in src
+
+
+def test_the_teardown_verifies_every_table_it_deletes():
+    """DERIVED, so the two lists cannot drift. `verify()` once counted three tables while the
+    purge deleted four — and the delivery table it missed was the one the purge had just been
+    taught about, so the check passed while the gap it exists to find was open.
+
+    Worse, the edit that was supposed to add it was a silent no-op: a string replace that matched
+    nothing, followed by a print saying it had worked. The assertion is the fix for that, and this
+    test is the fix for it happening again.
+    """
+    from scoring.seed_demo import _PURGE_ORDER, verify
+
+    counted = inspect.getsource(verify)
+    missing = [t for t, _ in _PURGE_ORDER
+               if t != "artifact_state_transition" and f'"{t}"' not in counted]
+    assert not missing, (
+        f"the purge deletes {missing} and the teardown check does not count them, so a scope "
+        f"that misses them reports success.")
