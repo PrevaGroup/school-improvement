@@ -28,10 +28,22 @@ def test_the_gate_is_in_the_query_bind_actually_runs():
 
 def test_a_confirmation_names_who_made_it():
     """A gate that opened by itself is not a gate. The CHECK in 0024 refuses an anonymous one;
-    this refuses to write one."""
-    src = inspect.getsource(review)
-    assert "confirmed_by = :who" in src
-    assert "_who(principal)" in src
+    this refuses to write one.
+
+    Asserted against the STATEMENT rather than a module's source. It used to read `review.py`,
+    and when the statement moved to `gate.py` — so the API and the terminal command could not
+    drift apart — this went red without anything being wrong. A test that names where code lives
+    breaks on every move; one that names what the code says does not.
+    """
+    from intake.gate import CONFIRM
+    assert "confirmed_by = :who" in str(CONFIRM)
+    assert "_who(principal)" in inspect.getsource(review.confirm)
+
+
+def test_the_api_and_the_terminal_share_one_confirmation():
+    """A gate implemented twice can be opened two ways and closed one."""
+    from intake.gate import CONFIRM
+    assert review._CONFIRM is CONFIRM
 
 
 def test_a_confirmation_cannot_be_made_twice():

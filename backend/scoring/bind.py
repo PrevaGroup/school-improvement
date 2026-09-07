@@ -76,6 +76,24 @@ _PENDING = text("""
      ORDER BY m.read_at, f.name
 """)
 
+# What the GATE is holding, and what is simply done. Without this, "0 pending" reads identically
+# whether a folder is waiting for a teacher, was bound an hour ago, or was never read — three
+# different situations with three different next actions, reported as one number. The bind log
+# already made this mistake once by printing every artifact's initial state instead of its final
+# one; a summary that cannot distinguish its own cases is the same defect in a different place.
+_HELD = text("""
+    SELECT m.manifest_id, m.source_ref, count(*) AS files
+      FROM intake_file f
+      JOIN intake_manifest m ON m.manifest_id = f.manifest_id
+     WHERE f.tenant_id = :tenant
+       AND m.confirmed_at IS NULL
+       AND f.status = ANY(CAST(:bindable AS text[]))
+       AND (CAST(:manifest_id AS text) IS NULL OR f.manifest_id = CAST(:manifest_id AS text))
+       AND NOT EXISTS (SELECT 1 FROM artifact a WHERE a.intake_file_id = f.file_id)
+     GROUP BY m.manifest_id, m.source_ref
+     ORDER BY m.source_ref
+""")
+
 # The artifact currently standing for this binding key, if any. `superseded_by_artifact_id IS NULL`
 # is what makes it the current one — a chain of supersessions has exactly one open end.
 _CURRENT = text("""
@@ -164,7 +182,14 @@ def bind_pending(*, tenant: str, manifest_id: str | None = None, run_id: str | N
         pending = [dict(r) for r in conn.execute(
             _PENDING, {"tenant": tenant, "bindable": list(BINDABLE),
                        "manifest_id": manifest_id}).mappings()]
-    log.info("%d intake file(s) with no artifact yet", len(pending))
+        held = [dict(r) for r in conn.execute(
+            _HELD, {"tenant": tenant, "bindable": list(BINDABLE),
+                    "manifest_id": manifest_id}).mappings()]
+
+    log.info("%d file(s) ready to bind", len(pending))
+    for h in held:
+        log.info("%d file(s) in %s are waiting for a teacher to confirm the folder",
+                 h["files"], h["source_ref"])
 
     for row in pending:
         try:
@@ -177,7 +202,14 @@ def bind_pending(*, tenant: str, manifest_id: str | None = None, run_id: str | N
         if action in ("created", "superseded") and row["status"] == "unresolved":
             counts["unbound"] += 1
 
-    return {"pending": len(pending), **counts, "failed": failed}
+    return {"pending": len(pending), **counts,
+            # Named separately so "nothing happened" is never ambiguous. Zero everywhere with a
+            # non-empty `awaiting_confirmation` means the gate is holding a folder, which is a
+            # different situation from zero everywhere with an empty one.
+            "awaiting_confirmation": [
+                {"manifest_id": h["manifest_id"], "folder": h["source_ref"], "files": h["files"]}
+                for h in held],
+            "failed": failed}
 
 
 def _bind_one(eng, row: dict, *, tenant: str, run_id: str | None, dry_run: bool) -> str:

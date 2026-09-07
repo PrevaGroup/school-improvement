@@ -40,6 +40,8 @@ from sqlalchemy.orm import Session
 from app.db import get_db_public
 from app.security import get_current_principal
 
+from .gate import CONFIRM
+
 log = logging.getLogger("intake.review")
 router = APIRouter(prefix="/intake", tags=["intake"])
 
@@ -105,10 +107,9 @@ _ROSTER = text("""
      ORDER BY s.display_name
 """)
 
-_CONFIRM = text("""
-    UPDATE intake_manifest SET confirmed_at = now(), confirmed_by = :who
-     WHERE manifest_id = :manifest_id AND tenant_id = :tenant AND confirmed_at IS NULL
-""")
+# THE statement lives in `gate.py`, which the terminal command also uses. A gate implemented
+# twice is a gate that can be opened two ways and closed one.
+_CONFIRM = CONFIRM
 
 _ASSIGN = text("""
     UPDATE intake_file
