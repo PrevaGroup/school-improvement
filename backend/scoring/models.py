@@ -113,6 +113,15 @@ class Artifact(Base, TenantMixin):
     # --- provenance ---
     content_hash: Mapped[str] = mapped_column(Text, nullable=False)
     source_uri: Mapped[str | None] = mapped_column(Text)
+    # The intake row this was bound from, and where its text now lives. NO foreign key: intake
+    # belongs to another module, and a cross-module FK would make dropping and reloading a
+    # manifest a scoring problem. The reference is by value, checked where it is read.
+    #
+    # Added by migration 0022 and NOT declared here until now — the column existed in Postgres and
+    # not in `Base.metadata`, which is one `--autogenerate` away from a DROP COLUMN. Same class as
+    # `artifact_transition_rule` existing in the database and in no model. Found by a test asking
+    # the schema which tables carry it, and getting back nothing.
+    intake_file_id: Mapped[str | None] = mapped_column(Text)
     handed_in_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     # Per binding element: "looked_up" or "inferred". A score whose binding was inferred has a
@@ -138,6 +147,7 @@ class Artifact(Base, TenantMixin):
         Index("ix_artifact_student", "tenant_id", "student_id"),
         Index("ix_artifact_run", "run_id"),
         Index("ix_artifact_state", "tenant_id", "state"),
+        Index("ix_artifact_intake_file", "intake_file_id"),
         CheckConstraint(
             "state IN (" + ",".join(f"'{s}'" for s in ARTIFACT_STATES) + ")",
             name="state"),
