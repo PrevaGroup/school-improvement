@@ -70,7 +70,7 @@ changing config or just code.
 
 > **⚠️ `--set-env-vars` REPLACES the entire env set; `--update-env-vars` MERGES.** This is
 > the single biggest deploy footgun here. The live service carries vars the full command
-> below **does not list** — `ALLOWED_EMAILS` (the eval runner + individual testers sign in
+> below **does not list** — `SYSTEM_EMAILS` (the eval runner + individual testers sign in
 > through it) and `EVAL_PRINCIPAL_EMAIL` (stamps eval traffic `source="eval"`). Copy the
 > full `--set-env-vars` command for a routine redeploy and you silently **drop both** — the
 > eval runner loses sign-in and eval runs start polluting the prod trace stream. For a
@@ -150,7 +150,7 @@ gcloud run deploy sip-api \
 The command above shows the infra + preva-only auth vars. **The live service also has**, and
 this form must re-add (values from the `describe` above, not from memory):
 
-- **`ALLOWED_EMAILS=…`** — per-email invite hatch. The eval runner
+- **`SYSTEM_EMAILS=…`** — per-email invite hatch. The eval runner
   (`eval-runner@prevagroup.com`) signs in through this, as do any individual/magic-link
   testers (see the invite-list section). Multiple addresses are comma-separated, which
   collides with gcloud's own comma parsing — use the `^@^` delimiter trick (below).
@@ -185,7 +185,7 @@ These need no Cloud Identity setup — a match is admin immediately.
 
 **Testing admin with a personal account** — a `@gmail.com` normally can't sign in (the invite
 gate is domain-bound), so two env vars are needed together:
-- `ALLOWED_EMAILS=you@gmail.com` — lets that EXACT address through the invite gate (still
+- `SYSTEM_EMAILS=you@gmail.com` — lets that EXACT address through the invite gate (still
   requires `email_verified`; skips the domain/provider binding — a deliberate hole, per-email
   only). ⚠️ This bypasses "access must ride a revocable org identity"; it is a TEST hatch —
   remove it before relying on that guarantee.
@@ -419,13 +419,13 @@ The older `ALLOWED_EMAIL_DOMAINS=prevagroup.com,...` still works and maps every 
 domain to `google.com` — correct for the preva-only era, so a redeploy from old shell
 history stays safe. Prefer the map for anything new.
 
-### Inviting any individual — magic link + `ALLOWED_EMAILS`
+### Inviting any individual — magic link + `SYSTEM_EMAILS`
 
 For people who aren't in a member org (investors, individual testers), sign-in is a
 **passwordless email link**, and access is two independent gates — both required:
 
-1. **`ALLOWED_EMAILS`** (env var, in the one `--set-env-vars` flag) — *authorization*. The exact
-   address must be listed. e.g. `ALLOWED_EMAILS=investor@acme.com,someone@gmail.com`.
+1. **`SYSTEM_EMAILS`** (env var, in the one `--set-env-vars` flag) — *authorization*. The exact
+   address must be listed. e.g. `SYSTEM_EMAILS=investor@acme.com,someone@gmail.com`.
 2. **The magic link** — *ownership*. They type their email on the sign-in screen; Identity
    Platform emails a one-time link to that exact address; clicking it verifies the mailbox
    (`email_verified: true`) and signs them in. Owning the mailbox is necessary, not sufficient —
@@ -442,7 +442,7 @@ Identity Platform console → **Providers** → **Email/Password** → toggle **
 email never sends.
 
 > **Abuse note:** anyone can *request* a link to any address (that's inherent to passwordless),
-> but only `ALLOWED_EMAILS` / member-domain identities get **in**. Identity Platform rate-limits
+> but only `SYSTEM_EMAILS` / member-domain identities get **in**. Identity Platform rate-limits
 > link sends; fine at demo volume.
 
 ### Adding an Entra org (Phase B checklist, in order)
@@ -480,15 +480,15 @@ email never sends.
 > ```
 >
 > **The delimiter must be a character the VALUE does not contain**, and `@` is the wrong choice
-> for `ALLOWED_EMAILS` — every address in it contains one, so `^@^` splits the list into
+> for `SYSTEM_EMAILS` — every address in it contains one, so `^@^` splits the list into
 > fragments and gcloud rejects the whole flag with `Bad syntax for dict arg: [gmail.com,...]`.
 > Use `:`, which an email address never contains:
 >
 > ```bash
-> gcloud run services update sip-api --region us-central1 >   --update-env-vars '^:^ALLOWED_EMAILS=a@one.com,b@two.com,eval-runner@prevagroup.com'
+> gcloud run services update sip-api --region us-central1 >   --update-env-vars '^:^SYSTEM_EMAILS=a@one.com,b@two.com,eval-runner@prevagroup.com'
 > ```
 >
-> `ALLOWED_EMAILS` replaces wholesale even under `--update-env-vars`, so list everyone who is
+> `SYSTEM_EMAILS` replaces wholesale even under `--update-env-vars`, so list everyone who is
 > already on it — dropping `eval-runner@prevagroup.com` costs the eval runner its sign-in.
 >
 > Without the alternate delimiter you get `ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com` plus a bogus

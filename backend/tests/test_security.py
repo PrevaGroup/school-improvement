@@ -41,7 +41,7 @@ def isolate_env(monkeypatch):
     # Empty map -> the ALLOWED_EMAIL_DOMAINS fallback applies (every domain requires
     # google.com). Provider-binding tests set this explicitly instead.
     monkeypatch.setattr(security.settings, "allowed_domain_providers", {})
-    monkeypatch.setattr(security.settings, "allowed_emails", set())  # per-email invite hatch off by default
+    monkeypatch.setattr(security.settings, "system_emails", set())  # per-email invite hatch off by default
     monkeypatch.setattr(security.settings, "session_max_age_days", 7.0)
 
 
@@ -209,10 +209,10 @@ def test_any_gmail_is_rejected(verified):
     assert "invite list" in e.value.detail
 
 
-def test_allowed_emails_hatch_admits_an_exact_address(verified, monkeypatch):
-    """ALLOWED_EMAILS lets an EXACT address in (e.g. a personal gmail for testing), bypassing the
+def test_system_emails_hatch_admits_an_exact_address(verified, monkeypatch):
+    """SYSTEM_EMAILS lets an EXACT address in (e.g. a personal gmail for testing), bypassing the
     domain/provider binding — the deliberate hole. Still an exact match: a different gmail is out."""
-    monkeypatch.setattr(security.settings, "allowed_emails", {"tester@gmail.com"})
+    monkeypatch.setattr(security.settings, "system_emails", {"tester@gmail.com"})
     verified(_claims(email="Tester@Gmail.com"))  # case-insensitive match against the allowlist
     principal = _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
     assert principal["email"].lower() == "tester@gmail.com"  # got in (claims keep original case)
@@ -225,9 +225,9 @@ def test_allowed_emails_hatch_admits_an_exact_address(verified, monkeypatch):
 
 def test_magic_link_token_admits_an_allowlisted_email(verified, monkeypatch):
     """A passwordless email-link sign-in arrives as sign_in_provider 'password' with
-    email_verified true (the click verified the mailbox). For an ALLOWED_EMAILS address the
+    email_verified true (the click verified the mailbox). For an SYSTEM_EMAILS address the
     provider binding is bypassed, so it's admitted — this is the 'any email + owns it' path."""
-    monkeypatch.setattr(security.settings, "allowed_emails", {"investor@acme.com"})
+    monkeypatch.setattr(security.settings, "system_emails", {"investor@acme.com"})
     verified(_claims(email="investor@acme.com", provider="password"))
     principal = _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
     assert principal["email"] == "investor@acme.com"
@@ -243,10 +243,10 @@ def test_magic_link_cannot_sidestep_a_member_org_provider(verified):
     assert e.value.status_code == 403
 
 
-def test_allowed_emails_hatch_still_requires_email_verified(verified, monkeypatch):
+def test_system_emails_hatch_still_requires_email_verified(verified, monkeypatch):
     """The hatch NEVER bypasses email_verified — that is the one control that can't be optional,
     or an allowlisted address could be claimed by anyone who registers it unverified."""
-    monkeypatch.setattr(security.settings, "allowed_emails", {"tester@gmail.com"})
+    monkeypatch.setattr(security.settings, "system_emails", {"tester@gmail.com"})
     verified(_claims(email="tester@gmail.com", verified=False))
     with pytest.raises(HTTPException) as e:
         _run(security.get_current_principal(authorization="Bearer good.jwt", x_dev_tenant=None))
@@ -535,10 +535,10 @@ def test_verify_401s_on_empty_claims(monkeypatch):
 # --------------------------------------------------------------------------- #
 # The invite list, held in Google rather than in an env var.
 #
-# `allowed_emails` makes the invite list a deploy artifact: it cannot be revoked without a
+# `system_emails` makes the invite list a deploy artifact: it cannot be revoked without a
 # release, it is invisible to anyone auditing who has access, and it is edited by whoever last
 # ran gcloud. A Workspace group is the account system's own answer to "who may use this", and
-# Google groups admit external members — which is the case `allowed_emails` was reached for.
+# Google groups admit external members — which is the case `system_emails` was reached for.
 # --------------------------------------------------------------------------- #
 
 def test_access_group_membership_admits(monkeypatch):
@@ -564,7 +564,7 @@ def test_an_external_address_can_be_a_member(monkeypatch):
 
 def test_no_group_configured_admits_nobody(monkeypatch):
     """Turning it on is additive; turning it off cannot admit anyone by accident. The other two
-    paths (domain->provider, allowed_emails) are untouched either way."""
+    paths (domain->provider, system_emails) are untouched either way."""
     import app.security as sec
 
     sec._access_cache.clear()
@@ -605,3 +605,33 @@ def test_group_membership_never_bypasses_email_verification(monkeypatch):
 
     src = inspect.getsource(sec._assert_invited)
     assert src.index("email_verified") < src.index("is_access_group_member")
+
+
+def test_the_retired_invite_list_fails_the_boot_rather_than_being_ignored(monkeypatch):
+    """A rename that silently ignores the old name is worse than no rename: the variable is still
+    on the revision, still reads like an invite list to whoever looks, and admits nobody. So the
+    deploy that renames it must also remove it, and forgetting is a failed deploy."""
+    import pytest
+
+    from app.security import assert_no_retired_invite_list
+
+    monkeypatch.setenv("ALLOWED_EMAILS", "someone@example.com")
+    with pytest.raises(RuntimeError, match="renamed to SYSTEM_EMAILS"):
+        assert_no_retired_invite_list()
+
+    monkeypatch.delenv("ALLOWED_EMAILS", raising=False)
+    assert_no_retired_invite_list()
+
+
+def test_system_emails_is_documented_as_service_identities_only():
+    """The rename IS the control. Under the old name this was reached for whenever somebody
+    needed access in a hurry, which put people in a deploy artifact."""
+    import inspect
+
+    from app import config
+
+    src = inspect.getsource(config)
+    block = src[src.index("system_emails: Annotated") - 1400:src.index("system_emails: Annotated")]
+    assert "SYSTEM identities only" in block
+    assert "never a person" in block
+    assert "access_group" in block

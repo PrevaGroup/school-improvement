@@ -107,6 +107,26 @@ def assert_dev_mode_not_in_production() -> None:
         )
 
 
+def assert_no_retired_invite_list() -> None:
+    """Refuse to boot if the retired ALLOWED_EMAILS is still set.
+
+    A rename that silently ignores the old name is worse than no rename: the variable is still on
+    the revision, still looks like an invite list to whoever reads it, and admits nobody. The
+    deploy that renames this MUST also remove it, so this makes forgetting a failed deploy rather
+    than a quietly shorter invite list.
+
+    Same argument as `assert_dev_mode_not_in_production`: the mistake is impossible to miss rather
+    than merely inert.
+    """
+    if os.environ.get("ALLOWED_EMAILS"):
+        raise RuntimeError(
+            "ALLOWED_EMAILS is set, and nothing reads it any more. It was renamed to "
+            "SYSTEM_EMAILS and narrowed to service identities — people belong in ACCESS_GROUP, "
+            "where removing one takes effect in minutes instead of at the next deploy. Refusing "
+            "to start rather than silently admitting nobody it lists. Move the addresses, then "
+            "`gcloud run services update sip-api --remove-env-vars ALLOWED_EMAILS`.")
+
+
 async def get_current_principal(
     authorization: str | None = Header(default=None),
     x_dev_tenant: str | None = Header(default=None),
@@ -202,11 +222,11 @@ def _assert_invited(claims: dict) -> None:
             status.HTTP_403_FORBIDDEN, f"the email {email} is not verified"
         )
 
-    # Per-email invite hatch (config.allowed_emails): an EXACT, still-verified address is
+    # Per-email invite hatch (config.system_emails): an EXACT, still-verified address is
     # admitted and SKIPS the domain/provider binding below. This is the deliberate testing
     # hole (e.g. a personal gmail) — it does NOT bypass `email_verified` (never that), and it
     # is exact-match only, so it can't widen to a domain.
-    if email in settings.allowed_emails:
+    if email in settings.system_emails:
         return
 
     # The same question asked of Google instead of of an env var: is this verified address a
@@ -214,7 +234,7 @@ def _assert_invited(claims: dict) -> None:
     # within the TTL rather than at the next deploy, and auditable in one place a person can look
     # at — which an env var on a Cloud Run revision is not.
     #
-    # Admits external members, which is the whole reason it replaces `allowed_emails` rather than
+    # Admits external members, which is the whole reason it replaces `system_emails` rather than
     # sitting beside it: a Google group can contain an address from any domain.
     if is_access_group_member(email):
         return
