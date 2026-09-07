@@ -63,6 +63,9 @@ EXPECTED: dict[str, set[str]] = {
     # --- the writing subsystem's review surface, split the way the modules are ---
     # serving reads (app/review_view.py); scoring owns the writes because it owns the tables.
     # Both mount under /api/review at the composition root — neither module knows the other.
+    # Where every SET stands. /queue answers "what is waiting for me"; this answers "is 5B's
+    # op-ed done", which is a property of a set and the per-paper queue has no notion of one.
+    "/api/review/home": {"GET"},
     "/api/review/queue": {"GET"},
     "/api/review/artifact/{artifact_id}": {"GET"},
     "/api/review/{artifact_id}/state": {"POST"},

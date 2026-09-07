@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
+import { AssignmentHome, Scope } from "./AssignmentHome";
 
 // The teacher's review screen: the queue on the left, one paper on the right.
 //
@@ -75,8 +76,10 @@ type QueueRow = {
   state: string;
   state_reason_code: string | null;
   student_id: string | null;
+  section_id: string | null;
   task_id: string | null;
   iteration: string | null;
+  window_label: string | null;
   display_name: string | null;
   needs_human: number | null;
   holds: number | null;
@@ -178,7 +181,20 @@ function who(name: string | null | undefined, id: string | null): string {
   return (name && name.trim()) || id || "—";
 }
 
+// A set is a binding key, and a paper is in it when every declared part matches. `null` in the
+// scope means "not declared", which is a value a paper can genuinely have — so this compares
+// rather than skipping, and a set of undeclared papers is a real set you can open.
+function inScope(r: QueueRow, sc: Scope): boolean {
+  return r.section_id === sc.section_id && r.task_id === sc.task_id
+      && r.iteration === sc.iteration && r.window_label === sc.window_label;
+}
+
 export function ReviewConsole() {
+  // The console opens on the sets, not on a paper. "What is waiting for me" is a question the
+  // teacher asks second; "is 5B's op-ed done" is the one they arrive with.
+  const [scope, setScope] = useState<Scope | null>(null);
+  const [scopeTitle, setScopeTitle] = useState<string>("");
+  const [atHome, setAtHome] = useState(true);
   const [queue, setQueue] = useState<QueueRow[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -195,14 +211,38 @@ export function ReviewConsole() {
       setAvailable(r.available);
       setQueue(r.queue);
       setCounts(r.counts);
-      if (r.queue.length && !selected) setSelected(r.queue[0].artifact_id);
+      if (r.queue.length && !selected && !atHome) setSelected(r.queue[0].artifact_id);
     } catch (e) {
       setAvailable(false);
       setError(e instanceof ApiError ? e.message : String(e));
     }
-  }, [selected]);
+  }, [selected, atHome]);
 
   useEffect(() => { void loadQueue(); }, [loadQueue]);
+
+  function openSet(sc: Scope, title: string) {
+    setScope(sc);
+    setScopeTitle(title);
+    setAtHome(false);
+    const first = queue.find((r) => inScope(r, sc));
+    setSelected(first ? first.artifact_id : null);
+  }
+
+  // A stuck paper is opened from the home page directly, with no set around it — that is the
+  // point of naming them there rather than counting them.
+  function openPaper(artifact_id: string) {
+    setScope(null);
+    setScopeTitle("");
+    setAtHome(false);
+    setSelected(artifact_id);
+  }
+
+  function goHome() {
+    setAtHome(true);
+    setScope(null);
+    setSelected(null);
+    setDetail(null);
+  }
 
   useEffect(() => {
     if (!selected) { setDetail(null); return; }
@@ -298,16 +338,27 @@ export function ReviewConsole() {
     );
   }
 
+  if (atHome) return <AssignmentHome onOpenSet={openSet} onOpenPaper={openPaper} />;
+
+  const shown = scope ? queue.filter((r) => inScope(r, scope)) : queue;
+
   return (
     <div className="rv">
       <aside className="rv-queue">
+        <div className="rv-back">
+          <button onClick={goHome}>&larr; All assignments</button>
+          {scopeTitle && <div className="rv-scope">{scopeTitle}</div>}
+        </div>
         <div className="rv-counts">
-          {Object.entries(counts).map(([state, n]) => (
+          {Object.entries(scope
+            ? shown.reduce<Record<string, number>>(
+                (acc, r) => ({ ...acc, [r.state]: (acc[r.state] ?? 0) + 1 }), {})
+            : counts).map(([state, n]) => (
             <span key={state} className={`rv-chip rv-${state}`}>{n} {STATE_LABEL[state] ?? state}</span>
           ))}
         </div>
         <ul>
-          {queue.map((r) => (
+          {shown.map((r) => (
             <li key={r.artifact_id}
                 className={r.artifact_id === selected ? "rv-sel" : ""}
                 onClick={() => setSelected(r.artifact_id)}>
@@ -321,7 +372,11 @@ export function ReviewConsole() {
             </li>
           ))}
         </ul>
-        {!queue.length && <p className="rv-mut">Nothing waiting.</p>}
+        {!shown.length && (
+          <p className="rv-mut">
+            {scope ? "Nothing in this set is waiting on you." : "Nothing waiting."}
+          </p>
+        )}
       </aside>
 
       <section className="rv-paper">
