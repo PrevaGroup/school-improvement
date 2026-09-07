@@ -328,6 +328,11 @@ class ScoringConfiguration(Base):
     effort: Mapped[str | None] = mapped_column(Text)
     prompt_versions: Mapped[dict] = mapped_column(JSONB, nullable=False)   # per pipeline function
     normalization_version: Mapped[str] = mapped_column(Text, nullable=False)  # span verifier rules
+    # How deep this rater may look: budget, declared triggers, escalated effort, terminal action.
+    # Shape and reasoning in `scoring/escalate.py`; NULL means the default policy, which is what
+    # every configuration written before migration 0027 has. Deliberately NOT in
+    # `definition_hash` — 0027 says why, and states the counter-argument.
+    escalation: Mapped[dict | None] = mapped_column(JSONB)
     definition_hash: Mapped[str] = mapped_column(Text, nullable=False)
 
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")

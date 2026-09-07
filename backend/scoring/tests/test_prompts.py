@@ -5,19 +5,24 @@ prompts.py and it fails, which forces the version bump into the same commit as t
 configuration promoted against the old version then refuses to run rather than quietly scoring
 papers with a rater nobody approved.
 
-If you are here because that test failed: you changed a prompt. Bump EVIDENCE_VERSION or
-SCORE_VERSION, paste the new hash below, and promote a new scoring configuration. Do not just
-paste the hash.
+If you are here because that test failed: you changed a prompt. Bump FIT_VERSION,
+EVIDENCE_VERSION or SCORE_VERSION, paste the new hash below, and promote a new scoring
+configuration. Do not just paste the hash.
+
+ADDING a stage does the same thing, and should. When the fit gate arrived, every configuration
+already in the database stopped matching and refused to run — correctly, because a rater that now
+decides admissibility before scoring is not the rater those configurations named.
 """
 from __future__ import annotations
 
 import pytest
 
-from scoring.prompts import (EVIDENCE_SCHEMA, EVIDENCE_VERSION, FEEDBACK_VERSION,
-                             SCORE_SCHEMA, SCORE_VERSION, feedback_fingerprint, fingerprint,
-                             render_scale)
+from scoring.prompts import (EVIDENCE_SCHEMA, EVIDENCE_VERSION, FEEDBACK_VERSION, FIT_SCHEMA,
+                             FIT_VERSION, SCORE_SCHEMA, SCORE_VERSION, feedback_fingerprint,
+                             fingerprint, render_scale)
 
 PINNED = {
+    "fit": {"version": "fit.1", "sha256": "2338d95dcc9f0219"},
     "evidence": {"version": "ev.1", "sha256": "05264504a54983f7"},
     "score": {"version": "sc.1", "sha256": "97f36f59d676de80"},
 }

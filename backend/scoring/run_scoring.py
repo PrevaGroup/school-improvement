@@ -42,6 +42,7 @@ import argparse
 import hashlib
 import json
 import logging
+from dataclasses import replace
 
 from sqlalchemy import text
 
@@ -51,11 +52,15 @@ from ._db import engine
 from ._ids import uuid7
 from .prompts import fingerprint
 from .rater import AnthropicRater, RaterIdentity, Usage
-from .score import Criterion, Outcome, score_artifact
+from . import escalate, fit
+from .score import Criterion, Outcome, score_artifact, score_criterion
 
 log = logging.getLogger("scoring.run_scoring")
 
-SCRUTINY_PASS = 1   # escalation is a later phase; the column exists so the pass is never implicit
+# The first look. An escalated criterion is written at pass 2 — see `scoring/escalate.py` for
+# why the budget is per artifact, why the trigger list is short, and why there is no pass 3.
+SCRUTINY_PASS = 1
+ESCALATED_PASS = 2
 
 # --------------------------------------------------------------------------- #
 # Reads against other modules' tables. `registry` is read with SQL and never imported: a produced
@@ -76,13 +81,13 @@ _TRAIT_SET = text("""
 """)
 
 _ACTIVE_CONFIG = text("""
-    SELECT config_id, model_id, effort, prompt_versions, normalization_version
+    SELECT config_id, model_id, effort, prompt_versions, normalization_version, escalation
       FROM registry_scoring_configuration
      WHERE config_key = :config_key AND status = 'active'
 """)
 
 _CONFIG_BY_ID = text("""
-    SELECT config_id, model_id, effort, prompt_versions, normalization_version
+    SELECT config_id, model_id, effort, prompt_versions, normalization_version, escalation
       FROM registry_scoring_configuration
      WHERE config_id = :config_id
 """)
@@ -110,6 +115,20 @@ _PENDING = text("""
        AND (CAST(:run_id AS text) IS NULL OR a.run_id = CAST(:run_id AS text))
      ORDER BY a.created_at
      LIMIT :limit
+""")
+
+# The task statement, which is the file intake classified as `not_student_work` in the same
+# folder. The plan is specific that it is kept for this: "non-student classification that retains
+# the prompt as the task statement". Without it the fit gate has no task to be an attempt AT, and
+# the question collapses into "is this good writing" — the drift the gate is built to avoid.
+_TASK_STATEMENT = text("""
+    SELECT p.text
+      FROM intake_file f
+      JOIN intake_file p ON p.manifest_id = f.manifest_id
+     WHERE f.file_id = :file_id AND p.status = 'not_student_work'
+       AND p.text IS NOT NULL AND length(p.text) > 0
+     ORDER BY length(p.text) DESC
+     LIMIT 1
 """)
 
 _ALREADY_SCORED = text("""
@@ -188,7 +207,10 @@ def enters_calibration(outcome: Outcome, is_measurement_occasion: bool) -> bool:
 
 
 def event_rows(artifact: dict, outcomes: list[Outcome], identity: RaterIdentity,
-               ts_version: str, is_measurement_occasion: bool) -> list[dict]:
+               ts_version: str, is_measurement_occasion: bool, *,
+               scrutiny_passes: int = SCRUTINY_PASS,
+               triggers: dict[str, str] | None = None,
+               supersedes: dict[str, str] | None = None) -> list[dict]:
     """Outcomes -> score_event rows. Pure, so the facet stamp can be asserted without a database.
 
     `rubric_version` holds the node_version_id rather than the integer version: an integer is only
@@ -218,8 +240,11 @@ def event_rows(artifact: dict, outcomes: list[Outcome], identity: RaterIdentity,
             "scorer_type": "ai",
             "scorer_id": None,          # a machine rater IS its configuration
             "human_blind": None,
-            "scrutiny_passes": SCRUTINY_PASS,
-            "escalation_trigger": None,
+            "scrutiny_passes": scrutiny_passes,
+            # WHICH declared rule fired. Without it an escalated row says a second look happened
+            # and not what prompted it, and "escalated papers are not a random subset" becomes
+            # unanalysable — the subset is defined by the trigger.
+            "escalation_trigger": (triggers or {}).get(o.node_id),
             "status": o.status,
             "level": o.level,
             "confidence": o.confidence,
@@ -229,10 +254,13 @@ def event_rows(artifact: dict, outcomes: list[Outcome], identity: RaterIdentity,
             "is_measurement_occasion": is_measurement_occasion,
             "enters_calibration": enters_calibration(o, is_measurement_occasion),
             "revised_after_feedback": None,
-            "supersedes_event_id": None,
+            # The pass-1 event this deeper look replaces. Both rows survive — the table is
+            # append-only — so the pair is the scrutiny-invariance comparison Phase 5 wants. This
+            # only says which one STANDS.
+            "supersedes_event_id": (supersedes or {}).get(o.node_id),
             "set_override_id": None,
             "idempotency_key": idempotency_key(
-                artifact["artifact_id"], o.node_id, identity.config_id, SCRUTINY_PASS),
+                artifact["artifact_id"], o.node_id, identity.config_id, scrutiny_passes),
             "tenant_id": artifact["tenant_id"],
             "visibility": artifact["visibility"],
         })
@@ -301,8 +329,13 @@ def load_criteria(conn, task_id: str, iteration: str) -> tuple[list[Criterion], 
 
 
 def resolve_configuration(conn, *, tenant: str, section_id: str | None, task_id: str,
-                          iteration: str, config_key: str) -> RaterIdentity:
-    """The pinned configuration for this scope, or the active one if the scope is new."""
+                          iteration: str,
+                          config_key: str) -> tuple[RaterIdentity, escalate.Policy]:
+    """The pinned configuration for this scope, or the active one if the scope is new.
+
+    Returns the rater AND its escalation policy, because they are two halves of one published
+    decision: what the model is, and how many times it is allowed to look.
+    """
     pinned = [r[0] for r in conn.execute(
         _PINNED_CONFIG, {"tenant": tenant, "section_id": section_id,
                          "task_id": task_id, "iteration": iteration}).all()]
@@ -324,7 +357,11 @@ def resolve_configuration(conn, *, tenant: str, section_id: str | None, task_id:
                              prompt_versions=dict(r["prompt_versions"]),
                              normalization_version=r["normalization_version"])
     check_configuration(identity)
-    return identity
+    # Escalation behaviour is a property of the published configuration somebody approved, not of
+    # whichever constants were in this file that week. A row with no policy gets the default,
+    # which is what every configuration written before this column existed has.
+    policy = escalate.Policy.from_config(r.get("escalation"))
+    return identity, policy
 
 
 # ------------------------------------------------------------------ the loop
@@ -370,12 +407,15 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
     with eng.connect() as conn:
         conn.execute(text("SELECT set_config('app.tenant', :t, true)"), {"t": tenant})
         criteria, is_occasion = load_criteria(conn, artifact["task_id"], artifact["iteration"])
-        identity = resolve_configuration(
+        identity, policy = resolve_configuration(
             conn, tenant=tenant, section_id=artifact["section_id"], task_id=artifact["task_id"],
             iteration=artifact["iteration"], config_key=config_key)
         done = {r[0] for r in conn.execute(
             _ALREADY_SCORED, {"artifact_id": aid, "config_id": identity.config_id,
                               "pass_n": SCRUTINY_PASS}).all()}
+        task_statement = (conn.execute(
+            _TASK_STATEMENT, {"file_id": artifact["intake_file_id"]}).scalar()
+            if artifact.get("intake_file_id") else None)
 
     remaining = [c for c in criteria if c.node_id not in done]
     if not remaining:
@@ -386,16 +426,50 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
 
     # The calls. Outside any transaction, on purpose — see the module docstring.
     rater = rater_factory(identity)
-    outcomes, usage = score_artifact(body, remaining, rater)
-    state, reason_code = next_state(outcomes)
+
+    # Stage B, first, because its entire purpose is to run before the expensive part. One call
+    # decides whether the next several hundred are worth making. It resolves toward admitting on
+    # anything ambiguous — see `scoring/fit.py` for why those two errors are not comparable.
+    verdict, fit_usage = fit.check(task_statement, body, rater)
+    usage = fit_usage
+    if not verdict.admitted:
+        outcomes = [Outcome(node_id=c.node_id, node_version_id=c.node_version_id,
+                            status="not_scorable", reason_code=fit.NOT_THIS_TASK,
+                            reason=verdict.reason,
+                            evidence=verdict.as_evidence())
+                    for c in remaining]
+    else:
+        scored_outcomes, score_usage = score_artifact(body, remaining, rater)
+        outcomes = scored_outcomes
+        usage = usage + score_usage
+
+    # The second, deeper look — bounded, on declared triggers, at higher effort. This is the whole
+    # of "escalation under a fixed budget" reaching a real path; the module beside it is where the
+    # reasoning lives. A gated paper skips it: `not_scorable` is not a trigger, and paying twice
+    # to confirm a document is not an attempt is the opposite of what the gate is for.
+    escalated, plan, esc_usage, unchanged = escalate_pass(
+        body, remaining, outcomes, policy, identity, rater_factory)
+    usage = usage + esc_usage
+
+    # What the record says now, per criterion: the escalated outcome where one stands, the first
+    # pass otherwise. Both rows are written; this decides which is not superseded.
+    stands = {o.node_id: o for o in outcomes}
+    stands.update({o.node_id: o for o in escalated})
+    state, reason_code = next_state(list(stands.values()))
 
     if dry_run:
-        log.info("%s (dry run): %s, %d outcome(s), %d call(s)",
-                 aid, state, len(outcomes), usage.calls)
+        log.info("%s (dry run): %s, %d outcome(s), %d escalated, %d call(s)",
+                 aid, state, len(outcomes), len(escalated), usage.calls)
         return usage
 
-    rows = event_rows(artifact, outcomes, identity,
-                      trait_set_version([c.node_version_id for c in criteria]), is_occasion)
+    ts_version = trait_set_version([c.node_version_id for c in criteria])
+    rows = event_rows(artifact, outcomes, identity, ts_version, is_occasion)
+    # An escalated row supersedes the pass-1 row written in this same transaction, so the id has
+    # to come from the row about to be inserted rather than from a second read.
+    first_ids = {r["node_id"]: r["event_id"] for r in rows}
+    rows += event_rows(artifact, escalated, identity, ts_version, is_occasion,
+                       scrutiny_passes=ESCALATED_PASS, triggers=plan.triggers,
+                       supersedes=first_ids)
 
     # One transaction: every event and the transition, or neither. A partially scored artifact
     # left in `bound` would be picked up again and score its remaining criteria under whatever
@@ -412,8 +486,60 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
                 f"{aid} was not in `bound` when the transition ran ({moved} rows). Another worker "
                 f"has it; rolling back rather than writing a second rater's scores.")
 
+    if plan.escalate:
+        log.info("%s: escalated %d criteria (%s); %d kept the first pass",
+                 aid, len(plan.escalate), ", ".join(sorted(set(plan.triggers.values()))),
+                 len(unchanged))
+    if plan.unfunded:
+        # Named, not counted. A criterion that met a declared trigger and got no second look
+        # because the budget ran out is a different fact from one that never triggered, and this
+        # log line is the only place anybody would ever see it.
+        log.warning("%s: escalation budget %d spent; %d criteria triggered and were not "
+                    "escalated: %s", aid, policy.budget, len(plan.unfunded),
+                    ", ".join(plan.unfunded))
+
+    if not verdict.admitted:
+        log.info("%s: the fit gate refused it — %s (%s). %d scoring calls not made.",
+                 aid, verdict.reason, verdict.document_is, len(remaining) * 2)
+
     log.info("%s -> %s: %d event(s), %d call(s)", aid, state, len(rows), usage.calls)
     return usage
+
+
+def escalate_pass(body: str, criteria: list[Criterion], outcomes: list[Outcome],
+                  policy: escalate.Policy, identity: RaterIdentity,
+                  rater_factory) -> tuple[list[Outcome], escalate.Plan, Usage, dict[str, str]]:
+    """The second, deeper look. Same criteria, same paper, higher effort.
+
+    Returns the outcomes that STAND after escalation, the plan (so the run can report what it
+    could not fund), the usage, and which node kept its pass-1 result — because an escalated pass
+    that changed nothing is a fact worth having, not a no-op.
+
+    Deeper is `effort`, and that is not cosmetic: effort is part of the rater's identity hash, so
+    the escalated pass is stamped as coming from a rater that genuinely is not the pass-1 rater.
+    `scrutiny_passes` is what lets measurement hold them apart.
+    """
+    p = escalate.plan(outcomes, policy)
+    if not p:
+        return [], p, Usage(), {}
+
+    deeper = replace(identity, effort=policy.escalated_effort)
+    rater = rater_factory(deeper)
+    by_node = {c.node_id: c for c in criteria}
+    first_by_node = {o.node_id: o for o in outcomes}
+
+    stands, total, unchanged = [], Usage(), {}
+    for node_id in p.escalate:
+        second, usage = score_criterion(body, by_node[node_id], rater)
+        total = total + usage
+        winner, changed = escalate.keep(first_by_node[node_id], second)
+        if changed:
+            stands.append(winner)
+        else:
+            # The terminal action, reached early: a deeper look that found nothing does not get to
+            # delete a level the first pass produced. The criterion keeps what it had.
+            unchanged[node_id] = p.triggers[node_id]
+    return stands, p, total, unchanged
 
 
 def read_text(artifact: dict) -> str:
