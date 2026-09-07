@@ -98,6 +98,12 @@ _PURGE_ORDER = (
 _BY_RUN = "run_id = :run"
 _BY_ARTIFACT = "artifact_id IN (SELECT artifact_id FROM artifact WHERE run_id = :run)"
 
+# Widened scope: everything `bind` made from a file this fixture read. Used by the teardown, never
+# by anything that runs against real work.
+_BY_RUN_OR_INTAKE = "(run_id = :run OR intake_file_id IS NOT NULL)"
+_BY_ARTIFACT_WIDE = ("artifact_id IN (SELECT artifact_id FROM artifact "
+                     "WHERE run_id = :run OR intake_file_id IS NOT NULL)")
+
 # Both are append-only by trigger, so the triggers come off for this transaction. That is why
 # purging is a maintenance script and not something the pipeline can reach: the append-only rule
 # must not be negotiable from inside the pipeline, and a cleanup path the scorer could call would
@@ -106,8 +112,20 @@ _APPEND_ONLY = (("score_event", "trg_score_event_append_only"),
                 ("artifact_composition", "trg_artifact_composition_append_only"))
 
 
-def purge() -> dict:
+def purge(include_intake_derived: bool = False) -> dict:
     """Remove one run's artifacts, their events and their review packets.
+
+    `include_intake_derived` widens the scope to every artifact `bind` made from an intake file,
+    which is what a fixture teardown means now. THE RUN SCOPE ALONE IS NOT ENOUGH and that is a
+    bug this function had: artifacts used to be created here under `RUN_ID`, and are now created
+    by `scoring.bind`, which stamps the MANIFEST id as the run. So the purge kept matching a run
+    nothing was writing any more — it deleted the stragglers, reported a number, and left the
+    artifacts that mattered behind. The next `bind` then skipped two of three files as unchanged
+    and nobody could see why.
+
+    Third teardown in this session scoped by something the creation path does not guarantee. The
+    durable answer is not a better predicate, it is `verify()` below — a teardown that checks
+    itself rather than reporting what it attempted.
 
     No try/finally around the trigger disable. ALTER TABLE is transactional in Postgres, so a
     failure rolls the DISABLE back with everything else and the triggers are never left off. The
@@ -121,7 +139,10 @@ def purge() -> dict:
             conn.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {trigger}"))
 
         for table, scope in _PURGE_ORDER:
-            where = _BY_RUN if scope == "run" else _BY_ARTIFACT
+            if scope == "run":
+                where = _BY_RUN_OR_INTAKE if include_intake_derived else _BY_RUN
+            else:
+                where = _BY_ARTIFACT_WIDE if include_intake_derived else _BY_ARTIFACT
             counts[table] = conn.execute(
                 text(f"DELETE FROM {table} WHERE {where}"), {"run": RUN_ID}).rowcount
 
@@ -150,3 +171,30 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def verify(include_intake_derived: bool = False) -> dict:
+    """What is still there after a purge claimed to have removed it.
+
+    A teardown that reports what it ATTEMPTED is how three separate scoping bugs in this session
+    all looked like success: a `demo-` prefix nothing carried any more, a table added after the
+    delete list was written, and a run id the creation path stopped using. Each deleted some rows,
+    returned a number, and left the ones that mattered.
+
+    Counting what remains cannot make that mistake. If the predicate is wrong, this says so.
+    """
+    scope = ("run_id = :run OR intake_file_id IS NOT NULL") if include_intake_derived         else "run_id = :run"
+    with engine().connect() as conn:
+        conn.execute(text("SELECT set_config('app.tenant', 'public', true)"))
+        left = {
+            "artifact": conn.execute(
+                text(f"SELECT count(*) FROM artifact WHERE {scope}"),
+                {"run": RUN_ID}).scalar_one(),
+            "score_event": conn.execute(
+                text(f"SELECT count(*) FROM score_event WHERE {scope}"),
+                {"run": RUN_ID}).scalar_one(),
+            "artifact_composition": conn.execute(text(
+                "SELECT count(*) FROM artifact_composition c JOIN artifact a USING (artifact_id) "
+                f"WHERE {scope}"), {"run": RUN_ID}).scalar_one(),
+        }
+    return left
