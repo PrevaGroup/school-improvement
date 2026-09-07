@@ -479,7 +479,19 @@ email never sends.
 >   --set-env-vars ^@^GCP_PROJECT=school-improvement-501916@ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com,gatesfoundation.org=microsoft.com@DEV_MODE=false
 > ```
 >
-> Without it you get `ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com` plus a bogus
+> **The delimiter must be a character the VALUE does not contain**, and `@` is the wrong choice
+> for `ALLOWED_EMAILS` — every address in it contains one, so `^@^` splits the list into
+> fragments and gcloud rejects the whole flag with `Bad syntax for dict arg: [gmail.com,...]`.
+> Use `:`, which an email address never contains:
+>
+> ```bash
+> gcloud run services update sip-api --region us-central1 >   --update-env-vars '^:^ALLOWED_EMAILS=a@one.com,b@two.com,eval-runner@prevagroup.com'
+> ```
+>
+> `ALLOWED_EMAILS` replaces wholesale even under `--update-env-vars`, so list everyone who is
+> already on it — dropping `eval-runner@prevagroup.com` costs the eval runner its sign-in.
+>
+> Without the alternate delimiter you get `ALLOWED_DOMAIN_PROVIDERS=prevagroup.com=google.com` plus a bogus
 > `gatesfoundation.org` env var holding `microsoft.com` — and a silently *shorter* invite
 > list. (Same class of footgun as the "all env vars in ONE flag" note above.) The `=` signs
 > inside the value are never the problem — gcloud splits entries on the first `=` only; the

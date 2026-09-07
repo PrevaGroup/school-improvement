@@ -194,6 +194,21 @@ class Settings(BaseSettings):
     # before relying on the org-identity guarantee in production.
     allowed_emails: Annotated[set[str], NoDecode] = set()
 
+    # THE INVITE LIST, held in Google rather than here. A Workspace group whose members may use
+    # the application, checked live against Cloud Identity exactly as `admin_group` is — so adding
+    # a reviewer is a Workspace console change with no deploy, and removing one takes effect
+    # within the membership TTL rather than at the next release.
+    #
+    # It exists because `allowed_emails` is an env var, which makes the invite list a deploy
+    # artifact: it cannot be revoked without a release, it is invisible to anyone auditing who has
+    # access, and it is edited by whoever last ran gcloud. A group is the account system's own
+    # answer to "who may use this", and Google groups admit external members, which is what makes
+    # it usable for reviewers outside the domain — the case `allowed_emails` was reached for.
+    #
+    # Unset admits nobody through this path and leaves the other two untouched, so turning it on
+    # is additive and turning it off cannot lock anyone out mid-pilot.
+    access_group: str = ""
+
     # The eval runner (evals.run_evals) authenticates as this exact address. When the verified
     # caller's email matches, chat stamps the turn `source="eval"` so eval traffic is separable
     # from real use in the trace store — a SERVER-side decision keyed on the authenticated

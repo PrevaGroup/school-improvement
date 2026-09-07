@@ -530,3 +530,78 @@ def test_verify_401s_on_empty_claims(monkeypatch):
     with pytest.raises(HTTPException) as e:
         security._verify_identity_token("empty.jwt")
     assert e.value.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# The invite list, held in Google rather than in an env var.
+#
+# `allowed_emails` makes the invite list a deploy artifact: it cannot be revoked without a
+# release, it is invisible to anyone auditing who has access, and it is edited by whoever last
+# ran gcloud. A Workspace group is the account system's own answer to "who may use this", and
+# Google groups admit external members — which is the case `allowed_emails` was reached for.
+# --------------------------------------------------------------------------- #
+
+def test_access_group_membership_admits(monkeypatch):
+    import app.security as sec
+
+    sec._access_cache.clear()
+    monkeypatch.setattr(sec.settings, "access_group", "sip-users@prevagroup.com")
+    monkeypatch.setattr(sec, "_is_group_member", lambda e, g: e == "reviewer@otherorg.com")
+    assert sec.is_access_group_member("reviewer@otherorg.com")
+    assert not sec.is_access_group_member("stranger@otherorg.com")
+
+
+def test_an_external_address_can_be_a_member(monkeypatch):
+    """The whole reason this replaces the env var rather than sitting beside it. A group can
+    contain an address from any domain, which is what reviewers from other organisations are."""
+    import app.security as sec
+
+    sec._access_cache.clear()
+    monkeypatch.setattr(sec.settings, "access_group", "sip-users@prevagroup.com")
+    monkeypatch.setattr(sec, "_is_group_member", lambda e, g: True)
+    assert sec.is_access_group_member("someone@gmail.com")
+
+
+def test_no_group_configured_admits_nobody(monkeypatch):
+    """Turning it on is additive; turning it off cannot admit anyone by accident. The other two
+    paths (domain->provider, allowed_emails) are untouched either way."""
+    import app.security as sec
+
+    sec._access_cache.clear()
+    monkeypatch.setattr(sec.settings, "access_group", "")
+    monkeypatch.setattr(sec, "_is_group_member", lambda e, g: True)
+    assert not sec.is_access_group_member("anyone@anywhere.com")
+
+
+def test_a_membership_error_withholds_access_and_is_not_cached(monkeypatch):
+    """Same posture as the admin check, for the same reason: this is admission, so every unhappy
+    path withholds. And an error must not be cached, or one Cloud Identity blip locks a user out
+    for the whole TTL."""
+    import app.security as sec
+
+    sec._access_cache.clear()
+    monkeypatch.setattr(sec.settings, "access_group", "sip-users@prevagroup.com")
+
+    calls = {"n": 0}
+
+    def flaky(email, group):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("cloud identity is down")
+        return True
+
+    monkeypatch.setattr(sec, "_is_group_member", flaky)
+    assert not sec.is_access_group_member("reviewer@otherorg.com")
+    assert sec.is_access_group_member("reviewer@otherorg.com"), (
+        "the failure was cached, so a transient outage denies for the whole TTL")
+
+
+def test_group_membership_never_bypasses_email_verification(monkeypatch):
+    """Membership answers "may this person use it". It does not answer "is this person who they
+    say they are", and that stays with the identity provider."""
+    import inspect
+
+    import app.security as sec
+
+    src = inspect.getsource(sec._assert_invited)
+    assert src.index("email_verified") < src.index("is_access_group_member")

@@ -70,7 +70,7 @@ IGNORED_NAMES = {".ds_store", "thumbs.db", "desktop.ini"}
 CANDIDATE_FLOOR = 0.60
 
 _ROSTER = text("""
-    SELECT s.student_id, s.display_name
+    SELECT s.student_id, s.display_name, s.email
       FROM roster_student s
       JOIN roster_enrollment e ON e.student_id = s.student_id
      WHERE e.tenant_id = :tenant AND e.section_id = :section_id
@@ -266,6 +266,32 @@ def read_local(folder: pathlib.Path) -> list[SourceFile]:
             source_ref=path.name, name=path.name, data=data,
             modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
             size_bytes=stat.st_size, unreadable_reason=reason))
+    return out
+
+
+def read_drive(client, folder_id: str) -> list[SourceFile]:
+    """A Drive folder as the same list `read_local` produces.
+
+    The whole point of the seam: `classify`, `reconcile` and `rows_for` never learn where a file
+    came from, so a Drive read and a local read produce comparable manifests and the five statuses
+    keep meaning the same five things.
+
+    A Doc arrives already extracted, as text — Drive's export does that in one call. It is handed
+    on as UTF-8 bytes with a text mime so `extract` takes the plain-text path it already documents
+    for exactly this case, rather than a second extraction route existing for one provider.
+    """
+    out = []
+    for f in client.enumerate(folder_id):
+        client.extract(f)
+        client.history(f)
+        out.append(SourceFile(
+            source_ref=f.source_ref, name=f.name,
+            data=(f.text or "").encode("utf8"),
+            mime="text/plain" if f.text is not None else f.mime,
+            modified_at=f.modified_at, size_bytes=f.size_bytes,
+            # The two fields the whole integration exists for.
+            owner_email=f.owner_email, editor_emails=list(f.editor_emails),
+            unreadable_reason=f.unreadable_reason))
     return out
 
 

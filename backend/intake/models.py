@@ -128,3 +128,51 @@ class File(Base, TenantMixin):
         Index("ix_intake_file_hash", "text_hash"),
         Index("ix_intake_file_student", "tenant_id", "resolved_student_id"),
     )
+
+
+class DriveConnection(Base, TenantMixin):
+    """One person's authorisation to read one Google account's Drive.
+
+    Per-teacher OAuth, not domain-wide delegation: one refresh token reaches one teacher's Drive,
+    where a delegated service account would reach everyone's — including staff files that have
+    nothing to do with this product. The plan makes domain-wide a district-scale decision, and
+    blast radius is the reason it is not this one.
+
+    TWO IDENTITIES, DELIBERATELY. The person signed into the console and the Google account whose
+    Drive is read are not necessarily the same, and in the pilot they are not. Recording only one
+    would make "whose Drive did this folder come from" unanswerable — the question asked when a
+    paper turns out to be somebody else's, or when a person leaves and their access must go too.
+
+    THIS ROW HOLDS NO CREDENTIALS. `token_secret_name` points into Secret Manager, where the rest
+    of this system's secrets already live, so the token is under IAM rather than a table grant —
+    auditable per read, revocable without a deploy, and invisible to a `pg_dump`. Migration 0029;
+    `intake/token_store.py` is the other half.
+    """
+    __tablename__ = "intake_drive_connection"
+
+    connection_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_sub: Mapped[str] = mapped_column(Text, nullable=False)   # who connected it
+    principal_email: Mapped[str | None] = mapped_column(Text)
+    google_email: Mapped[str] = mapped_column(Text, nullable=False)    # whose Drive it reaches
+
+    token_secret_name: Mapped[str] = mapped_column(Text, nullable=False)
+    # As Google RETURNED them, not as we asked. A user who unticked a scope grants less than was
+    # requested, and the failure should say "you did not grant Docs" rather than surfacing a 403.
+    granted_scopes: Mapped[str] = mapped_column(Text, nullable=False)
+
+    connected_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default="now()")
+    last_used_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    # An expired refresh token is the normal end of a connection on an External/Testing consent
+    # screen — Google expires them after seven days. Recorded so the console can say "reconnect"
+    # rather than failing a folder read with a stack trace.
+    failed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    failure_detail: Mapped[str | None] = mapped_column(Text)
+    revoked_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    revoked_by: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        CheckConstraint("failed_at IS NULL OR failure_detail IS NOT NULL",
+                        name="a_failure_says_what_failed"),
+        Index("ix_intake_drive_connection_principal", "tenant_id", "principal_sub"),
+    )
