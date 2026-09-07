@@ -89,6 +89,41 @@ gcloud run deploy sip-api --source . --region us-central1 \
   --update-env-vars GIT_SHA=$(git rev-parse HEAD)
 ```
 
+> **⚠️ "Done." is not a deployment.** The closing line names the revision *serving
+> traffic*, not the one the command just built. If traffic has been pinned to a specific
+> revision, every deploy still builds, still pushes, still creates a revision — and that
+> revision gets 0% of traffic while gcloud prints the pinned revision's name and `Done.`
+>
+> This is invisible precisely because it looks like success: five consecutive deploys once
+> reported `sip-api-00072-rqk` while LATEST climbed to `00077-htg`. The tell is a revision
+> number that does not increase across deploys. Check and correct:
+>
+> ```bash
+> gcloud run services describe sip-api --region us-central1 --format='value(status.traffic)'
+> gcloud run services update-traffic sip-api --to-latest --region us-central1
+> ```
+>
+> `status.traffic` should read `LATEST`. A `revisionName` there means traffic is pinned and
+> nothing you deploy will serve until you unpin it.
+
+### Verify what is actually being served (both deploy shapes)
+
+Neither the build log nor the deploy output can tell you this — both describe what was
+produced, not what is answering requests. These two do, and they need no credentials:
+
+```bash
+B=https://sip-api-1013838667941.us-central1.run.app
+# The route contract of the RUNNING app. A route you added should be in here.
+curl -s "$B/openapi.json" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['paths']),'routes')"
+# The hashed bundle name changes whenever the frontend changes. Compare it to the
+# `dist/assets/index-*.js` line in the build log — same hash means the old image is serving.
+curl -s "$B/" | grep -o '/assets/[^"]*\.js'
+```
+
+An unmatched `/api/...` path answers `{"detail":"no such API route: ..."}` with a 404, and a
+route that exists but needs sign-in answers 401. **404 vs 401 is the whole test**: 401 means the
+route is registered and the deploy landed; 404 means it is not there, whatever the deploy said.
+
 ### Full deploy — first provision, or deliberately re-asserting the whole env set
 
 Because `--set-env-vars` replaces everything, this must list **every** var the live service
