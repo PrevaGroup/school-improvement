@@ -30,7 +30,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .prompts import EVIDENCE_SCHEMA, FEEDBACK_SCHEMA, SCORE_SCHEMA
+from .prompts import EVIDENCE_SCHEMA, FEEDBACK_SCHEMA, FIT_SCHEMA, SCORE_SCHEMA
 
 SECRET_NAME = "anthropic-api-key"
 
@@ -87,6 +87,11 @@ class Rater(Protocol):
 
     identity: RaterIdentity
 
+    # Stage B, before either of the scoring calls. Named like the others rather than folded into a
+    # generic call so a fake rater cannot answer the wrong stage by accident — the fit gate is the
+    # one stage where a wrong answer removes a student instead of misplacing them.
+    def judge_fit(self, prompt: str) -> tuple[dict, Usage]: ...
+
     def propose_spans(self, prompt: str) -> tuple[list[str], Usage]: ...
 
     def assign_level(self, prompt: str) -> tuple[dict, Usage]: ...
@@ -112,6 +117,9 @@ class AnthropicRater:
         self._max_tokens = max_tokens
         self._client = anthropic.Anthropic(api_key=api_key or resolve_api_key(),
                                            max_retries=max_retries)
+
+    def judge_fit(self, prompt: str) -> tuple[dict, Usage]:
+        return self._call(prompt, FIT_SCHEMA)
 
     def propose_spans(self, prompt: str) -> tuple[list[str], Usage]:
         out, usage = self._call(prompt, EVIDENCE_SCHEMA)

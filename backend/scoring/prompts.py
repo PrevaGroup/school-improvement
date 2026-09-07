@@ -33,8 +33,45 @@ import hashlib
 
 # Bump the version when the text changes. The test below will tell you if you forgot; the driver
 # will refuse to run if a configuration still stamps the old one.
+FIT_VERSION = "fit.1"
 EVIDENCE_VERSION = "ev.1"
 SCORE_VERSION = "sc.1"
+
+# Stage B. The cheapest call on the path and the one with the worst failure mode, so almost all
+# of this prompt is spent narrowing what "no" is allowed to mean.
+#
+# The gate exists to stop spend on work that is not a response to the task — a blank template, the
+# assignment sheet, last week's essay dropped in the same folder. It does NOT exist to filter out
+# weak writing, and a gate that drifts that way removes exactly the students the subsystem is most
+# careful about, silently, before any criterion is ever scored. `not_scorable` means a defined
+# non-attempt against the bound task. It never means bad.
+FIT_PROMPT = """You are deciding ONE thing about a document: is it an attempt at the assigned task?
+
+TASK: {task}
+
+DOCUMENT:
+<text>
+{text}
+</text>
+
+Answer `attempt` unless the document is clearly not a response to this task at all. Examples of
+what is NOT an attempt: the assignment sheet or rubric itself, a blank or unfilled template, a
+response to a visibly different assignment, or a file containing only a name and a heading.
+
+`attempt` is the answer for all of the following, and this list is the point of this prompt:
+
+- Writing that is short, unfinished, or stops mid-sentence.
+- Writing that misunderstands the task, or argues the opposite of what was asked.
+- Writing with heavy spelling, grammar or punctuation errors, or written in a mix of languages.
+- Writing that is off-topic in substance but is plainly this student's attempt at this assignment.
+- Anything you are unsure about.
+
+A weak, confused or barely-started response IS an attempt. Judging its quality is a separate step
+that happens later against a rubric, and answering `not_an_attempt` here removes the student from
+that step entirely — so the only papers that belong on that side are the ones where there is
+nothing to score, not the ones where there is little.
+
+Give a one-sentence reason a teacher could check against the document."""
 
 EVIDENCE_PROMPT = """You are extracting evidence for ONE criterion from ONE piece of student writing.
 
@@ -134,6 +171,19 @@ RULES, all of them firm:
 # therefore instruction rather than constraint, and nothing downstream depends on it holding —
 # verification is what actually bounds what reaches stage D.
 # --------------------------------------------------------------------------- #
+FIT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["attempt", "not_an_attempt"]},
+        # Asked for separately so the gate cannot be confidently wrong cheaply: a model that has
+        # to name what it thinks the document IS will not call a short essay a rubric.
+        "document_is": {"type": "string"},
+        "reason": {"type": "string"},
+    },
+    "required": ["verdict", "document_is", "reason"],
+    "additionalProperties": False,
+}
+
 EVIDENCE_SCHEMA: dict = {
     "type": "object",
     "properties": {"spans": {"type": "array", "items": {"type": "string"}}},
@@ -210,6 +260,7 @@ def fingerprint() -> dict:
     as a stop rather than a warning.
     """
     return {
+        "fit": {"version": FIT_VERSION, "sha256": _sha(FIT_PROMPT)},
         "evidence": {"version": EVIDENCE_VERSION, "sha256": _sha(EVIDENCE_PROMPT)},
         "score": {"version": SCORE_VERSION, "sha256": _sha(SCORE_PROMPT)},
     }

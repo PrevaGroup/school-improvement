@@ -52,7 +52,7 @@ from ._db import engine
 from ._ids import uuid7
 from .prompts import fingerprint
 from .rater import AnthropicRater, RaterIdentity, Usage
-from . import escalate
+from . import escalate, fit
 from .score import Criterion, Outcome, score_artifact, score_criterion
 
 log = logging.getLogger("scoring.run_scoring")
@@ -115,6 +115,20 @@ _PENDING = text("""
        AND (CAST(:run_id AS text) IS NULL OR a.run_id = CAST(:run_id AS text))
      ORDER BY a.created_at
      LIMIT :limit
+""")
+
+# The task statement, which is the file intake classified as `not_student_work` in the same
+# folder. The plan is specific that it is kept for this: "non-student classification that retains
+# the prompt as the task statement". Without it the fit gate has no task to be an attempt AT, and
+# the question collapses into "is this good writing" — the drift the gate is built to avoid.
+_TASK_STATEMENT = text("""
+    SELECT p.text
+      FROM intake_file f
+      JOIN intake_file p ON p.manifest_id = f.manifest_id
+     WHERE f.file_id = :file_id AND p.status = 'not_student_work'
+       AND p.text IS NOT NULL AND length(p.text) > 0
+     ORDER BY length(p.text) DESC
+     LIMIT 1
 """)
 
 _ALREADY_SCORED = text("""
@@ -399,6 +413,9 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
         done = {r[0] for r in conn.execute(
             _ALREADY_SCORED, {"artifact_id": aid, "config_id": identity.config_id,
                               "pass_n": SCRUTINY_PASS}).all()}
+        task_statement = (conn.execute(
+            _TASK_STATEMENT, {"file_id": artifact["intake_file_id"]}).scalar()
+            if artifact.get("intake_file_id") else None)
 
     remaining = [c for c in criteria if c.node_id not in done]
     if not remaining:
@@ -409,11 +426,27 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
 
     # The calls. Outside any transaction, on purpose — see the module docstring.
     rater = rater_factory(identity)
-    outcomes, usage = score_artifact(body, remaining, rater)
+
+    # Stage B, first, because its entire purpose is to run before the expensive part. One call
+    # decides whether the next several hundred are worth making. It resolves toward admitting on
+    # anything ambiguous — see `scoring/fit.py` for why those two errors are not comparable.
+    verdict, fit_usage = fit.check(task_statement, body, rater)
+    usage = fit_usage
+    if not verdict.admitted:
+        outcomes = [Outcome(node_id=c.node_id, node_version_id=c.node_version_id,
+                            status="not_scorable", reason_code=fit.NOT_THIS_TASK,
+                            reason=verdict.reason,
+                            evidence=verdict.as_evidence())
+                    for c in remaining]
+    else:
+        scored_outcomes, score_usage = score_artifact(body, remaining, rater)
+        outcomes = scored_outcomes
+        usage = usage + score_usage
 
     # The second, deeper look — bounded, on declared triggers, at higher effort. This is the whole
     # of "escalation under a fixed budget" reaching a real path; the module beside it is where the
-    # reasoning lives.
+    # reasoning lives. A gated paper skips it: `not_scorable` is not a trigger, and paying twice
+    # to confirm a document is not an attempt is the opposite of what the gate is for.
     escalated, plan, esc_usage, unchanged = escalate_pass(
         body, remaining, outcomes, policy, identity, rater_factory)
     usage = usage + esc_usage
@@ -464,6 +497,10 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
         log.warning("%s: escalation budget %d spent; %d criteria triggered and were not "
                     "escalated: %s", aid, policy.budget, len(plan.unfunded),
                     ", ".join(plan.unfunded))
+
+    if not verdict.admitted:
+        log.info("%s: the fit gate refused it — %s (%s). %d scoring calls not made.",
+                 aid, verdict.reason, verdict.document_is, len(remaining) * 2)
 
     log.info("%s -> %s: %d event(s), %d call(s)", aid, state, len(rows), usage.calls)
     return usage
