@@ -184,6 +184,12 @@ function who(name: string | null | undefined, id: string | null): string {
 // A set is a binding key, and a paper is in it when every declared part matches. `null` in the
 // scope means "not declared", which is a value a paper can genuinely have — so this compares
 // rather than skipping, and a set of undeclared papers is a real set you can open.
+// The papers a set-level decision would touch, named. The endpoint takes an explicit list
+// rather than a binding key, and this is why: a scope expands quietly when a late paper arrives,
+// and a judgment that silently grew to cover work the teacher never saw is not the judgment they
+// made. So the console sends what it showed.
+export type SetPaper = { artifact_id: string; name: string };
+
 function inScope(r: QueueRow, sc: Scope): boolean {
   return r.section_id === sc.section_id && r.task_id === sc.task_id
       && r.iteration === sc.iteration && r.window_label === sc.window_label;
@@ -271,6 +277,34 @@ export function ReviewConsole() {
     } catch (e) {
       // The database's refusal, passed through. It names the states and says what was wrong with
       // the move, which is more useful than anything this layer could reconstruct.
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // One judgment about one criterion, across the papers on screen. The single-paper override
+  // is deliberately NOT looped: the same decision written N times reads as N raters concurring.
+  async function setOverride(node_id: string, level: number | null, status: string,
+                             reason: string, artifact_ids: string[]) {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.post<{ applied: unknown[]; not_scored_on_this_criterion: string[] }>(
+        "/review/set-override", { node_id, level, status, reason, artifact_ids });
+      // Named, not counted: a paper the decision did not reach still carries the machine's score,
+      // and it is the one thing the teacher has to act on afterwards.
+      if (r.not_scored_on_this_criterion.length) {
+        setError(`Applied to ${r.applied.length}. Not applied to `
+          + `${r.not_scored_on_this_criterion.length} — those papers have no standing score on `
+          + `this criterion, so they still carry whatever the scoring said.`);
+      }
+      if (selected) {
+        const d = await api.get<Detail>(`/review/artifact/${encodeURIComponent(selected)}`);
+        setDetail(d);
+      }
+      await loadQueue();
+    } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -385,7 +419,13 @@ export function ReviewConsole() {
         {detail && detail.state === "unbound"
           ? <Stuck d={detail} busy={busy} onResolve={resolveTo} />
           : detail && <Paper d={detail} delivery={delivery} busy={busy} onMove={move}
-                             onOverride={override} onSaveFeedback={saveFeedback} />}
+                             onOverride={override} onSaveFeedback={saveFeedback}
+                             setPapers={scope
+                               ? shown.map((r) => ({ artifact_id: r.artifact_id,
+                                                     name: who(r.display_name, r.student_id) }))
+                               : null}
+                             setTitle={scopeTitle}
+                             onSetOverride={setOverride} />}
       </section>
     </div>
   );
@@ -481,8 +521,12 @@ function Stuck({ d, busy, onResolve }: {
   );
 }
 
-function Paper({ d, delivery, busy, onMove, onOverride, onSaveFeedback }: {
+function Paper({ d, delivery, busy, onMove, onOverride, onSaveFeedback,
+                setPapers, setTitle, onSetOverride }: {
   d: Detail; delivery: Delivery | null; busy: boolean;
+  setPapers: SetPaper[] | null; setTitle: string;
+  onSetOverride: (node_id: string, level: number | null, status: string, reason: string,
+                  artifact_ids: string[]) => void;
   onMove: (s: string) => void;
   onOverride: (ev: ScoreEvent, level: number | null, status: string, reason: string) => void;
   onSaveFeedback: (message: string) => void;
@@ -544,7 +588,9 @@ function Paper({ d, delivery, busy, onMove, onOverride, onSaveFeedback }: {
         <h3>Scores</h3>
         {p.criteria.map((c) => (
           <CriterionRow key={c.node_id} c={c} ev={current.get(c.node_id) ?? null}
-                        busy={busy} onOverride={onOverride} />
+                        busy={busy} onOverride={onOverride}
+                        setPapers={setPapers} setTitle={setTitle}
+                        onSetOverride={onSetOverride} />
         ))}
       </section>
 
@@ -579,12 +625,16 @@ function Paper({ d, delivery, busy, onMove, onOverride, onSaveFeedback }: {
   );
 }
 
-function CriterionRow({ c, ev, busy, onOverride }: {
+function CriterionRow({ c, ev, busy, onOverride, setPapers, setTitle, onSetOverride }: {
   c: Criterion; ev: ScoreEvent | null; busy: boolean;
+  setPapers: SetPaper[] | null; setTitle: string;
+  onSetOverride: (node_id: string, level: number | null, status: string, reason: string,
+                  artifact_ids: string[]) => void;
   onOverride: (ev: ScoreEvent, level: number | null, status: string, reason: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [applyToSet, setApplyToSet] = useState(false);
   // The level the RECORD currently holds, which is the override's if a teacher made one — not the
   // packet's copy. The packet is what was in front of the teacher when they decided; showing it
   // after an override would show someone their own change had not happened.
@@ -657,8 +707,74 @@ function CriterionRow({ c, ev, busy, onOverride }: {
               </small>
             </div>
           )}
+          {/* A judgment about the class, made once. Only offered inside a set — outside one there
+              is no set to apply it to, and a button that silently meant "every paper you can see"
+              would be a different decision from the one it looks like. */}
+          {!open && !applyToSet && setPapers && setPapers.length > 1 && (
+            <button className="rv-setbtn" disabled={busy} onClick={() => setApplyToSet(true)}>
+              Change for all {setPapers.length} in this set
+            </button>
+          )}
+          {applyToSet && setPapers && (
+            <SetOverridePanel c={c} papers={setPapers} title={setTitle} busy={busy}
+                              onApply={(lvl, st, reason_) => {
+                                onSetOverride(c.node_id, lvl, st, reason_,
+                                              setPapers.map((x) => x.artifact_id));
+                                setApplyToSet(false);
+                              }}
+                              onCancel={() => setApplyToSet(false)} />
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// The confirmation, and most of the design is in what it refuses to skip.
+//
+// It NAMES every paper the decision will touch, because "all 28" is a number and a teacher who
+// approves a number has not seen the set. It REQUIRES a reason, because this is the only record
+// of what the decision was about and it is read by people who were not in the room. And it says
+// plainly that this is one judgment rather than N, because that is the fact the record keeps and
+// the interface is where somebody would otherwise form the opposite impression.
+function SetOverridePanel({ c, papers, title, busy, onApply, onCancel }: {
+  c: Criterion; papers: SetPaper[]; title: string; busy: boolean;
+  onApply: (level: number | null, status: string, reason: string) => void;
+  onCancel: () => void;
+}) {
+  const [why, setWhy] = useState("");
+  const ready = why.trim().length > 0;
+
+  return (
+    <div className="rv-setpanel">
+      <b>{c.criterion_label ?? c.node_id} — for the whole set</b>
+      {title && <div className="rv-mut">{title}</div>}
+      <p>
+        This is recorded as <b>one judgment</b> applied to {papers.length} papers, not as{" "}
+        {papers.length} separate ratings. That distinction is kept in the record: the same
+        decision counted {papers.length} times would look like {papers.length} raters agreeing.
+      </p>
+      <details>
+        <summary>{papers.length} papers this will change</summary>
+        <ul className="rv-setlist">
+          {papers.map((p) => <li key={p.artifact_id}>{p.name}</li>)}
+        </ul>
+      </details>
+      <input value={why} placeholder="why this applies to the whole set (required)"
+             onChange={(e) => setWhy(e.target.value)} />
+      <div className="rv-setacts">
+        {(c.scale_categories ?? []).map((n) => (
+          <button key={n} disabled={busy || !ready}
+                  onClick={() => onApply(n, "scored", why)}>{n}</button>
+        ))}
+        <button disabled={busy || !ready}
+                onClick={() => onApply(null, "abstained", why)}>Can't tell</button>
+        <button disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+      {!ready && <small className="rv-mut">Say why before applying it.</small>}
+      <small className="rv-mut">
+        Papers with no standing score on this criterion are left alone, and named afterwards.
+      </small>
     </div>
   );
 }

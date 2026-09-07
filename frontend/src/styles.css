@@ -465,3 +465,22 @@
                     background: var(--panel); border-radius: 8px; color: var(--muted); cursor: pointer; }
   .rv-back button:hover { color: var(--ink); }
   .rv-scope { font-size: 12px; font-weight: 600; margin-top: 7px; }
+
+  /* One judgment about a class, made once. The panel's job is to make that visible before it
+     happens — the record keeps the distinction and this is where somebody would otherwise form
+     the opposite impression. */
+  .rv-setbtn { font: inherit; font-size: 12px; margin-left: 8px; padding: 5px 11px;
+               border: 1px dashed var(--line); background: none; border-radius: 8px;
+               color: var(--muted); cursor: pointer; }
+  .rv-setbtn:hover { color: var(--ink); border-color: var(--muted); }
+  .rv-setpanel { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--amber);
+                 border-left-width: 4px; border-radius: 8px; background: #fdf7ec;
+                 display: flex; flex-direction: column; gap: 8px; }
+  .rv-setpanel p { margin: 0; font-size: 13px; }
+  .rv-setpanel input { font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; }
+  .rv-setpanel summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+  .rv-setlist { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; column-width: 160px; }
+  .rv-setacts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .rv-setacts button { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line);
+                       background: var(--panel); border-radius: 8px; cursor: pointer; }
+  .rv-setacts button:disabled { opacity: .45; cursor: default; }

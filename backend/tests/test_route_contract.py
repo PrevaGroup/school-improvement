@@ -70,6 +70,9 @@ EXPECTED: dict[str, set[str]] = {
     "/api/review/artifact/{artifact_id}": {"GET"},
     "/api/review/{artifact_id}/state": {"POST"},
     "/api/review/{artifact_id}/override": {"POST"},
+    # One judgment across a class, recorded ONCE. Not a loop over the line above: the same
+    # decision written N times reads as N raters concurring, which is a claim nobody made.
+    "/api/review/set-override": {"POST"},
     "/api/review/{artifact_id}/feedback": {"POST"},
     "/api/review/{artifact_id}/resolve": {"POST"},
     # --- intake: the manifest gate. One confirmation for a folder, not one per paper. ---

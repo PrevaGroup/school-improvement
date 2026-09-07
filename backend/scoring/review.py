@@ -108,6 +108,24 @@ _INSERT_OVERRIDE = text("""
 """)
 
 
+# The event that CURRENTLY stands for one criterion on each of several papers — the newest one
+# that nothing supersedes. A set-level override has to disagree with what the record says now, not
+# with the machine's original score, or a teacher who already corrected one paper by hand would
+# have that correction silently reverted by a decision they made about the class.
+_CURRENT_EVENTS_FOR_NODE = text("""
+    SELECT e.event_id, e.artifact_id, e.node_id, e.status, e.level, e.run_id, e.student_id,
+           e.section_id, e.task_id, e.iteration, e.window_label, e.trait_set_version,
+           e.rubric_version, e.form_variant, e.scoring_configuration_id,
+           e.is_measurement_occasion, e.tenant_id, e.visibility,
+           e.scorer_type, e.scorer_id
+      FROM score_event e
+     WHERE e.artifact_id = ANY(:artifact_ids)
+       AND e.node_id = :node_id
+       AND NOT EXISTS (SELECT 1 FROM score_event l
+                        WHERE l.supersedes_event_id = e.event_id)
+""")
+
+
 # Setting the student and binding in ONE statement, so an artifact can never sit named-but-unbound.
 # Both guards see it: the rebind trigger checks the student change, the transition trigger checks
 # unbound -> bound and refuses a machine.
@@ -244,6 +262,117 @@ def override(artifact_id: str, payload: dict = Body(...), db: Session = Depends(
     return {"event_id": event_id, "supersedes_event_id": prior_id,
             "node_id": prior["node_id"], "status": new_status, "level": level,
             "scorer_id": actor_id}
+
+
+@router.post("/set-override")
+def set_override(payload: dict = Body(...), db: Session = Depends(get_db_public),
+                 principal: dict = Depends(get_current_principal)) -> dict:
+    """One judgment about one criterion, across several papers, recorded once.
+
+    ## Why this is not a loop over the single-paper endpoint
+
+    A teacher who decides "C3 is a 2 for this whole class" has made ONE judgment. Writing it as
+    twenty-eight independent teacher ratings would inflate apparent agreement with nothing — the
+    same decision counted twenty-eight times looks like twenty-eight raters concurring — and it
+    would hide from anyone reading the record later that a single call was made once and applied.
+    `set_override_id` is the column that keeps those two facts apart, `measurement.frames` already
+    knows how to exclude a set override from an estimation frame, and until now nothing wrote it.
+
+    ## Why the caller names the papers
+
+    An explicit list, not a binding key. The console shows which papers the decision will touch
+    and the teacher confirms that set — because a scope expands quietly when a late paper arrives,
+    and a judgment that silently grew to cover work the teacher never saw is not the judgment they
+    made. Same argument as the manifest gate: a set is a proposal until a person confirms it.
+
+    ## All of it, or none of it
+
+    One transaction. A set override that landed on nineteen of twenty-eight papers is not a
+    partial success, it is a decision that no longer means what it says — and the nine left behind
+    would carry the machine's score with no record that anybody disagreed.
+    """
+    node_id = str(payload.get("node_id") or "")
+    artifact_ids = payload.get("artifact_ids") or []
+    if not node_id or not isinstance(artifact_ids, list) or not artifact_ids:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "a set override names one criterion and the papers it applies to")
+
+    new_status = str(payload.get("status") or "scored")
+    level = payload.get("level")
+    if (new_status == "scored") != (level is not None):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "a level exists if and only if the status is `scored`. An abstention with a number "
+            "on it is a claim nobody made.")
+
+    # A set override is a judgment about a class, and the reason is the only place its scope is
+    # explained to whoever reads the record later. A blank one makes the decision unreadable.
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "say why this applies to the whole set — it is the only record of what the decision "
+            "was about, and it is read by people who were not in the room")
+
+    rows = [dict(r) for r in db.execute(
+        _CURRENT_EVENTS_FOR_NODE,
+        {"artifact_ids": list(artifact_ids), "node_id": node_id}).mappings()]
+    found = {r["artifact_id"] for r in rows}
+    # Named and NOT scored on this criterion. Reported rather than skipped silently: a teacher who
+    # selected twenty-eight papers and changed twenty-six is owed the two, because those two still
+    # carry whatever the machine said.
+    missing = [a for a in artifact_ids if a not in found]
+
+    if not rows:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"none of those papers has a standing score on {node_id}")
+
+    actor_id = _bind_teacher(db, principal)
+    set_id = uuid7()
+    written = []
+    try:
+        for prior in rows:
+            event_id = uuid7()
+            db.execute(_INSERT_OVERRIDE, {
+                "event_id": event_id,
+                "artifact_id": prior["artifact_id"],
+                "run_id": prior["run_id"],
+                "student_id": prior["student_id"],
+                "section_id": prior["section_id"],
+                "task_id": prior["task_id"],
+                "iteration": prior["iteration"],
+                "window_label": prior["window_label"],
+                "node_id": prior["node_id"],
+                "trait_set_version": prior["trait_set_version"],
+                "rubric_version": prior["rubric_version"],
+                "form_variant": prior["form_variant"],
+                "scoring_configuration_id": prior["scoring_configuration_id"],
+                "scorer_id": actor_id,
+                "status": new_status,
+                "level": level,
+                "reason": reason,
+                "is_measurement_occasion": prior["is_measurement_occasion"],
+                "supersedes_event_id": prior["event_id"],
+                # The one thing this endpoint exists to write.
+                "set_override_id": set_id,
+                "idempotency_key": f"{prior['artifact_id']}|{node_id}|set|{set_id}",
+                "tenant_id": prior["tenant_id"],
+                "visibility": prior["visibility"]})
+            written.append({"artifact_id": prior["artifact_id"], "event_id": event_id,
+                            "was": prior["level"], "was_status": prior["status"]})
+        db.commit()
+    except DBAPIError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, _trigger_message(exc)) from exc
+
+    log.info("set override %s on %s: %d papers by %s", set_id, node_id, len(written), actor_id)
+    return {"set_override_id": set_id, "node_id": node_id, "status": new_status, "level": level,
+            "scorer_id": actor_id, "applied": written,
+            # Named, not counted. A paper this decision did not reach is the one thing a teacher
+            # has to act on afterwards.
+            "not_scored_on_this_criterion": missing}
 
 
 @router.post("/{artifact_id}/resolve")
