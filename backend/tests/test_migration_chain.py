@@ -1,0 +1,223 @@
+"""Every migration is reachable, and the chain is one unbroken line.
+
+WHY THIS EXISTS. On 2026-09-05 six migrations (0008-0013) sat on disk, imported cleanly, and were
+asserted on by their modules' own tests — and Alembic could not see any of them, because their
+directories were missing from `version_locations` in alembic.ini. `alembic upgrade head` ran to
+0007 and reported success. Nothing was wrong; the work simply was not there.
+
+That is the same shape as the trap `pytest.ini` documents about `testpaths`: a path missing from a
+registry is not an error, it is an absence, and absences report green. Both traps are now covered by
+a test rather than by remembering.
+"""
+from __future__ import annotations
+
+import configparser
+import pathlib
+import re
+
+BACKEND = pathlib.Path(__file__).resolve().parent.parent
+REVISION_RE = re.compile(r'^revision\s*=\s*["\']([^"\']+)["\']', re.M)
+DOWN_RE = re.compile(r'^down_revision\s*=\s*(?:["\']([^"\']+)["\']|None)', re.M)
+
+
+def _configured_locations() -> list[pathlib.Path]:
+    cfg = configparser.ConfigParser()
+    cfg.read(BACKEND / "alembic.ini")
+    raw = cfg["alembic"]["version_locations"]
+    return [BACKEND / p for p in raw.split()]
+
+
+def _migration_files() -> list[pathlib.Path]:
+    """Every file on disk that declares a revision, wherever it lives."""
+    out = []
+    for path in BACKEND.rglob("*.py"):
+        if "migrations" not in path.parts or path.name.startswith("_"):
+            continue
+        if "__pycache__" in path.parts or path.name == "env.py":
+            continue
+        if REVISION_RE.search(path.read_text(encoding="utf8", errors="replace")):
+            out.append(path)
+    return sorted(out)
+
+
+def _revisions() -> dict[str, tuple[str | None, pathlib.Path]]:
+    revs = {}
+    for f in _migration_files():
+        text = f.read_text(encoding="utf8", errors="replace")
+        rev = REVISION_RE.search(text).group(1)
+        down_match = DOWN_RE.search(text)
+        down = down_match.group(1) if down_match else None
+        revs[rev] = (down, f)
+    return revs
+
+
+def test_every_migration_directory_is_registered():
+    """A revision file Alembic cannot see is not an error — it is an absence, and absences report
+    green. This is the check that would have caught six invisible migrations."""
+    configured = {p.resolve() for p in _configured_locations()}
+    missing = sorted({f.parent.resolve() for f in _migration_files()} - configured)
+    assert not missing, (
+        "migration directories not listed in alembic.ini `version_locations`: "
+        + ", ".join(str(p.relative_to(BACKEND)) for p in missing)
+        + ". `alembic upgrade head` will skip them silently and report success."
+    )
+
+
+def test_every_configured_location_exists():
+    """The mirror failure: a stale entry pointing at a directory that has moved."""
+    missing = [p for p in _configured_locations() if not p.is_dir()]
+    assert not missing, f"version_locations names directories that do not exist: {missing}"
+
+
+def test_the_chain_is_unbroken():
+    """One line, no orphans. A revision whose `down_revision` names nothing real splits the chain
+    into two heads, and Alembic will refuse to upgrade rather than pick one."""
+    revs = _revisions()
+    dangling = {rev: down for rev, (down, _) in revs.items()
+                if down is not None and down not in revs}
+    assert not dangling, f"down_revision points at revisions that do not exist: {dangling}"
+
+
+def test_there_is_exactly_one_base_and_one_head():
+    revs = _revisions()
+    bases = [r for r, (down, _) in revs.items() if down is None]
+    downs = {down for down, _ in revs.values() if down}
+    heads = [r for r in revs if r not in downs]
+    assert len(bases) == 1, f"expected one base revision, found {sorted(bases)}"
+    assert len(heads) == 1, (
+        f"expected one head, found {sorted(heads)} — a fork means `upgrade head` is ambiguous")
+
+
+def test_no_two_migrations_claim_the_same_revision():
+    """Two files with the same `revision` is a merge conflict that resolved badly, and Alembic will
+    load whichever it happens to see first."""
+    seen: dict[str, pathlib.Path] = {}
+    clashes = []
+    for f in _migration_files():
+        rev = REVISION_RE.search(f.read_text(encoding="utf8", errors="replace")).group(1)
+        if rev in seen:
+            clashes.append((rev, seen[rev].name, f.name))
+        seen[rev] = f
+    assert not clashes, f"duplicate revision ids: {clashes}"
+
+
+def test_the_head_reaches_the_base():
+    """Walk it, rather than trusting the counts above to imply connectivity."""
+    revs = _revisions()
+    downs = {down for down, _ in revs.values() if down}
+    head = next(r for r in revs if r not in downs)
+    walked, cursor = 0, head
+    while cursor is not None:
+        walked += 1
+        cursor = revs[cursor][0]
+        assert walked <= len(revs) + 1, "cycle in the migration chain"
+    assert walked == len(revs), (
+        f"walked {walked} revisions from head but {len(revs)} exist — some are unreachable")
+
+
+def test_no_constraint_name_is_doubled():
+    """The naming convention is `ck_%(table_name)s_%(constraint_name)s`, so an explicit CHECK name
+    that already carries the prefix gets it a second time — `ck_registry_node_ck_registry_node_...`.
+
+    Found on 2026-09-05 by reading the rendered SQL, not by any test: the models had been corrected
+    but the migrations had not, so the database would have ended up with different constraint names
+    than the models declare, and the next `--autogenerate` would have tried to reconcile the
+    difference. Unique constraints are unaffected — their template has no `constraint_name` token,
+    so an explicit name passes through.
+    """
+    from app.models import Base
+    import corpus.models, measurement.models, pooling.models  # noqa: F401
+    import registry.models, roster.models, scoring.models     # noqa: F401
+
+    doubled = sorted(
+        c.name for table in Base.metadata.tables.values() for c in table.constraints
+        if c.name and c.name.count(f"ck_{table.name}_") > 1)
+    assert not doubled, (
+        f"constraint names carry the convention prefix twice: {doubled}. "
+        f"Name the constraint bare (`state`, not `ck_artifact_state`) and let the convention "
+        f"expand it.")
+
+
+def test_migration_check_names_are_bare():
+    """The same rule at the source: a CHECK in a migration must not spell its own prefix, or the
+    database and the models disagree about what the constraint is called."""
+    offenders = []
+    for f in _migration_files():
+        for line in f.read_text(encoding="utf8", errors="replace").splitlines():
+            if 'name="ck_' in line:
+                offenders.append(f"{f.name}: {line.strip()}")
+    assert not offenders, (
+        "CHECK constraints naming their own `ck_` prefix — the convention adds it: "
+        + "; ".join(offenders))
+
+
+def _module_migration_text() -> tuple[str, set[str]]:
+    """The SQL of the module migrations (0008 onward), and the tables they create.
+
+    Scoped to those deliberately: the tables in 0001-0007 predate this convention, and folding
+    them in would mean either a large rename or an exemption list, both of which are separate
+    decisions rather than something to smuggle into a test.
+    """
+    bodies, tables = [], set()
+    for f in _migration_files():
+        body = f.read_text(encoding="utf8", errors="replace")
+        rev = REVISION_RE.search(body).group(1)
+        if not (rev.isdigit() and int(rev) >= 8):
+            continue
+        bodies.append(body)
+        tables.update(re.findall(r"""create_table\(\s*["']([a-z_0-9]+)["']""", body))
+        tables.update(re.findall(r"CREATE TABLE\s+([a-z_0-9]+)", body))
+    return "\n".join(bodies), tables
+
+
+def _declared_tables():
+    from app.models import Base
+    import corpus.models, measurement.models, pooling.models  # noqa: F401
+    import registry.models, roster.models, scoring.models     # noqa: F401
+    return Base.metadata.tables
+
+
+def test_every_unique_constraint_name_follows_the_convention():
+    """`uq` is the one template with no `constraint_name` token, so an explicit name passes
+    straight through instead of being expanded. That makes it the one place where a model and a
+    migration can name the same constraint two different things and nothing notices."""
+    offenders = sorted(
+        f"{t.name}.{c.name}" for t in _declared_tables().values() for c in t.constraints
+        if type(c).__name__ == "UniqueConstraint" and c.name
+        and not str(c.name).startswith("uq_"))
+    assert not offenders, (
+        f"unique constraints not named uq_*: {offenders}. Unlike `ck`, the convention cannot "
+        f"expand these — the name you write is the name you get, in both places.")
+
+
+def test_every_declared_constraint_name_exists_in_a_migration():
+    """The database and the models must agree on what a constraint is CALLED.
+
+    Found on 2026-09-05: ten of eleven unique constraints across the seven module tables had one
+    name in the models and a different one in the database — `version` against
+    `uq_registry_node_version`, and so on for the rest. Nothing raised. The next `--autogenerate`
+    would have proposed dropping and recreating all ten, and any code catching a named constraint
+    violation would have been catching a name that does not exist.
+
+    CHECK names are compared bare, because the models carry the convention-expanded form
+    (`ck_<table>_<name>`) while the migrations correctly write the bare one.
+    """
+    sql, created = _module_migration_text()
+    missing = []
+    for table in _declared_tables().values():
+        if table.name not in created:
+            continue
+        for c in table.constraints:
+            kind = type(c).__name__
+            if kind == "UniqueConstraint" and c.name:
+                needle = str(c.name)
+            elif kind == "CheckConstraint" and c.name:
+                needle = str(c.name).removeprefix(f"ck_{table.name}_")
+            else:
+                continue
+            if f'"{needle}"' not in sql and f"'{needle}'" not in sql:
+                missing.append(f"{table.name}.{c.name} (looked for {needle!r})")
+    assert not missing, (
+        "constraints declared in the models under names no migration creates:\n  "
+        + "\n  ".join(sorted(missing))
+        + "\n\nThe database and the models disagree about what these are called.")

@@ -18,9 +18,11 @@ from .auth_proxy import router as auth_proxy_router
 from .chat import router as chat_router
 from .db import get_db
 from .evals_view import router as evals_view_router
+from .review_view import router as review_view_router
 from .marts import router as marts_router
 from .models import DimSchool, FactMetric
 from .plans import router as plans_router
+from scoring.review import router as review_actions_router
 from .security import assert_dev_mode_not_in_production, get_current_principal, is_admin
 
 # Fail the deploy, not the security model: DEV_MODE + a production environment means the
@@ -56,6 +58,12 @@ app.include_router(plans_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 app.include_router(marts_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 app.include_router(chat_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 app.include_router(evals_view_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
+# The writing subsystem's review surface, split the way the modules are: `serving` reads the queue
+# and the packet, `scoring` owns the teacher's moves because it owns the tables they write. Both
+# mount under the same /api/review prefix, which is a composition-root decision — neither module
+# knows the other exists.
+app.include_router(review_view_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
+app.include_router(review_actions_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 # Firebase's reserved /__/* namespace, reverse-proxied so sign-in runs on OUR domain
 # (custom authDomain — see app/auth_proxy.py). Deliberately UNGATED: it serves the sign-in
 # flow to users who don't have a token yet — same access class as /health and the SPA shell.

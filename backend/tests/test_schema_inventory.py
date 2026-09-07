@@ -52,6 +52,13 @@ from app.models import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
 import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
 import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback
+import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_state_transition
+import roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
+import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
+import pooling.models  # noqa: E402,F401  — pooling_aggregation_consent, pooling_aggregate_run
+import intake.models  # noqa: E402,F401  — intake_manifest, intake_file (2)
+import registry.models  # noqa: E402,F401  — registry_node, registry_task, registry_scoring_*, lint ack (7)
+import corpus.models  # noqa: E402,F401  — corpus_source, corpus_paper, corpus_score, corpus_discourse_span
 
 # table -> the module that DECLARES it (whose models.py the class lives in). That's what this
 # file can actually check: Base.metadata is built from declarations, not from who writes rows.
@@ -103,6 +110,53 @@ EXPECTED_TABLES: dict[str, str] = {
     "eval_run": "evals",
     "eval_result": "evals",
     "feedback": "evals",
+    # --- scoring's tables — declared in scoring/models.py. Hold identifiable student
+    #     writing and carry tenant_id, but are NOT in PRIVATE_TABLES: turning RLS on is a
+    #     deliberate core move made when the subsystem first holds real student work, not
+    #     a side effect of the module existing. Same posture as evals. ---
+    "artifact": "scoring",
+    "score_event": "scoring",
+    "artifact_state_transition": "scoring",
+    "artifact_composition": "scoring",
+    # Created by raw SQL inside 0008's trigger block; declared in models.py anyway,
+    # because a table absent from Base.metadata is one autogenerate away from a DROP.
+    "artifact_transition_rule": "scoring",
+    # --- roster's tables — declared in roster/models.py. The section-scoped
+    #     authorisation edge; same deferred-RLS posture as scoring. ---
+    "roster_student": "roster",
+    "roster_section": "roster",
+    "roster_enrollment": "roster",
+    "roster_section_staff": "roster",
+    # --- measurement's tables — declared in measurement/models.py. The estimator
+    #     itself is Phase 6; these record what any estimate was fitted over. ---
+    "estimation_frame": "measurement",
+    "estimation_frame_member": "measurement",
+    "measurement_deletion_tombstone": "measurement",
+    # --- pooling's tables — declared in pooling/models.py. Tenant-NEUTRAL by
+    #     design: they belong to no district, which is what lets a principal with
+    #     no tenant mapping read them. ---
+    "pooling_aggregation_consent": "pooling",
+    "pooling_aggregate_run": "pooling",
+    # --- registry's tables — declared in registry/models.py. Public reference
+    #     content, no tenancy: a node means the same thing in every district. ---
+    "registry_node": "registry",
+    "registry_node_version": "registry",
+    "registry_task": "registry",
+    "registry_scoring_site": "registry",
+    "registry_scoring_site_node": "registry",
+    "registry_scoring_configuration": "registry",
+    "registry_lint_acknowledgment": "registry",
+    "intake_manifest": "intake",
+    "intake_file": "intake",
+    "registry_skill": "registry",
+    "registry_rubric": "registry",
+    "registry_rubric_trait": "registry",
+    # --- corpus tables — declared in corpus/models.py. Public reference content:
+    #     the anchor papers, identical for every district. ---
+    "corpus_source": "corpus",
+    "corpus_paper": "corpus",
+    "corpus_score": "corpus",
+    "corpus_discourse_span": "corpus",
 }
 
 
@@ -153,6 +207,36 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "eval_run": "0006_eval_tables.py",
     "eval_result": "0006_eval_tables.py",
     "feedback": "0006_eval_tables.py",
+    "artifact": "0008_scoring_tables.py",
+    "score_event": "0008_scoring_tables.py",
+    "artifact_state_transition": "0008_scoring_tables.py",
+    "artifact_composition": "0017_artifact_composition.py",
+    "artifact_transition_rule": "0008_scoring_tables.py",
+    "roster_student": "0009_roster_tables.py",
+    "roster_section": "0009_roster_tables.py",
+    "roster_enrollment": "0009_roster_tables.py",
+    "roster_section_staff": "0009_roster_tables.py",
+    "estimation_frame": "0010_measurement_frames.py",
+    "estimation_frame_member": "0010_measurement_frames.py",
+    "measurement_deletion_tombstone": "0010_measurement_frames.py",
+    "pooling_aggregation_consent": "0011_pooling_seam.py",
+    "pooling_aggregate_run": "0011_pooling_seam.py",
+    "registry_node": "0012_registry_tables.py",
+    "registry_node_version": "0012_registry_tables.py",
+    "registry_task": "0012_registry_tables.py",
+    "registry_scoring_site": "0012_registry_tables.py",
+    "registry_scoring_site_node": "0012_registry_tables.py",
+    "registry_scoring_configuration": "0012_registry_tables.py",
+    "registry_lint_acknowledgment": "0015_lint_acknowledgment.py",
+    "intake_manifest": "0021_intake_tables.py",
+    "intake_file": "0021_intake_tables.py",
+    "registry_skill": "0019_rubric_and_uuids.py",
+    "registry_rubric": "0019_rubric_and_uuids.py",
+    "registry_rubric_trait": "0019_rubric_and_uuids.py",
+    "corpus_source": "0013_corpus_tables.py",
+    "corpus_paper": "0013_corpus_tables.py",
+    "corpus_score": "0013_corpus_tables.py",
+    "corpus_discourse_span": "0013_corpus_tables.py",
 }
 
 

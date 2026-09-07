@@ -1,0 +1,358 @@
+-- Scoring subsystem smoke test — does the release authority actually hold?
+--
+--   PGPASSWORD=$(gcloud secrets versions access latest --secret=sip-migrator-password) \
+--   psql "host=127.0.0.1 dbname=sip user=sip_migrator" -f sql/20_scoring_smoketest.sql 1>&2
+--
+-- Companion to 10_rls_smoketest.sql, and the same idea: prove an invariant by ATTEMPTING the thing
+-- that must fail. Creating a trigger successfully says nothing about whether it fires — every
+-- function in 0008-0012 was created without error and none had ever been provoked.
+--
+-- Everything happens inside one transaction and is rolled back. Nothing persists, and it is safe to
+-- run against a live database.
+
+\set ON_ERROR_STOP on
+\timing off
+BEGIN;
+
+CREATE OR REPLACE FUNCTION pg_temp.expect_fail(sql text, what text) RETURNS void AS $$
+BEGIN
+    BEGIN
+        EXECUTE sql;
+    EXCEPTION WHEN others THEN
+        RAISE NOTICE 'PASS  % (blocked: %)', what, replace(SQLERRM, E'\n', ' ');
+        RETURN;
+    END;
+    RAISE EXCEPTION 'FAIL  % — this was allowed and must not be', what;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION pg_temp.expect_ok(sql text, what text) RETURNS void AS $$
+BEGIN
+    EXECUTE sql;
+    RAISE NOTICE 'PASS  %', what;
+END;
+$$ LANGUAGE plpgsql;
+
+-- --------------------------------------------------------------------------- --
+-- Fixtures. `public` already exists in dim_tenant.
+-- --------------------------------------------------------------------------- --
+INSERT INTO artifact (artifact_id, run_id, content_hash, state, tenant_id, visibility)
+VALUES ('sm-art-1', 'sm-run', 'hash-1', 'unbound', 'public', 'public'),
+       ('sm-art-2', 'sm-run', 'hash-2', 'bound',   'public', 'public');
+
+INSERT INTO score_event (event_id, artifact_id, run_id, node_id, scorer_type, status,
+                         level, idempotency_key, tenant_id, visibility)
+VALUES ('sm-ev-1', 'sm-art-2', 'sm-run', 'ci', 'ai', 'scored', 3, 'sm-idem-1',
+        'public', 'public');
+
+-- --------------------------------------------------------------------------- --
+-- 1. The release authority. The claim the whole product rests on.
+-- --------------------------------------------------------------------------- --
+SELECT set_config('app.actor_type', 'machine', true);
+
+-- THE test. It must be attempted from `in_review`, where `released` IS a legal move — from any
+-- other state the transition-legality check fires first and the actor check is never reached, which
+-- passes for the wrong reason and proves nothing. That is exactly what the first version of this
+-- file did.
+--
+-- sm-art-3 is walked to in_review entirely by machine moves, so reaching the gate proves the
+-- machine got there legitimately and was stopped only at the authority.
+INSERT INTO artifact (artifact_id, run_id, content_hash, state, tenant_id, visibility)
+VALUES ('sm-art-3', 'sm-run', 'hash-3', 'bound', 'public', 'public');
+UPDATE artifact SET state='scored'    WHERE artifact_id='sm-art-3';
+UPDATE artifact SET state='composed'  WHERE artifact_id='sm-art-3';
+UPDATE artifact SET state='in_review' WHERE artifact_id='sm-art-3';
+
+DO $$
+DECLARE code text;
+BEGIN
+    BEGIN
+        UPDATE artifact SET state='released' WHERE artifact_id='sm-art-3';
+    EXCEPTION WHEN others THEN
+        GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+        IF code = '42501' THEN
+            RAISE NOTICE 'PASS  a machine cannot release from in_review (insufficient_privilege)';
+            RETURN;
+        END IF;
+        RAISE EXCEPTION 'FAIL  blocked, but by the wrong check (SQLSTATE %): %', code, SQLERRM;
+    END;
+    RAISE EXCEPTION 'FAIL  A MACHINE RELEASED AN ARTIFACT. The authority claim does not hold.';
+END $$;
+
+-- An unset actor must be treated as a machine: a code path that forgot to say who it is cannot
+-- release by omission.
+SELECT set_config('app.actor_type', '', true);
+DO $$
+DECLARE code text;
+BEGIN
+    BEGIN
+        UPDATE artifact SET state='released' WHERE artifact_id='sm-art-3';
+    EXCEPTION WHEN others THEN
+        GET STACKED DIAGNOSTICS code = RETURNED_SQLSTATE;
+        IF code = '42501' THEN
+            RAISE NOTICE 'PASS  an unset actor cannot release (defaults to machine)';
+            RETURN;
+        END IF;
+        RAISE EXCEPTION 'FAIL  wrong check (SQLSTATE %): %', code, SQLERRM;
+    END;
+    RAISE EXCEPTION 'FAIL  AN UNSET ACTOR RELEASED AN ARTIFACT.';
+END $$;
+SELECT set_config('app.actor_type', 'machine', true);
+
+SELECT pg_temp.expect_fail(
+  $$UPDATE artifact SET state='released' WHERE artifact_id='sm-art-2'$$,
+  'bound -> released is refused on legality, before the actor is even considered');
+
+SELECT pg_temp.expect_fail(
+  $$UPDATE artifact SET state='released' WHERE artifact_id='sm-art-1'$$,
+  'unbound -> released is not a legal move at all');
+
+SELECT pg_temp.expect_fail(
+  $$UPDATE artifact SET state='in_review' WHERE artifact_id='sm-art-1'$$,
+  'unbound -> in_review skips binding');
+
+-- The machine may make machine moves.
+SELECT pg_temp.expect_ok(
+  $$UPDATE artifact SET state='scored' WHERE artifact_id='sm-art-2'$$,
+  'a machine may score a bound artifact');
+
+-- A teacher may make any legal move. An unset actor defaults to machine, so this is the only
+-- way to reach `released` — which is the point.
+SELECT set_config('app.actor_type', 'teacher', true);
+SELECT set_config('app.actor_id', 'sm-teacher', true);
+
+SELECT pg_temp.expect_ok(
+  $$UPDATE artifact SET state='composed'  WHERE artifact_id='sm-art-2'$$,
+  'teacher: scored -> composed');
+SELECT pg_temp.expect_ok(
+  $$UPDATE artifact SET state='in_review' WHERE artifact_id='sm-art-2'$$,
+  'teacher: composed -> in_review');
+SELECT pg_temp.expect_ok(
+  $$UPDATE artifact SET state='released'  WHERE artifact_id='sm-art-2'$$,
+  'teacher: in_review -> released');
+
+SELECT pg_temp.expect_fail(
+  $$UPDATE artifact SET state='in_review' WHERE artifact_id='sm-art-2'$$,
+  'released is terminal — supersession is a new artifact, not a move backwards');
+
+-- Every move was recorded, with the actor who made it.
+DO $$
+DECLARE n int; who text;
+BEGIN
+    SELECT count(*), max(actor_id) INTO n, who
+      FROM artifact_state_transition
+     WHERE artifact_id='sm-art-2' AND to_state='released';
+    IF n = 1 AND who = 'sm-teacher' THEN
+        RAISE NOTICE 'PASS  the release was recorded against sm-teacher';
+    ELSE
+        RAISE EXCEPTION 'FAIL  release audit: % rows, actor %', n, who;
+    END IF;
+END $$;
+
+-- The rebind rule (0023). A teacher may name the author of a paper nobody was matched to, and
+-- may not change that answer once the paper carries scores, a review and a delivery record —
+-- pointing that history at a different person manufactures a false record for two people at once.
+INSERT INTO artifact (artifact_id, run_id, content_hash, state, tenant_id, visibility)
+VALUES ('sm-art-4', 'sm-run', 'hash-4', 'unbound', 'public', 'public');
+
+SELECT set_config('app.actor_type', 'teacher', true);
+SELECT pg_temp.expect_ok(
+  $$UPDATE artifact SET student_id='sm-stu-1', state='bound' WHERE artifact_id='sm-art-4'$$,
+  'a teacher may name the author of an unbound paper');
+
+SELECT pg_temp.expect_fail(
+  $$UPDATE artifact SET student_id='sm-stu-2' WHERE artifact_id='sm-art-4'$$,
+  'a bound paper cannot be reassigned to a different student');
+
+INSERT INTO artifact (artifact_id, run_id, content_hash, state, tenant_id, visibility)
+VALUES ('sm-art-5', 'sm-run', 'hash-5', 'unbound', 'public', 'public');
+UPDATE artifact SET state='withheld' WHERE artifact_id='sm-art-5';
+DO $$
+DECLARE code text;
+BEGIN
+    -- sm-art-5 carries NO student, so the "already bound" branch cannot fire and this reaches the
+    -- state branch it is named for. Asserting the MESSAGE as well as the failure, because a check
+    -- that passes on the wrong branch is a check that proves nothing — which is what the previous
+    -- version of this one did.
+    BEGIN
+        UPDATE artifact SET student_id='sm-stu-4' WHERE artifact_id='sm-art-5';
+    EXCEPTION WHEN others THEN
+        IF SQLERRM LIKE '%not unbound%' THEN
+            RAISE NOTICE 'PASS  a student cannot be named outside `unbound`, even when none is set';
+            RETURN;
+        END IF;
+        RAISE EXCEPTION 'FAIL  blocked by the wrong branch: %', SQLERRM;
+    END;
+    RAISE EXCEPTION 'FAIL  a student was named on a withheld artifact.';
+END $$;
+
+SELECT set_config('app.actor_type', 'machine', true);
+
+-- --------------------------------------------------------------------------- --
+-- 2. Scores append; they never change.
+-- --------------------------------------------------------------------------- --
+SELECT pg_temp.expect_fail(
+  $$UPDATE score_event SET level=4 WHERE event_id='sm-ev-1'$$,
+  'a score cannot be edited — an override appends');
+SELECT pg_temp.expect_fail(
+  $$DELETE FROM score_event WHERE event_id='sm-ev-1'$$,
+  'a score cannot be deleted');
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO score_event (event_id, artifact_id, run_id, node_id, scorer_type, status,
+                             level, idempotency_key, tenant_id, visibility)
+    VALUES ('sm-ev-dup','sm-art-2','sm-run','ci','ai','scored',3,'sm-idem-1','public','public')$$,
+  'a resumed run cannot double an observation');
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO score_event (event_id, artifact_id, run_id, node_id, scorer_type, status,
+                             level, idempotency_key, tenant_id, visibility)
+    VALUES ('sm-ev-2','sm-art-2','sm-run','ev','ai','abstained',2,'sm-idem-2','public','public')$$,
+  'an abstention cannot carry a level');
+
+-- --------------------------------------------------------------------------- --
+-- 3. Deletion marks the frames it invalidates, in the same transaction.
+-- --------------------------------------------------------------------------- --
+INSERT INTO estimation_frame (frame_id, frame_key, version, definition, definition_hash,
+                              status, tenant_id, visibility)
+VALUES ('sm-frame', 'sm', 1, '{"windows":["fall 2026"]}'::jsonb, 'deadbeef', 'active',
+        'public', 'public');
+INSERT INTO estimation_frame_member (frame_id, event_id, enters_calibration,
+                                     tenant_id, visibility)
+VALUES ('sm-frame', 'sm-ev-1', true, 'public', 'public');
+
+UPDATE score_event SET student_id='sm-student' WHERE false;  -- no-op; the trigger blocks UPDATE
+DO $$
+BEGIN
+    -- The event was inserted without a student_id, so give the tombstone something to match on by
+    -- targeting the artifact instead — same code path, different subject_type.
+    INSERT INTO measurement_deletion_tombstone
+        (tombstone_id, subject_type, subject_id, reason, tenant_id, visibility)
+    VALUES ('sm-tomb', 'artifact', 'sm-art-2', 'smoke test', 'public', 'public');
+END $$;
+
+DO $$
+DECLARE st text; marked int;
+BEGIN
+    SELECT status INTO st FROM estimation_frame WHERE frame_id='sm-frame';
+    SELECT frames_marked_stale INTO marked
+      FROM measurement_deletion_tombstone WHERE tombstone_id='sm-tomb';
+    IF st = 'stale' AND marked = 1 THEN
+        RAISE NOTICE 'PASS  a tombstone marked the frame stale in the same transaction (% frame)',
+                     marked;
+    ELSE
+        RAISE EXCEPTION 'FAIL  frame status %, frames_marked_stale % — GET DIAGNOSTICS or the '
+                        'join is wrong', st, marked;
+    END IF;
+END $$;
+
+SELECT pg_temp.expect_fail(
+  $$UPDATE estimation_frame SET definition='{"windows":["spring 2027"]}'::jsonb
+     WHERE frame_id='sm-frame'$$,
+  'an active frame definition is frozen');
+
+-- --------------------------------------------------------------------------- --
+-- 4. Registry identity.
+-- --------------------------------------------------------------------------- --
+INSERT INTO registry_node (node_id, standard_code, criterion_label, grade_band,
+                           scale_categories, kind)
+VALUES ('00000000-0000-4000-8000-000000000001', 'RH.11-12.6', 'point of view', '11-12', '[1,2,3,4]'::jsonb, 'anchor');
+
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO registry_node (node_id, standard_code, criterion_label, grade_band,
+                               scale_categories, kind)
+    VALUES ('00000000-0000-4000-8000-000000000002','RI.11-12.6','x','11-12','[3]'::jsonb,'anchor')$$,
+  'a one-category scale is not fittable');
+
+SELECT pg_temp.expect_fail(
+  $$UPDATE registry_node SET scale_categories='[1,2,3]'::jsonb WHERE node_id='00000000-0000-4000-8000-000000000001'$$,
+  'a node scale is its identity and cannot change');
+
+INSERT INTO registry_node_version (node_version_id, node_id, version, descriptors, status)
+VALUES ('00000000-0000-4000-8000-000000000001:1', '00000000-0000-4000-8000-000000000001', 1, '{"1":"a","2":"b","3":"c","4":"d"}'::jsonb, 'published');
+SELECT pg_temp.expect_fail(
+  $$UPDATE registry_node_version SET descriptors='{"1":"changed"}'::jsonb
+     WHERE node_version_id='00000000-0000-4000-8000-000000000001:1'$$,
+  'published descriptors are frozen');
+
+-- Exactly one published version per node (0014). Two would make the scoring driver's trait-set
+-- join return the node twice — scored twice, under two wordings, and nothing would raise.
+INSERT INTO registry_node_version (node_version_id, node_id, version, descriptors, status)
+VALUES ('sm-nv2', '00000000-0000-4000-8000-000000000001', 2, '{"1":"a","2":"b","3":"c","4":"d"}'::jsonb, 'draft');
+SELECT pg_temp.expect_ok(
+  $$SELECT 1$$, 'a draft second version is fine — history is not what is bounded');
+SELECT pg_temp.expect_fail(
+  $$UPDATE registry_node_version SET status='published' WHERE node_version_id='sm-nv2'$$,
+  'a node cannot have two published versions at once');
+
+-- Exactly one active configuration per key (0014). Two active rows is an ambiguous rater.
+INSERT INTO registry_scoring_configuration
+    (config_id, config_key, version, model_id, effort, prompt_versions, normalization_version,
+     definition_hash, status, promoted_by, rationale)
+VALUES ('sm-cfg-1', 'sm-key', 1, 'claude-opus-5', 'high', '{}'::jsonb, '1', 'h1', 'active',
+        'sm-admin', 'smoke test');
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO registry_scoring_configuration
+        (config_id, config_key, version, model_id, effort, prompt_versions,
+         normalization_version, definition_hash, status, promoted_by, rationale)
+    VALUES ('sm-cfg-2','sm-key',2,'claude-opus-5','high','{}'::jsonb,'1','h2','active',
+            'sm-admin','smoke test')$$,
+  'a config key cannot have two active configurations');
+
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO registry_scoring_configuration
+        (config_id, config_key, version, model_id, effort, prompt_versions,
+         normalization_version, definition_hash, status)
+    VALUES ('sm-cfg-3','sm-key-2',1,'claude-opus-5','high','{}'::jsonb,'1','h3','active')$$,
+  'a promotion with no recorded reason is a change nobody can explain later');
+
+-- The rubric layer (0019). A trait is not owned by a rubric — the same identifier in two rubrics
+-- is how commonality gets declared — so these check the identity rules the many-to-many needs.
+INSERT INTO registry_rubric (rubric_id, name, publisher, grade_band, status)
+VALUES ('00000000-0000-4000-8000-0000000000aa', 'Smoke rubric', 'test', '11-12', 'draft');
+
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO registry_rubric (rubric_id, name, status)
+    VALUES ('not-a-uuid', 'Bad', 'draft')$$,
+  'a rubric identifier that is not a UUID is refused');
+
+SELECT pg_temp.expect_ok(
+  $$INSERT INTO registry_rubric_trait (rubric_id, node_id, ordinal)
+    VALUES ('00000000-0000-4000-8000-0000000000aa',
+            '00000000-0000-4000-8000-000000000001', 0)$$,
+  'a rubric is made of traits');
+
+INSERT INTO registry_rubric (rubric_id, name, publisher, grade_band, status)
+VALUES ('00000000-0000-4000-8000-0000000000bb', 'Second rubric', 'test', '11-12', 'draft');
+SELECT pg_temp.expect_ok(
+  $$INSERT INTO registry_rubric_trait (rubric_id, node_id, ordinal)
+    VALUES ('00000000-0000-4000-8000-0000000000bb',
+            '00000000-0000-4000-8000-000000000001', 0)$$,
+  'the SAME trait may belong to a second rubric — that is how commonality is declared');
+
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO registry_skill (skill_id, standard_code, statement, derivation)
+    VALUES ('00000000-0000-4000-8000-0000000000cc', 'RH.11-12.6', 'x', 'clause')$$,
+  'a clause split with nobody answerable for it is refused');
+
+SELECT pg_temp.expect_ok(
+  $$INSERT INTO registry_skill (skill_id, standard_code, statement, derivation, derived_by)
+    VALUES ('00000000-0000-4000-8000-0000000000cc', 'RH.11-12.6', 'x', 'clause', 'sm-pm')$$,
+  'a clause split names who made it');
+
+-- --------------------------------------------------------------------------- --
+-- 5. Section access fails closed.
+-- --------------------------------------------------------------------------- --
+DO $$
+DECLARE n int;
+BEGIN
+    PERFORM set_config('app.principal_hash', '', true);
+    SELECT count(*) INTO n FROM roster_visible_sections();
+    IF n = 0 THEN
+        RAISE NOTICE 'PASS  an unset principal sees no sections';
+    ELSE
+        RAISE EXCEPTION 'FAIL  unset principal saw % sections', n;
+    END IF;
+END $$;
+
+ROLLBACK;
+\echo ''
+\echo 'All checks passed. Rolled back — nothing persisted.'
