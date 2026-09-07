@@ -129,3 +129,40 @@ def test_the_assignment_and_the_unopenable_do_not_become_papers(status):
     """The first is the task statement; the second is an inventory discrepancy. Neither is
     anybody's writing, and scoring either produces a confident level for a paper nobody wrote."""
     assert status not in BINDABLE
+
+
+# ------------------------------------------------------------------ saying why nothing happened
+
+
+def test_the_gate_and_the_finished_are_counted_separately():
+    """`0 pending` read identically whether a folder was waiting for a teacher, was bound an hour
+    ago, or was never read — three situations with three different next actions, reported as one
+    number. `_HELD` counts what the gate is holding so the ambiguity is gone.
+
+    Same defect as the bind log that printed every artifact's INITIAL state and so called the
+    bound ones unbound: a summary that cannot distinguish its own cases.
+    """
+    from scoring.bind import _HELD, _PENDING
+    assert "confirmed_at IS NULL" in str(_HELD), "the held query must select UNconfirmed reads"
+    assert "confirmed_at IS NOT NULL" in str(_PENDING), "the pending query must exclude them"
+
+
+def test_held_and_pending_are_complements_over_the_same_files():
+    """They differ ONLY on the confirmation. If one grew a filter the other lacks, files would
+    fall between them and be reported nowhere — which is worse than the ambiguity this replaced."""
+    from scoring.bind import _HELD, _PENDING
+    held, pending = str(_HELD), str(_PENDING)
+    for clause in ("f.status = ANY(CAST(:bindable AS text[]))",
+                   "NOT EXISTS (SELECT 1 FROM artifact a WHERE a.intake_file_id = f.file_id)",
+                   "f.tenant_id = :tenant"):
+        assert clause in held, f"held is missing: {clause}"
+        assert clause in pending, f"pending is missing: {clause}"
+
+
+def test_the_summary_names_the_folder_a_teacher_has_to_go_and_confirm():
+    """A count of held files is not actionable; the folder's name is."""
+    import inspect
+    from scoring import bind
+    src = inspect.getsource(bind.bind_pending)
+    assert '"folder": h["source_ref"]' in src
+    assert "awaiting_confirmation" in src
