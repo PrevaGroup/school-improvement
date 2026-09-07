@@ -53,6 +53,10 @@ log = logging.getLogger("scoring.bind")
 # assignment, the second is an inventory discrepancy, and neither is anybody's writing.
 BINDABLE = ("resolved", "empty", "unresolved")
 
+# Only files under a CONFIRMED manifest. `read_folder` proposes; a teacher agrees with the set;
+# this is what turns that agreement into papers.
+REQUIRES_CONFIRMATION = True
+
 _PENDING = text("""
     SELECT f.file_id, f.source_ref, f.name, f.text, f.text_hash, f.word_count, f.status,
            f.reason_code, f.resolved_student_id, f.resolution_basis, f.resolution_path,
@@ -62,6 +66,10 @@ _PENDING = text("""
       FROM intake_file f
       JOIN intake_manifest m ON m.manifest_id = f.manifest_id
      WHERE f.tenant_id = :tenant
+       -- THE GATE. A folder read is a proposal until a teacher agrees with the set; binding an
+       -- unconfirmed read would score papers against a declaration nobody made. Enforced here,
+       -- in the query bind actually runs, rather than in whatever called it.
+       AND m.confirmed_at IS NOT NULL
        AND f.status = ANY(CAST(:bindable AS text[]))
        AND (CAST(:manifest_id AS text) IS NULL OR f.manifest_id = CAST(:manifest_id AS text))
        AND NOT EXISTS (SELECT 1 FROM artifact a WHERE a.intake_file_id = f.file_id)
