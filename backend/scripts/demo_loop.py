@@ -60,7 +60,10 @@ def reset() -> dict:
     from roster import seed_demo as roster_seed
     from scoring import seed_demo as scoring_seed
 
-    out = {"artifacts": scoring_seed.purge(),
+    # `include_intake_derived` because `bind` stamps the MANIFEST id as an artifact's run, not
+    # the fixture's RUN_ID — so run-scoping alone left every bind-created artifact behind while
+    # reporting a tidy count of the few it did remove.
+    out = {"artifacts": scoring_seed.purge(include_intake_derived=True),
            "registry": registry_seed.purge(),
            "roster": roster_seed.purge()}
     # The manifests themselves: intake rows outlive an artifact purge, and a stale unconfirmed
@@ -73,6 +76,17 @@ def reset() -> dict:
         files = conn.execute(text("DELETE FROM intake_file")).rowcount
         manifests = conn.execute(text("DELETE FROM intake_manifest")).rowcount
     out["intake"] = {"intake_file": files, "intake_manifest": manifests}
+
+    # WHAT IS STILL THERE, not what was attempted. Three teardown bugs in this session each
+    # deleted some rows, returned a number, and left the ones that mattered — a `demo-` prefix
+    # nothing carried any more, a table added after the delete list was written, and a run id the
+    # creation path had stopped using. A count of survivors cannot make that mistake.
+    left = scoring_seed.verify(include_intake_derived=True)
+    out["still_there"] = left
+    if any(left.values()):
+        raise RuntimeError(
+            f"the teardown reported success and left rows behind: {left}. The purge predicate "
+            f"does not cover what the creation path writes.")
     return out
 
 

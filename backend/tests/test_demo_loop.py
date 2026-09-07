@@ -75,8 +75,8 @@ def test_teardown_removes_children_before_parents():
     """A purge running the other way round trips a foreign key halfway and leaves the database
     neither empty nor seeded — the worst of both for somebody trying to iterate."""
     src = inspect.getsource(demo_loop.reset)
-    assert src.index("scoring_seed.purge()") < src.index("registry_seed.purge()")
-    assert src.index("registry_seed.purge()") < src.index("roster_seed.purge()")
+    order = [src.index(f"{m}_seed.purge(") for m in ("scoring", "registry", "roster")]
+    assert order == sorted(order), "artifacts must go before the registry, and both before roster"
 
 
 def test_teardown_removes_the_manifests_too():
@@ -99,3 +99,23 @@ def test_the_summary_says_whether_anything_spent_money():
     than at the end of the month."""
     src = inspect.getsource(demo_loop.main)
     assert "stages_that_cost_money" in src
+
+
+def test_the_teardown_checks_what_is_left_rather_than_what_it_deleted():
+    """Three teardown bugs in this session each deleted some rows, returned a number, and left
+    the ones that mattered: a `demo-` prefix nothing carried any more, a table added after the
+    delete list was written, and a run id the creation path had stopped using.
+
+    A count of SURVIVORS cannot make that mistake, and it raises rather than reporting."""
+    src = inspect.getsource(demo_loop.reset)
+    assert "verify(" in src
+    assert "still_there" in src
+    assert "raise RuntimeError" in src
+
+
+def test_the_teardown_covers_artifacts_bind_created():
+    """`bind` stamps the MANIFEST id as an artifact's run, not the fixture's RUN_ID. Run-scoping
+    alone left every bind-created artifact behind, and the next bind then skipped two of three
+    files as unchanged with nothing to explain why."""
+    src = inspect.getsource(demo_loop.reset)
+    assert "include_intake_derived=True" in src
