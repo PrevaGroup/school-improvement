@@ -201,8 +201,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
           You're signed in as <b>{phase.email}</b>, but {phase.detail.toLowerCase()}
         </p>
         <p className="muted">
-          Access is limited to invited organizations. If you believe this is a mistake, contact
-          the person who sent you here.
+          Access is granted either to an invited organization's whole domain, or to named people
+          in the group that may use this application. If you should have access, ask whoever sent
+          you here to add you to that group — it takes effect within a few minutes.
         </p>
         <button className="auth-btn" onClick={() => void signOut()}>
           Sign in with a different account
