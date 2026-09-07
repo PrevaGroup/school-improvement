@@ -97,6 +97,26 @@ type ScoreEvent = {
   created_at: string | null;
 };
 
+type Attempt = {
+  delivery_id: string;
+  composition_id: string;
+  channel: string;
+  target_ref: string | null;
+  status: string;
+  detail: string | null;
+  message_hash: string | null;
+  attempted_at: string | null;
+  delivered_at: string | null;
+  attempted_by: string | null;
+};
+
+type Delivery = {
+  available: boolean;
+  attempts: Attempt[];
+  delivered: Attempt | null;
+  last_attempt: Attempt | null;
+};
+
 type Transition = {
   from_state: string | null;
   to_state: string;
@@ -164,6 +184,7 @@ export function ReviewConsole() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -190,6 +211,11 @@ export function ReviewConsole() {
     api.get<Detail>(`/review/artifact/${encodeURIComponent(selected)}`)
       .then((d) => { if (live) setDetail(d); })
       .catch((e) => { if (live) { setDetail(null); setError(e instanceof ApiError ? e.message : String(e)); } });
+    // Separate call: a paper with no hand-back yet is the normal case, and a 404 or an empty
+    // result here must not stop the review packet rendering.
+    api.get<Delivery>(`/delivery/${encodeURIComponent(selected)}`)
+      .then((d) => { if (live) setDelivery(d); })
+      .catch(() => { if (live) setDelivery(null); });
     return () => { live = false; };
   }, [selected]);
 
@@ -303,8 +329,8 @@ export function ReviewConsole() {
         {!detail && <p className="rv-mut">Select a paper.</p>}
         {detail && detail.state === "unbound"
           ? <Stuck d={detail} busy={busy} onResolve={resolveTo} />
-          : detail && <Paper d={detail} busy={busy} onMove={move} onOverride={override}
-                             onSaveFeedback={saveFeedback} />}
+          : detail && <Paper d={detail} delivery={delivery} busy={busy} onMove={move}
+                             onOverride={override} onSaveFeedback={saveFeedback} />}
       </section>
     </div>
   );
@@ -400,8 +426,8 @@ function Stuck({ d, busy, onResolve }: {
   );
 }
 
-function Paper({ d, busy, onMove, onOverride, onSaveFeedback }: {
-  d: Detail; busy: boolean;
+function Paper({ d, delivery, busy, onMove, onOverride, onSaveFeedback }: {
+  d: Detail; delivery: Delivery | null; busy: boolean;
   onMove: (s: string) => void;
   onOverride: (ev: ScoreEvent, level: number | null, status: string, reason: string) => void;
   onSaveFeedback: (message: string) => void;
@@ -448,6 +474,11 @@ function Paper({ d, busy, onMove, onOverride, onSaveFeedback }: {
       )}
 
       {p.prior_note && <div className="rv-note">{p.prior_note}</div>}
+
+      {delivery?.available && delivery.attempts.length > 0 && (
+        <HandBack delivery={delivery}
+                  currentComposition={d.composition_id} />
+      )}
 
       {p.feedback?.message && (
         <FeedbackPanel key={d.composition_id} fb={p.feedback} busy={busy}
@@ -646,6 +677,67 @@ function FeedbackPanel({ fb, busy, onSave }: {
           <pre>{fb.machine_draft}</pre>
         </details>
       )}
+    </section>
+  );
+}
+
+
+// What happened after Release. Read only: the file channel writes where the folder is, and the API
+// cannot reach it — the batch job sends until Drive makes the channel reachable from here.
+//
+// Three things this has to keep straight, and each of them is a different sentence on screen:
+//   * what the student is HOLDING, which is the last successful send
+//   * what happened LAST, which may be a failure after a success — and does not mean they have
+//     nothing
+//   * whether the message has been edited SINCE, in which case they are holding an older one
+function HandBack({ delivery, currentComposition }: {
+  delivery: Delivery; currentComposition: string;
+}) {
+  const { delivered, last_attempt: last, attempts } = delivery;
+  const stale = !!delivered && delivered.composition_id !== currentComposition;
+  const failingNow = last?.status === "failed";
+
+  return (
+    <section className="rv-criteria">
+      <h3>Handed back</h3>
+
+      {delivered ? (
+        <p className={stale ? "rv-nonum" : ""}>
+          {stale
+            ? "The student is holding an EARLIER version of this message — it was edited after it went out."
+            : "Delivered."}{" "}
+          <span className="rv-mut">
+            {new Date(delivered.delivered_at!).toLocaleString()} · {delivered.channel}
+          </span>
+        </p>
+      ) : (
+        <p className="rv-nonum">Nothing has reached this student yet.</p>
+      )}
+
+      {failingNow && (
+        <div className="rv-holds">
+          <b>The last attempt did not go.</b>
+          <p>{last?.detail}</p>
+          <small>
+            {delivered
+              ? "They still have the earlier message — this failure did not take anything away."
+              : "Nothing has reached them. It will be retried."}
+          </small>
+        </div>
+      )}
+
+      <ol className="rv-trail">
+        {attempts.map((a) => (
+          <li key={a.delivery_id}>
+            <b className={a.status === "sent" ? "rv-teacher" : "rv-machine"}>{a.status}</b>{" "}
+            {a.attempted_at && new Date(a.attempted_at).toLocaleTimeString()}
+            {a.target_ref && <> → {a.target_ref}</>}
+            {a.detail && <> — {a.detail}</>}
+            {/* The hash is how "which version did they read" is answerable at all. */}
+            {a.message_hash && <small> · {a.message_hash.slice(0, 8)}</small>}
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }
