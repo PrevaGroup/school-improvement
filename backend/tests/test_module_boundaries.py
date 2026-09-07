@@ -75,6 +75,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "pooling": "pooling",  # the ONLY module that crosses the district threshold — expansion plan §7
     "registry": "registry",  # nodes, tasks, scoring sites, scoring configuration + the linter
     "corpus": "corpus",  # anchor papers — public reference content, bulk ETL like public_metrics
+    "delivery": "delivery",  # hand-back attempts, including the ones that fail
     "intake": "intake",  # folder -> manifest; roster reconciliation; the manifest gate
 }
 
@@ -94,7 +95,8 @@ MODULE_OF_PREFIX: dict[str, str] = {
 # a comment. Third instance of this shape, after pytest.ini `testpaths` and alembic
 # `version_locations`: a path missing from a registry is an absence, and absences report green.
 SOURCE_TREES = ("app", "etl", "likeschools", "public_metrics", "evals",
-                "scoring", "roster", "measurement", "pooling", "registry", "corpus", "intake")
+                "scoring", "roster", "measurement", "pooling", "registry", "corpus", "intake",
+                "delivery")
 
 # Package directories that are tooling rather than modules. `tests` and `scripts` reach across
 # everything by design; `migrations` is the repo-level alembic tree.

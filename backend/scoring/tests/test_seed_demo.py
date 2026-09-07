@@ -12,6 +12,7 @@ with nothing useful to say about why.
 from __future__ import annotations
 
 import inspect
+import pathlib
 
 import pytest
 
@@ -99,11 +100,36 @@ def test_the_purge_deletes_children_before_the_parent():
 
 
 def test_every_append_only_table_has_its_trigger_taken_off_and_put_back():
-    """A cleanup script that left either table mutable would be a silent hole in the record's
-    central invariant."""
+    """A cleanup script that left one of these mutable would be a silent hole in the record's
+    central invariant.
+
+    The expected set is DERIVED from the migrations rather than written here. It used to be the
+    literal `{"score_event", "artifact_composition"}`, which meant adding a third append-only
+    table broke this test for no reason and taught whoever hit it to edit the literal — the exact
+    move that would then hide a purge which had genuinely forgotten one. Scanning for the trigger
+    is the same discipline as deriving table ownership from `__tablename__`.
+    """
+    import re
+
+    backend = pathlib.Path(__file__).resolve().parents[2]
+    declared = set()
+    for f in backend.rglob("migrations/*.py"):
+        if "__pycache__" in f.parts:
+            continue
+        body = f.read_text(encoding="utf8", errors="replace")
+        # `[^O]*` was wrong here: "BEFORE UPDATE OR DELETE ON" contains an O, so the scan
+        # silently found nothing and the guard below is what caught it.
+        declared.update(re.findall(
+            r"CREATE TRIGGER\s+trg_\w*append_only\s+BEFORE.*?ON\s+(\w+)", body, re.S))
+    assert declared, "the trigger scan found nothing — this test now proves nothing"
+
+    listed = {t for t, _ in seed_demo._APPEND_ONLY}
+    missing = sorted(declared - listed)
+    assert not missing, (
+        f"append-only tables the purge does not disable the trigger for: {missing}. The DELETE "
+        f"will be refused by the very trigger that protects the record.")
+
     src = inspect.getsource(seed_demo.purge)
-    tables = {t for t, _ in seed_demo._APPEND_ONLY}
-    assert tables == {"score_event", "artifact_composition"}
     assert src.index("DISABLE TRIGGER") < src.index("ENABLE TRIGGER")
 
 

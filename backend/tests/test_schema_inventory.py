@@ -57,6 +57,7 @@ import roster.models  # noqa: E402,F401  — roster_student, roster_section, ros
 import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
 import pooling.models  # noqa: E402,F401  — pooling_aggregation_consent, pooling_aggregate_run
 import intake.models  # noqa: E402,F401  — intake_manifest, intake_file (2)
+import delivery.models  # noqa: E402,F401  — artifact_delivery (1)
 import registry.models  # noqa: E402,F401  — registry_node, registry_task, registry_scoring_*, lint ack (7)
 import corpus.models  # noqa: E402,F401  — corpus_source, corpus_paper, corpus_score, corpus_discourse_span
 
@@ -148,6 +149,7 @@ EXPECTED_TABLES: dict[str, str] = {
     "registry_lint_acknowledgment": "registry",
     "intake_manifest": "intake",
     "intake_file": "intake",
+    "artifact_delivery": "delivery",
     "registry_skill": "registry",
     "registry_rubric": "registry",
     "registry_rubric_trait": "registry",
@@ -230,6 +232,7 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "registry_lint_acknowledgment": "0015_lint_acknowledgment.py",
     "intake_manifest": "0021_intake_tables.py",
     "intake_file": "0021_intake_tables.py",
+    "artifact_delivery": "0025_delivery_attempts.py",
     "registry_skill": "0019_rubric_and_uuids.py",
     "registry_rubric": "0019_rubric_and_uuids.py",
     "registry_rubric_trait": "0019_rubric_and_uuids.py",

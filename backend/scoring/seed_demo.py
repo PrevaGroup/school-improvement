@@ -89,6 +89,7 @@ def seed(text_dir: pathlib.Path) -> dict:
 # tables only reference the artifact. Scoping those by a subquery keeps one run's rows together
 # even when another run's artifacts exist beside them.
 _PURGE_ORDER = (
+    ("artifact_delivery", "artifact"),
     ("artifact_composition", "artifact"),
     ("score_event", "run"),
     ("artifact_state_transition", "artifact"),
@@ -109,7 +110,8 @@ _BY_ARTIFACT_WIDE = ("artifact_id IN (SELECT artifact_id FROM artifact "
 # must not be negotiable from inside the pipeline, and a cleanup path the scorer could call would
 # make it so.
 _APPEND_ONLY = (("score_event", "trg_score_event_append_only"),
-                ("artifact_composition", "trg_artifact_composition_append_only"))
+                ("artifact_composition", "trg_artifact_composition_append_only"),
+                ("artifact_delivery", "trg_artifact_delivery_append_only"))
 
 
 def purge(include_intake_derived: bool = False) -> dict:
@@ -195,6 +197,9 @@ def verify(include_intake_derived: bool = False) -> dict:
                 {"run": RUN_ID}).scalar_one(),
             "artifact_composition": conn.execute(text(
                 "SELECT count(*) FROM artifact_composition c JOIN artifact a USING (artifact_id) "
+                f"WHERE {scope}"), {"run": RUN_ID}).scalar_one(),
+            "artifact_delivery": conn.execute(text(
+                "SELECT count(*) FROM artifact_delivery d JOIN artifact a USING (artifact_id) "
                 f"WHERE {scope}"), {"run": RUN_ID}).scalar_one(),
         }
     return left
