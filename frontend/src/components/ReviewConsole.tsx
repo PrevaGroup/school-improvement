@@ -29,6 +29,10 @@ type Criterion = {
   reason_code: string | null;
   needs_human: boolean;
   evidence: string[];
+  // WHERE each verified span sits in the normalised text. The verifier returned these offsets
+  // so a reader could highlight without searching again; until now they were discarded and the
+  // console listed quotations beside the paper instead of showing them in it.
+  spans?: { at: number; len: number; span: string | null }[];
   evidence_dropped: number;
   rubric_version: string | null;
   prior: PriorObservation[];
@@ -52,6 +56,11 @@ type Packet = {
   iteration: string | null;
   window_label: string | null;
   text?: string;
+  // The string the offsets are into, and the string the scorer was actually shown. Highlighting
+  // over `text` instead would be off by however much whitespace and typography the normaliser
+  // folded — silently, and by a different amount on every paper.
+  text_normalized?: string;
+  normalization_version?: string;
   stamp: Record<string, string | number | null>;
   criteria: Criterion[];
   needs_human: string[];
@@ -532,6 +541,10 @@ function Paper({ d, delivery, busy, onMove, onOverride, onSaveFeedback,
   onSaveFeedback: (message: string) => void;
 }) {
   const p = d.packet;
+  // One criterion at a time. Highlighting every criterion's evidence at once would colour most
+  // of the paper and say nothing — the question a teacher has is "why did THIS get a 2", and the
+  // answer is the handful of sentences that criterion was judged on.
+  const [focus, setFocus] = useState<Criterion | null>(null);
   if (!p) return <p className="rv-mut">This paper has not been scored yet.</p>;
   const holds = p.feedback?.holds ?? [];
   const current = new Map(d.events.filter((e) => e.current).map((e) => [e.node_id, e]));
@@ -590,14 +603,17 @@ function Paper({ d, delivery, busy, onMove, onOverride, onSaveFeedback,
           <CriterionRow key={c.node_id} c={c} ev={current.get(c.node_id) ?? null}
                         busy={busy} onOverride={onOverride}
                         setPapers={setPapers} setTitle={setTitle}
-                        onSetOverride={onSetOverride} />
+                        onSetOverride={onSetOverride}
+                        focused={focus?.node_id === c.node_id}
+                        onFocus={() => setFocus(focus?.node_id === c.node_id ? null : c)} />
         ))}
       </section>
 
       {p.text && (
         <section className="rv-text">
           <h3>What they wrote</h3>
-          <pre>{p.text}</pre>
+          {focus && <PaperWithSpans p={p} c={focus} onClear={() => setFocus(null)} />}
+          {!focus && <pre>{p.text}</pre>}
         </section>
       )}
 
@@ -625,8 +641,10 @@ function Paper({ d, delivery, busy, onMove, onOverride, onSaveFeedback,
   );
 }
 
-function CriterionRow({ c, ev, busy, onOverride, setPapers, setTitle, onSetOverride }: {
+function CriterionRow({ c, ev, busy, onOverride, setPapers, setTitle, onSetOverride,
+                       focused, onFocus }: {
   c: Criterion; ev: ScoreEvent | null; busy: boolean;
+  focused: boolean; onFocus: () => void;
   setPapers: SetPaper[] | null; setTitle: string;
   onSetOverride: (node_id: string, level: number | null, status: string, reason: string,
                   artifact_ids: string[]) => void;
@@ -660,9 +678,16 @@ function CriterionRow({ c, ev, busy, onOverride, setPapers, setTitle, onSetOverr
       {c.reason && <p className="rv-reason">{ev?.reason ?? c.reason}</p>}
 
       {c.evidence.length > 0 && (
-        <ul className="rv-ev">
-          {c.evidence.map((s, i) => <li key={i}>“{s}”</li>)}
-        </ul>
+        <>
+          <ul className="rv-ev">
+            {c.evidence.map((s, i) => <li key={i}>“{s}”</li>)}
+          </ul>
+          {(c.spans?.length ?? 0) > 0 && (
+            <button className={"rv-showin" + (focused ? " on" : "")} onClick={onFocus}>
+              {focused ? "Stop showing these in the paper" : "Show these in the paper"}
+            </button>
+          )}
+        </>
       )}
       {c.evidence_dropped > 0 && (
         <small className="rv-mut">
@@ -737,6 +762,73 @@ function CriterionRow({ c, ev, busy, onOverride, setPapers, setTitle, onSetOverr
 // of what the decision was about and it is read by people who were not in the room. And it says
 // plainly that this is one judgment rather than N, because that is the fact the record keeps and
 // the interface is where somebody would otherwise form the opposite impression.
+// The paper with one criterion's verified evidence marked in it.
+//
+// The offsets come from the verifier and are into the NORMALISED text, so that is what is
+// rendered — and it is labelled, because it is not character-for-character what the student
+// typed. Showing the raw text with these offsets would misplace every highlight on any paper
+// whose typography was folded, which is most papers out of Google Docs; searching the raw text
+// for the span instead would re-implement the match in a second place with different rules.
+//
+// Overlaps are merged rather than nested. Two spans that overlap are one piece of evidence as
+// far as a reader is concerned, and nested <mark>s render as a darker patch that reads like a
+// third, stronger thing.
+function PaperWithSpans({ p, c, onClear }: {
+  p: Packet; c: Criterion; onClear: () => void;
+}) {
+  const body = p.text_normalized;
+  if (!body) {
+    // Scored before the offsets were kept. Say so rather than silently showing an unhighlighted
+    // paper, which would read as "this criterion has no evidence in the text".
+    return (
+      <>
+        <p className="rv-mut">
+          This paper was scored before span positions were recorded, so its evidence can only be
+          listed, not shown in place.
+        </p>
+        <pre>{p.text}</pre>
+      </>
+    );
+  }
+
+  const marks = [...(c.spans ?? [])]
+    .filter((s) => s.at >= 0 && s.len > 0 && s.at + s.len <= body.length)
+    .sort((a, b) => a.at - b.at)
+    .reduce<{ at: number; end: number }[]>((acc, s) => {
+      const last = acc[acc.length - 1];
+      if (last && s.at <= last.end) last.end = Math.max(last.end, s.at + s.len);
+      else acc.push({ at: s.at, end: s.at + s.len });
+      return acc;
+    }, []);
+
+  const parts: JSX.Element[] = [];
+  let cursor = 0;
+  marks.forEach((m, i) => {
+    if (m.at > cursor) parts.push(<span key={`t${i}`}>{body.slice(cursor, m.at)}</span>);
+    parts.push(<mark key={`m${i}`}>{body.slice(m.at, m.end)}</mark>);
+    cursor = m.end;
+  });
+  if (cursor < body.length) parts.push(<span key="tail">{body.slice(cursor)}</span>);
+
+  return (
+    <>
+      <div className="rv-spanbar">
+        <b>{c.criterion_label ?? c.node_id}</b>
+        <span className="rv-mut">
+          {marks.length} passage{marks.length === 1 ? "" : "s"} this criterion was judged on
+        </span>
+        <button onClick={onClear}>Show the paper as written</button>
+      </div>
+      <pre className="rv-marked">{parts}</pre>
+      <small className="rv-mut">
+        Shown with typography normalised{p.normalization_version
+          ? ` (${p.normalization_version})` : ""} — quotation marks, dashes and spacing folded.
+        That is the text the scoring read, and the only text these positions are exact in.
+      </small>
+    </>
+  );
+}
+
 function SetOverridePanel({ c, papers, title, busy, onApply, onCancel }: {
   c: Criterion; papers: SetPaper[]; title: string; busy: boolean;
   onApply: (level: number | null, status: string, reason: string) => void;

@@ -484,3 +484,16 @@
   .rv-setacts button { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line);
                        background: var(--panel); border-radius: 8px; cursor: pointer; }
   .rv-setacts button:disabled { opacity: .45; cursor: default; }
+
+  /* A criterion's justification shown IN the paper rather than listed beside it. */
+  .rv-showin { font: inherit; font-size: 12px; margin-top: 6px; padding: 4px 10px;
+               border: 1px solid var(--line); background: var(--panel); border-radius: 8px;
+               color: var(--muted); cursor: pointer; }
+  .rv-showin:hover { color: var(--ink); }
+  .rv-showin.on { background: var(--amber); border-color: var(--amber); color: #fff; }
+  .rv-spanbar { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .rv-spanbar button { font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid var(--line);
+                       background: var(--panel); border-radius: 8px; color: var(--muted); cursor: pointer; }
+  /* The highlight is the only colour in the paper, so it needs no border to be found. Kept light
+     enough that the student's words stay the thing being read. */
+  .rv-marked mark { background: #fbe6b8; color: inherit; padding: 1px 0; border-radius: 2px; }
