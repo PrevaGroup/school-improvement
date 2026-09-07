@@ -22,6 +22,7 @@ from .review_view import router as review_view_router
 from .marts import router as marts_router
 from .models import DimSchool, FactMetric
 from .plans import router as plans_router
+from delivery.view import router as delivery_router
 from intake.review import router as intake_router
 from scoring.review import router as review_actions_router
 from .security import assert_dev_mode_not_in_production, get_current_principal, is_admin
@@ -67,6 +68,9 @@ app.include_router(review_view_router, prefix=API, dependencies=_REQUIRE_SIGN_IN
 app.include_router(review_actions_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 # The manifest gate: intake owns these because it owns the tables they write.
 app.include_router(intake_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
+# Read-only: the file channel writes where the folder is, which Cloud Run cannot
+# reach. The batch job does the sending until Drive makes it reachable from here.
+app.include_router(delivery_router, prefix=API, dependencies=_REQUIRE_SIGN_IN)
 # Firebase's reserved /__/* namespace, reverse-proxied so sign-in runs on OUR domain
 # (custom authDomain — see app/auth_proxy.py). Deliberately UNGATED: it serves the sign-in
 # flow to users who don't have a token yet — same access class as /health and the SPA shell.

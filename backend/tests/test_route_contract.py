@@ -74,6 +74,10 @@ EXPECTED: dict[str, set[str]] = {
     "/api/intake/manifest/{manifest_id}": {"GET"},
     "/api/intake/manifest/{manifest_id}/confirm": {"POST"},
     "/api/intake/file/{file_id}/assign": {"POST"},
+    # --- delivery: read only. The file channel writes where the folder is, and the API cannot
+    # reach it; the batch job sends until Drive makes the channel reachable from Cloud Run.
+    "/api/delivery": {"GET"},
+    "/api/delivery/{artifact_id}": {"GET"},
 }
 
 
