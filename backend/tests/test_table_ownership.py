@@ -37,7 +37,7 @@ import pytest
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
 
 # The modules whose table ownership is enforced. Adding a module here is how it opts in.
-SCANNED = ("scoring", "roster", "measurement", "pooling", "registry", "corpus", "intake", "evals")
+SCANNED = ("scoring", "roster", "measurement", "pooling", "registry", "corpus", "intake", "delivery", "evals")
 
 TABLENAME_RE = re.compile(r'__tablename__\s*=\s*["\']([a-z_0-9]+)["\']')
 # INSERT INTO x / UPDATE x SET / DELETE FROM x, in a SQL string anywhere in the file.
