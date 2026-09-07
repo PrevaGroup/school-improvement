@@ -54,6 +54,7 @@ from ._db import engine
 from ._ids import uuid7
 from .rater import AnthropicRater, RaterIdentity
 from .run_scoring import read_text
+from .verify import NORM_VERSION, normalize
 
 log = logging.getLogger("scoring.compose")
 
@@ -194,6 +195,18 @@ def build_packet(artifact: dict, events: list[dict], labels: dict[str, dict],
             # to read the invention as evidence, and the reviewer who needs the full text is
             # debugging the pipeline, not reviewing a paper. score_event keeps them either way.
             "evidence": [k.get("span") for k in evidence.get("kept", [])],
+            # WHERE each kept span sits, so the console can show a criterion's justification in
+            # the paper instead of listing it beside the paper. The verifier already returned the
+            # offset for exactly this reason — "so a caller can highlight without searching
+            # again" — and it was being thrown away.
+            #
+            # The offsets are into the NORMALIZED text, which is why `text_normalized` is stored
+            # with the packet. Searching the raw text for the span instead would re-do the match
+            # in a second place, with different rules, and would silently miss every span whose
+            # typography was folded — which is most of them, on a paper out of Google Docs.
+            "spans": [{"at": k["at"], "len": k["len"], "span": k.get("span")}
+                      for k in evidence.get("kept", [])
+                      if k.get("at") is not None and k.get("len") is not None],
             "evidence_dropped": len(evidence.get("dropped", [])),
             "rubric_version": e.get("rubric_version"),
             "prior": prior_for_node(prior_rows, node_id, config),
@@ -315,6 +328,11 @@ def _compose_one(eng, artifact: dict, *, tenant: str, dry_run: bool, rater_facto
     # artifact with no readable text. Duplication of student writing is a deliberate prototype
     # tradeoff — a real deployment points this at a text store instead.
     packet["text"] = body
+    # The same string the spans are offsets into, and the same string the scorer was shown. A
+    # console that highlighted offsets over the RAW text would be off by however much whitespace
+    # and typography the normaliser folded — silently, and differently on every paper.
+    packet["text_normalized"] = normalize(body)
+    packet["normalization_version"] = NORM_VERSION
 
     packet["feedback"] = {
         "message": drafted.message,

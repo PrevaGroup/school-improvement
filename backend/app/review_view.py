@@ -116,9 +116,125 @@ _TRANSITIONS = text("""
 """)
 
 
+# ---------------------------------------------------------------------------------------- #
+# The assignment home: where a SET stands, which is the question the per-paper queue cannot
+# answer. A teacher does not hold twenty-eight papers in mind; they hold "5B's op-ed" and want
+# to know whether it is done. That is one row here and twenty-eight rows in /queue.
+#
+# WHY ONE QUERY. Every stage below is derived from the same per-artifact CTE, so the pipeline
+# bar and the per-assignment counts cannot disagree — a bar that sums to a different number
+# than the rows beneath it is worse than no bar, because it invites the reader to trust it.
+#
+# WHY THE STAGES ARE MUTUALLY EXCLUSIVE. They are drawn as one stacked bar, and a paper counted
+# in two segments makes the bar longer than the work. `stage` is a CASE, so each artifact lands
+# in exactly one — and `delivered` is checked BEFORE `reviewed` because a released paper whose
+# feedback has gone is further along, not both.
+_STAGES = """
+    WITH sent AS (
+        SELECT DISTINCT artifact_id FROM artifact_delivery WHERE status = 'sent'
+    ),
+    failing AS (
+        -- Tried and did not land, with nothing successful since. A paper that failed and was
+        -- then delivered is NOT failing; the failure stays in the record without following the
+        -- student around.
+        SELECT DISTINCT d.artifact_id FROM artifact_delivery d
+         WHERE d.status = 'failed'
+           AND d.artifact_id NOT IN (SELECT artifact_id FROM sent)
+    ),
+    staged AS (
+        SELECT a.artifact_id, a.section_id, a.task_id, a.iteration, a.window_label, a.state,
+               CASE
+                 WHEN a.state IN ('unbound','blocked','not_scorable') THEN 'stuck'
+                 WHEN a.state IN ('bound','scored','composed')        THEN 'working'
+                 WHEN a.state = 'in_review'                           THEN 'ready'
+                 WHEN s.artifact_id IS NOT NULL                       THEN 'delivered'
+                 ELSE 'reviewed'
+               END AS stage,
+               (f.artifact_id IS NOT NULL) AS failing
+          FROM artifact a
+          LEFT JOIN sent s    ON s.artifact_id = a.artifact_id
+          LEFT JOIN failing f ON f.artifact_id = a.artifact_id
+    )
+"""
+
+_PIPELINE = text(_STAGES + """
+    SELECT stage, count(*) AS n FROM staged GROUP BY stage
+""")
+
+# One row per assignment, where an assignment is the binding key a teacher actually names: this
+# class, this task, this iteration. `window_label` rides along because two windows of the same
+# task are two sets of work, not one set scored twice.
+_ASSIGNMENTS = text(_STAGES + """
+    SELECT g.section_id, g.task_id, g.iteration, g.window_label,
+           sec.name AS section_name, t.name AS task_name, t.module_key, t.ordinal,
+           count(*)                                        AS total,
+           count(*) FILTER (WHERE g.stage = 'working')     AS working,
+           count(*) FILTER (WHERE g.stage = 'stuck')       AS stuck,
+           count(*) FILTER (WHERE g.stage = 'ready')       AS ready,
+           count(*) FILTER (WHERE g.stage = 'reviewed')    AS reviewed,
+           count(*) FILTER (WHERE g.stage = 'delivered')   AS delivered,
+           count(*) FILTER (WHERE g.failing)               AS failing
+      FROM staged g
+      LEFT JOIN roster_section sec ON sec.section_id = g.section_id
+      LEFT JOIN registry_task  t   ON t.task_id      = g.task_id
+     GROUP BY g.section_id, g.task_id, g.iteration, g.window_label,
+              sec.name, t.name, t.module_key, t.ordinal
+     ORDER BY t.module_key NULLS LAST, t.ordinal NULLS LAST, sec.name NULLS LAST, g.iteration
+""")
+
+# The two things that stop a paper before anything is scored: we do not know whose it is, or we
+# could not read it. Both are fixed on this page, so both are named here rather than counted.
+_STUCK = text("""
+    SELECT a.artifact_id, a.state, a.state_reason_code, a.section_id, a.task_id,
+           sec.name AS section_name, t.name AS task_name,
+           f.name AS file_name, s.display_name
+      FROM artifact a
+      LEFT JOIN roster_section sec ON sec.section_id = a.section_id
+      LEFT JOIN registry_task  t   ON t.task_id      = a.task_id
+      LEFT JOIN intake_file    f   ON f.file_id      = a.intake_file_id
+      LEFT JOIN roster_student s   ON s.student_id   = a.student_id
+     WHERE a.state IN ('unbound','blocked','not_scorable')
+     ORDER BY a.created_at
+     LIMIT :limit
+""")
+
+# Order and words are the contract with the bar: the console renders these left to right and
+# never invents a label. "Stuck" sits second because it is where the paper stopped, not where it
+# is furthest along — the bar is a pipeline, not a ranking.
+PIPELINE_STAGES: tuple[tuple[str, str], ...] = (
+    ("working",   "Being scored"),
+    ("stuck",     "Stuck"),
+    ("ready",     "Scored, ready for you"),
+    ("reviewed",  "You reviewed"),
+    ("delivered", "Feedback on the doc"),
+)
+
+
+# "Not loaded yet" and "you may not read this" are different answers, and only the first is
+# allowed to render as a calm empty page. Collapsing the second into `available: false` would show
+# a teacher a tidy screen saying nothing has been read, when in fact the read was refused — the
+# recurring defect in this codebase, a thing reporting success while not doing the job.
+_NOT_LOADED_YET = ("UndefinedTable", "UndefinedColumn")
+
+
+def _is_not_loaded_yet(exc: Exception) -> bool:
+    orig = getattr(exc, "orig", None)
+    return type(orig).__name__ in _NOT_LOADED_YET
+
+
 def _unavailable(exc: Exception) -> dict:
     log.info("review tables not available yet: %s", exc)
     return {"available": False, "queue": [], "counts": {}}
+
+
+def _empty_or_raise(exc: SQLAlchemyError, empty: dict) -> dict:
+    """An absent table is `available: false`; anything else is an error and says so."""
+    if _is_not_loaded_yet(exc):
+        log.info("review tables not available yet: %s", exc)
+        return {"available": False, **empty}
+    log.error("review read failed: %s", exc)
+    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                        f"the review tables could not be read: {exc}") from exc
 
 
 @router.get("/queue")
@@ -192,4 +308,36 @@ def artifact(artifact_id: str, db: Session = Depends(get_db_public),
         "roster": roster,
         "events": events,
         "transitions": transitions,
+    }
+
+
+@router.get("/home")
+def home(limit: int = 500, db: Session = Depends(get_db_public),
+         principal: dict = Depends(get_current_principal)) -> dict:
+    """Where every set stands — the page a teacher opens before they open a paper.
+
+    The per-paper queue answers "what is waiting for me". It cannot answer "is 5B's op-ed done",
+    which is the question a teacher actually has, because that answer is a property of a SET and
+    the queue has no notion of one. This is that page.
+
+    Still no aggregation over anyone's writing: every number is a count of papers in a state.
+    There is no class average here for the same reason there is none in the queue.
+    """
+    try:
+        stages = {r["stage"]: r["n"] for r in db.execute(_PIPELINE).mappings()}
+        rows = [dict(r) for r in db.execute(_ASSIGNMENTS).mappings()]
+        stuck = [dict(r) for r in db.execute(_STUCK, {"limit": limit}).mappings()]
+    except SQLAlchemyError as exc:
+        db.rollback()
+        return _empty_or_raise(exc, {"pipeline": [], "assignments": [], "stuck": []})
+
+    return {
+        "available": True,
+        # Every stage, including the empty ones. A segment that disappears at zero is how a
+        # teacher stops noticing that nothing has been handed back — the same argument as the
+        # manifest gate showing all five counts.
+        "pipeline": [{"key": k, "label": label, "n": stages.get(k, 0)}
+                     for k, label in PIPELINE_STAGES],
+        "assignments": rows,
+        "stuck": stuck,
     }

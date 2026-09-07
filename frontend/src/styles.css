@@ -396,3 +396,104 @@
   .fc-missing { display: flex; flex-wrap: wrap; gap: 6px; }
   .fc-missing span { font-size: 12.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
   .fc-who { font-size: 14px; font-weight: 600; }
+
+  /* The assignment home — where a SET stands. The queue shows papers; this shows sets, which is
+     the question a teacher arrives with. */
+  .ah { flex: 1; overflow-y: auto; padding: 22px 28px 60px; min-width: 0; }
+  .ah-lede { max-width: 62ch; margin-bottom: 20px; }
+  .ah-lede h2 { margin: 0 0 6px; font-size: 20px; }
+  .ah-lede p { margin: 0; color: var(--muted); font-size: 13px; }
+  .ah-head { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+             margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+
+  /* One stacked bar. The segments are proportions of the same total, so nothing is scaled to
+     look bigger than it is. */
+  .ah-pipe { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .ah-bar { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--bg); }
+  .ah-seg { display: block; min-width: 2px; }
+  .ah-working   { background: #c8c2b4; }
+  .ah-stuck     { background: var(--red); }
+  .ah-ready     { background: var(--amber); }
+  .ah-reviewed  { background: #7fa892; }
+  .ah-delivered { background: var(--green); }
+  .ah-key { list-style: none; margin: 14px 0 0; padding: 0; display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 18px; }
+  .ah-key li { font-size: 13px; display: grid; grid-template-columns: 10px auto 1fr; gap: 0 7px; align-items: baseline; }
+  .ah-key i { width: 10px; height: 10px; border-radius: 3px; display: block; }
+  .ah-key b { font-variant-numeric: tabular-nums; }
+  .ah-key small { grid-column: 2 / -1; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+  /* An empty stage keeps its row and its explanation; only the number greys out. A segment that
+     vanishes at zero is how "nothing has been handed back" stops being noticeable. */
+  .ah-key li.ah-zero b, .ah-key li.ah-zero { color: var(--muted); }
+  .ah-total { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+
+  .ah-stuck { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .ah-stuck li { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--red);
+                 border-radius: 8px; padding: 10px 12px; }
+  .ah-why { display: inline-block; margin-left: 10px; font-size: 12px; color: var(--red); }
+  .ah-stuck small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+
+  .ah-unit { margin-bottom: 22px; }
+  .ah-unit h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 700; }
+  .ah-undeclared { font-style: italic; }
+  .ah-sets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .ah-sets li { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+                background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 11px 14px; }
+  /* The only visual emphasis on this page marks a request to a person. Everything else is
+     description, and description that shouts is noise. */
+  .ah-sets li.ah-needs { border-left: 3px solid var(--amber); }
+  .ah-set-main { min-width: 0; }
+  .ah-set-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .ah-iter, .ah-win { font-size: 11px; padding: 2px 7px; border-radius: 999px;
+                      background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+  .ah-set-cls { font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .ah-set-state { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .ah-bad { color: var(--red); }
+  .ah-set-act { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+  .ah-done { font-size: 12px; color: var(--green); }
+  .ah-out { font-size: 12px; color: var(--muted); }
+  .ah-btn { font: inherit; font-size: 13px; padding: 6px 13px; border: 1px solid var(--line);
+            background: var(--panel); border-radius: 8px; cursor: pointer; }
+  .ah-primary { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+  .ah-linkish { font: inherit; font-size: 14px; font-weight: 600; padding: 0; border: 0;
+                background: none; color: var(--ink); cursor: pointer; text-align: left; }
+  .ah-linkish:hover { color: var(--accent); text-decoration: underline; }
+
+  /* Back out of a set to the sets. Without it the console is a queue you cannot leave. */
+  .rv-back { margin-bottom: 10px; }
+  .rv-back button { font: inherit; font-size: 12px; padding: 4px 9px; border: 1px solid var(--line);
+                    background: var(--panel); border-radius: 8px; color: var(--muted); cursor: pointer; }
+  .rv-back button:hover { color: var(--ink); }
+  .rv-scope { font-size: 12px; font-weight: 600; margin-top: 7px; }
+
+  /* One judgment about a class, made once. The panel's job is to make that visible before it
+     happens — the record keeps the distinction and this is where somebody would otherwise form
+     the opposite impression. */
+  .rv-setbtn { font: inherit; font-size: 12px; margin-left: 8px; padding: 5px 11px;
+               border: 1px dashed var(--line); background: none; border-radius: 8px;
+               color: var(--muted); cursor: pointer; }
+  .rv-setbtn:hover { color: var(--ink); border-color: var(--muted); }
+  .rv-setpanel { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--amber);
+                 border-left-width: 4px; border-radius: 8px; background: #fdf7ec;
+                 display: flex; flex-direction: column; gap: 8px; }
+  .rv-setpanel p { margin: 0; font-size: 13px; }
+  .rv-setpanel input { font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; }
+  .rv-setpanel summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+  .rv-setlist { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; column-width: 160px; }
+  .rv-setacts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .rv-setacts button { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line);
+                       background: var(--panel); border-radius: 8px; cursor: pointer; }
+  .rv-setacts button:disabled { opacity: .45; cursor: default; }
+
+  /* A criterion's justification shown IN the paper rather than listed beside it. */
+  .rv-showin { font: inherit; font-size: 12px; margin-top: 6px; padding: 4px 10px;
+               border: 1px solid var(--line); background: var(--panel); border-radius: 8px;
+               color: var(--muted); cursor: pointer; }
+  .rv-showin:hover { color: var(--ink); }
+  .rv-showin.on { background: var(--amber); border-color: var(--amber); color: #fff; }
+  .rv-spanbar { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .rv-spanbar button { font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid var(--line);
+                       background: var(--panel); border-radius: 8px; color: var(--muted); cursor: pointer; }
+  /* The highlight is the only colour in the paper, so it needs no border to be found. Kept light
+     enough that the student's words stay the thing being read. */
+  .rv-marked mark { background: #fbe6b8; color: inherit; padding: 1px 0; border-radius: 2px; }
