@@ -164,11 +164,27 @@ SELECT pg_temp.expect_fail(
   $$UPDATE artifact SET student_id='sm-stu-2' WHERE artifact_id='sm-art-4'$$,
   'a bound paper cannot be reassigned to a different student');
 
-INSERT INTO artifact (artifact_id, run_id, content_hash, state, student_id, tenant_id, visibility)
-VALUES ('sm-art-5', 'sm-run', 'hash-5', 'bound', 'sm-stu-3', 'public', 'public');
-SELECT pg_temp.expect_fail(
-  $$UPDATE artifact SET student_id='sm-stu-4' WHERE artifact_id='sm-art-5'$$,
-  'naming a student is refused outside `unbound`, whatever the current value');
+INSERT INTO artifact (artifact_id, run_id, content_hash, state, tenant_id, visibility)
+VALUES ('sm-art-5', 'sm-run', 'hash-5', 'unbound', 'public', 'public');
+UPDATE artifact SET state='withheld' WHERE artifact_id='sm-art-5';
+DO $$
+DECLARE code text;
+BEGIN
+    -- sm-art-5 carries NO student, so the "already bound" branch cannot fire and this reaches the
+    -- state branch it is named for. Asserting the MESSAGE as well as the failure, because a check
+    -- that passes on the wrong branch is a check that proves nothing — which is what the previous
+    -- version of this one did.
+    BEGIN
+        UPDATE artifact SET student_id='sm-stu-4' WHERE artifact_id='sm-art-5';
+    EXCEPTION WHEN others THEN
+        IF SQLERRM LIKE '%not unbound%' THEN
+            RAISE NOTICE 'PASS  a student cannot be named outside `unbound`, even when none is set';
+            RETURN;
+        END IF;
+        RAISE EXCEPTION 'FAIL  blocked by the wrong branch: %', SQLERRM;
+    END;
+    RAISE EXCEPTION 'FAIL  a student was named on a withheld artifact.';
+END $$;
 
 SELECT set_config('app.actor_type', 'machine', true);
 
@@ -238,29 +254,29 @@ SELECT pg_temp.expect_fail(
 -- --------------------------------------------------------------------------- --
 INSERT INTO registry_node (node_id, standard_code, criterion_label, grade_band,
                            scale_categories, kind)
-VALUES ('sm-node', 'RH.11-12.6', 'point of view', '11-12', '[1,2,3,4]'::jsonb, 'anchor');
+VALUES ('00000000-0000-4000-8000-000000000001', 'RH.11-12.6', 'point of view', '11-12', '[1,2,3,4]'::jsonb, 'anchor');
 
 SELECT pg_temp.expect_fail(
   $$INSERT INTO registry_node (node_id, standard_code, criterion_label, grade_band,
                                scale_categories, kind)
-    VALUES ('sm-node-2','RI.11-12.6','x','11-12','[3]'::jsonb,'anchor')$$,
+    VALUES ('00000000-0000-4000-8000-000000000002','RI.11-12.6','x','11-12','[3]'::jsonb,'anchor')$$,
   'a one-category scale is not fittable');
 
 SELECT pg_temp.expect_fail(
-  $$UPDATE registry_node SET scale_categories='[1,2,3]'::jsonb WHERE node_id='sm-node'$$,
+  $$UPDATE registry_node SET scale_categories='[1,2,3]'::jsonb WHERE node_id='00000000-0000-4000-8000-000000000001'$$,
   'a node scale is its identity and cannot change');
 
 INSERT INTO registry_node_version (node_version_id, node_id, version, descriptors, status)
-VALUES ('sm-nv', 'sm-node', 1, '{"1":"a","2":"b","3":"c","4":"d"}'::jsonb, 'published');
+VALUES ('00000000-0000-4000-8000-000000000001:1', '00000000-0000-4000-8000-000000000001', 1, '{"1":"a","2":"b","3":"c","4":"d"}'::jsonb, 'published');
 SELECT pg_temp.expect_fail(
   $$UPDATE registry_node_version SET descriptors='{"1":"changed"}'::jsonb
-     WHERE node_version_id='sm-nv'$$,
+     WHERE node_version_id='00000000-0000-4000-8000-000000000001:1'$$,
   'published descriptors are frozen');
 
 -- Exactly one published version per node (0014). Two would make the scoring driver's trait-set
 -- join return the node twice — scored twice, under two wordings, and nothing would raise.
 INSERT INTO registry_node_version (node_version_id, node_id, version, descriptors, status)
-VALUES ('sm-nv2', 'sm-node', 2, '{"1":"a","2":"b","3":"c","4":"d"}'::jsonb, 'draft');
+VALUES ('sm-nv2', '00000000-0000-4000-8000-000000000001', 2, '{"1":"a","2":"b","3":"c","4":"d"}'::jsonb, 'draft');
 SELECT pg_temp.expect_ok(
   $$SELECT 1$$, 'a draft second version is fine — history is not what is bounded');
 SELECT pg_temp.expect_fail(
@@ -287,6 +303,40 @@ SELECT pg_temp.expect_fail(
          normalization_version, definition_hash, status)
     VALUES ('sm-cfg-3','sm-key-2',1,'claude-opus-5','high','{}'::jsonb,'1','h3','active')$$,
   'a promotion with no recorded reason is a change nobody can explain later');
+
+-- The rubric layer (0019). A trait is not owned by a rubric — the same identifier in two rubrics
+-- is how commonality gets declared — so these check the identity rules the many-to-many needs.
+INSERT INTO registry_rubric (rubric_id, name, publisher, grade_band, status)
+VALUES ('00000000-0000-4000-8000-0000000000aa', 'Smoke rubric', 'test', '11-12', 'draft');
+
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO registry_rubric (rubric_id, name, status)
+    VALUES ('not-a-uuid', 'Bad', 'draft')$$,
+  'a rubric identifier that is not a UUID is refused');
+
+SELECT pg_temp.expect_ok(
+  $$INSERT INTO registry_rubric_trait (rubric_id, node_id, ordinal)
+    VALUES ('00000000-0000-4000-8000-0000000000aa',
+            '00000000-0000-4000-8000-000000000001', 0)$$,
+  'a rubric is made of traits');
+
+INSERT INTO registry_rubric (rubric_id, name, publisher, grade_band, status)
+VALUES ('00000000-0000-4000-8000-0000000000bb', 'Second rubric', 'test', '11-12', 'draft');
+SELECT pg_temp.expect_ok(
+  $$INSERT INTO registry_rubric_trait (rubric_id, node_id, ordinal)
+    VALUES ('00000000-0000-4000-8000-0000000000bb',
+            '00000000-0000-4000-8000-000000000001', 0)$$,
+  'the SAME trait may belong to a second rubric — that is how commonality is declared');
+
+SELECT pg_temp.expect_fail(
+  $$INSERT INTO registry_skill (skill_id, standard_code, statement, derivation)
+    VALUES ('00000000-0000-4000-8000-0000000000cc', 'RH.11-12.6', 'x', 'clause')$$,
+  'a clause split with nobody answerable for it is refused');
+
+SELECT pg_temp.expect_ok(
+  $$INSERT INTO registry_skill (skill_id, standard_code, statement, derivation, derived_by)
+    VALUES ('00000000-0000-4000-8000-0000000000cc', 'RH.11-12.6', 'x', 'clause', 'sm-pm')$$,
+  'a clause split names who made it');
 
 -- --------------------------------------------------------------------------- --
 -- 5. Section access fails closed.
