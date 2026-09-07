@@ -101,7 +101,12 @@ _BY_ARTIFACT = "artifact_id IN (SELECT artifact_id FROM artifact WHERE run_id = 
 
 # Widened scope: everything `bind` made from a file this fixture read. Used by the teardown, never
 # by anything that runs against real work.
-_BY_RUN_OR_INTAKE = "(run_id = :run OR intake_file_id IS NOT NULL)"
+#
+# ONLY `artifact` HAS `intake_file_id`. The first version of this applied the column predicate to
+# every table carrying `run_id`, which meant `DELETE FROM score_event WHERE ... intake_file_id IS
+# NOT NULL` — a column that table has never had. Every other table reaches the widened set through
+# the artifact, which is the only place the link is recorded.
+_BY_RUN_OR_INTAKE = "(run_id = :run OR intake_file_id IS NOT NULL)"        # artifact ONLY
 _BY_ARTIFACT_WIDE = ("artifact_id IN (SELECT artifact_id FROM artifact "
                      "WHERE run_id = :run OR intake_file_id IS NOT NULL)")
 
@@ -141,10 +146,14 @@ def purge(include_intake_derived: bool = False) -> dict:
             conn.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER {trigger}"))
 
         for table, scope in _PURGE_ORDER:
-            if scope == "run":
-                where = _BY_RUN_OR_INTAKE if include_intake_derived else _BY_RUN
+            if not include_intake_derived:
+                where = _BY_RUN if scope == "run" else _BY_ARTIFACT
+            elif table == "artifact":
+                # The only table carrying the link, so the only one that can be asked about it
+                # directly.
+                where = _BY_RUN_OR_INTAKE
             else:
-                where = _BY_ARTIFACT_WIDE if include_intake_derived else _BY_ARTIFACT
+                where = _BY_ARTIFACT_WIDE
             counts[table] = conn.execute(
                 text(f"DELETE FROM {table} WHERE {where}"), {"run": RUN_ID}).rowcount
 
@@ -185,15 +194,18 @@ def verify(include_intake_derived: bool = False) -> dict:
 
     Counting what remains cannot make that mistake. If the predicate is wrong, this says so.
     """
-    scope = ("run_id = :run OR intake_file_id IS NOT NULL") if include_intake_derived         else "run_id = :run"
+    # Same trap as the purge: only `artifact` has `intake_file_id`. `artifact_scope` is asked of
+    # the artifact table directly; everything else counts through a join to it.
+    artifact_scope = ("run_id = :run OR intake_file_id IS NOT NULL") if include_intake_derived         else "run_id = :run"
+    scope = f"a.artifact_id IN (SELECT artifact_id FROM artifact WHERE {artifact_scope})"
     with engine().connect() as conn:
         conn.execute(text("SELECT set_config('app.tenant', 'public', true)"))
         left = {
             "artifact": conn.execute(
-                text(f"SELECT count(*) FROM artifact WHERE {scope}"),
+                text(f"SELECT count(*) FROM artifact a WHERE {artifact_scope}"),
                 {"run": RUN_ID}).scalar_one(),
             "score_event": conn.execute(
-                text(f"SELECT count(*) FROM score_event WHERE {scope}"),
+                text(f"SELECT count(*) FROM score_event a WHERE {scope}"),
                 {"run": RUN_ID}).scalar_one(),
             "artifact_composition": conn.execute(text(
                 "SELECT count(*) FROM artifact_composition c JOIN artifact a USING (artifact_id) "

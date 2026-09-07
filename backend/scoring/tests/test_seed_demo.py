@@ -172,3 +172,54 @@ def test_a_fixture_paper_assembles_a_stage_c_prompt():
 def test_the_papers_are_long_enough_to_be_attempts():
     for key, paper in seed_demo.load()["papers"].items():
         assert len(paper["text"]) > 200, f"{key} would be a strange thing to demonstrate with"
+
+
+def test_the_purge_only_asks_a_table_for_columns_it_has():
+    """`DELETE FROM score_event WHERE ... intake_file_id IS NOT NULL` — a column only `artifact`
+    has ever had. It ran fine in every unit test, because a unit test over a SQL string cannot
+    know what a table's columns are, and failed on the first real teardown.
+
+    This can know: the columns come from `Base.metadata`. For each table the purge touches, the
+    predicate it would use is checked against that table's actual columns — which turns a class of
+    error that previously needed a database into one a test catches.
+    """
+    import re
+
+    from app.models import Base
+    import delivery.models, intake.models, scoring.models  # noqa: F401
+
+    from scoring.seed_demo import (_BY_ARTIFACT, _BY_ARTIFACT_WIDE, _BY_RUN, _BY_RUN_OR_INTAKE,
+                                   _PURGE_ORDER)
+
+    def columns_asked_of_the_table(predicate: str) -> set[str]:
+        """Bare column references, excluding anything inside a subquery — a subquery names its
+        own table and is checked against that one, not this."""
+        outer = re.sub(r"\(SELECT.*?\)", "", predicate, flags=re.S | re.I)
+        return {c for c in re.findall(r"([a-z_]+_id|run_id)", outer)}
+
+    for table, scope in _PURGE_ORDER:
+        have = set(Base.metadata.tables[table].c.keys())
+        for widened in (False, True):
+            if not widened:
+                predicate = _BY_RUN if scope == "run" else _BY_ARTIFACT
+            elif table == "artifact":
+                predicate = _BY_RUN_OR_INTAKE
+            else:
+                predicate = _BY_ARTIFACT_WIDE
+            asked = columns_asked_of_the_table(predicate)
+            missing = sorted(asked - have)
+            assert not missing, (
+                f"the purge asks {table} for {missing}, which it does not have. "
+                f"predicate: {predicate}")
+
+
+def test_only_the_artifact_carries_the_link_to_intake():
+    """The reason the widened predicate cannot be applied uniformly, stated as a fact about the
+    schema rather than as a comment somebody has to notice."""
+    from app.models import Base
+    import delivery.models, intake.models, scoring.models  # noqa: F401
+
+    carriers = {t.name for t in Base.metadata.tables.values() if "intake_file_id" in t.c}
+    assert carriers == {"artifact"}, (
+        f"{carriers} carry intake_file_id — if that is deliberate the purge can widen through "
+        f"more than one table, and this test should say so explicitly.")
