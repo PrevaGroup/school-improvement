@@ -16,7 +16,7 @@ import json
 
 from registry import seed_demo
 from scoring.escalate import Policy
-from scoring.rater import RaterIdentity
+from scoring.rater import STAGES, RaterIdentity
 
 
 def test_the_seed_and_the_rater_hash_the_same_parts():
@@ -24,7 +24,8 @@ def test_the_seed_and_the_rater_hash_the_same_parts():
                        "score": {"version": "sc.2", "sha256": "def456"}}
 
     seeded = hashlib.sha256(
-        json.dumps({"model_id": seed_demo.MODEL_ID, "effort": seed_demo.EFFORT,
+        json.dumps({"models": {stage: seed_demo.MODEL_ID for stage in STAGES},
+                    "effort": seed_demo.EFFORT,
                     "prompt_versions": prompt_versions, "normalization_version": "1",
                     "escalation": seed_demo.DEFAULT_ESCALATION},
                    sort_keys=True, separators=(",", ":")).encode("utf8")).hexdigest()[:32]
@@ -34,6 +35,12 @@ def test_the_seed_and_the_rater_hash_the_same_parts():
                           escalation=Policy().as_dict()).definition_hash
 
     assert seeded == rater
+
+
+def test_the_seeds_stage_list_is_the_real_stage_list():
+    """`seed_demo.STAGES` is retyped by hand across the import boundary, like the policy. A stage
+    added to the rater and not here silently drops out of every seeded configuration's hash."""
+    assert tuple(seed_demo.STAGES) == tuple(STAGES)
 
 
 def test_the_seeds_default_policy_is_the_real_default_policy():

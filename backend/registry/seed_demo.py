@@ -126,6 +126,10 @@ def _read_registry(conn, acks: dict[str, dict]) -> Registry:
 
 # `scoring.escalate.Policy().as_dict()`, written out because `registry` may not import `scoring`.
 # The consistency test compares them.
+# `scoring.rater.STAGES`, written out for the same boundary reason. The seed declares no
+# per-stage overrides, so every stage resolves to MODEL_ID.
+STAGES = ("fit", "evidence", "score", "feedback")
+
 DEFAULT_ESCALATION = {"budget": 2,
                       "triggers": ["abstained", "no_verified_evidence"],
                       "escalated_effort": "high",
@@ -143,7 +147,8 @@ def seed(prompt_versions: dict) -> dict:
     # resolved, not NULL, because a configuration that declares nothing and one that spells out
     # the defaults are the same rater.
     definition_hash = hashlib.sha256(
-        json.dumps({"model_id": MODEL_ID, "effort": EFFORT, "prompt_versions": prompt_versions,
+        json.dumps({"models": {s: MODEL_ID for s in STAGES}, "effort": EFFORT,
+                    "prompt_versions": prompt_versions,
                     "normalization_version": "1", "escalation": DEFAULT_ESCALATION},
                    sort_keys=True,
                    separators=(",", ":")).encode("utf8")).hexdigest()[:32]
