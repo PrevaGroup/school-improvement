@@ -124,11 +124,28 @@ def _read_registry(conn, acks: dict[str, dict]) -> Registry:
     )
 
 
+# `scoring.escalate.Policy().as_dict()`, written out because `registry` may not import `scoring`.
+# The consistency test compares them.
+DEFAULT_ESCALATION = {"budget": 2,
+                      "triggers": ["abstained", "no_verified_evidence"],
+                      "escalated_effort": "high",
+                      "terminal_action": "route_to_human"}
+
+
 def seed(prompt_versions: dict) -> dict:
     fx = load()
+    # Must stay byte-identical to `scoring.rater.RaterIdentity.definition_hash`. It is duplicated
+    # rather than imported because `registry` may not import `scoring` — modules integrate through
+    # tables. `tests/test_identity_hash_agrees.py` is what keeps the two from drifting, since a
+    # silent divergence here makes every seeded configuration refuse to load.
+    #
+    # ESCALATION is part of it. This seed declares none, so the hash covers the DEFAULT policy —
+    # resolved, not NULL, because a configuration that declares nothing and one that spells out
+    # the defaults are the same rater.
     definition_hash = hashlib.sha256(
         json.dumps({"model_id": MODEL_ID, "effort": EFFORT, "prompt_versions": prompt_versions,
-                    "normalization_version": "1"}, sort_keys=True,
+                    "normalization_version": "1", "escalation": DEFAULT_ESCALATION},
+                   sort_keys=True,
                    separators=(",", ":")).encode("utf8")).hexdigest()[:32]
 
     with engine().begin() as conn:

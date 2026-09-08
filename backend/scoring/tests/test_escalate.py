@@ -16,6 +16,7 @@ import pytest
 
 from scoring import escalate
 from scoring.escalate import DEFAULT_TRIGGERS, NO_LEVEL, Policy, keep, plan, trigger_for
+from scoring.rater import RaterIdentity
 from scoring.score import Outcome
 
 
@@ -123,8 +124,10 @@ def test_deeper_means_effort_which_is_part_of_the_rater_identity():
     from scoring.rater import RaterIdentity
 
     base = RaterIdentity(config_id="cfg-1", model_id="claude-opus-5", effort="medium",
+                         escalation=Policy().as_dict(),
                          prompt_versions={"evidence": "ev.1"}, normalization_version="n.1")
     deeper = RaterIdentity(config_id="cfg-1", model_id="claude-opus-5",
+                           escalation=Policy().as_dict(),
                            effort=Policy().escalated_effort,
                            prompt_versions={"evidence": "ev.1"}, normalization_version="n.1")
     assert Policy().escalated_effort != base.effort
@@ -233,7 +236,8 @@ def test_escalation_is_reachable_from_the_scoring_run():
     from scoring.score import Criterion
 
     identity = RaterIdentity(config_id="cfg-1", model_id="claude-opus-5", effort="medium",
-                             prompt_versions={"e": "1"}, normalization_version="n.1")
+                             prompt_versions={"e": "1"}, normalization_version="n.1",
+                             escalation=Policy().as_dict())
     criteria = [Criterion(node_id="n1", criterion_label="Counterclaim", categories=[1, 2, 3, 4],
                           descriptors={"1": "a", "2": "b", "3": "c", "4": "d"},
                           node_version_id="n1.v1")]
@@ -265,7 +269,8 @@ def test_the_escalated_event_supersedes_the_first_pass_and_says_what_fired():
     from scoring.run_scoring import ESCALATED_PASS, SCRUTINY_PASS, event_rows
 
     identity = RaterIdentity(config_id="cfg-1", model_id="claude-opus-5", effort="medium",
-                             prompt_versions={"e": "1"}, normalization_version="n.1")
+                             prompt_versions={"e": "1"}, normalization_version="n.1",
+                             escalation=Policy().as_dict())
     artifact = {"artifact_id": "art-1", "run_id": "run-1", "student_id": "stu-1",
                 "section_id": "sec-1", "task_id": "task-1", "iteration": "final",
                 "window_label": "fall 2026", "tenant_id": "public", "visibility": "public"}
@@ -296,3 +301,55 @@ def test_measurement_can_already_separate_the_two_passes():
     plain = {"scrutiny_passes": 1, "escalation_trigger": None}
     assert admits({"include_escalated": False}, plain)
     assert not admits({"include_escalated": False}, esc)
+
+
+# ------------------------------------------------------------------ the harness is the rater
+
+def _identity(**over):
+    base = dict(config_id="cfg-1", model_id="claude-opus-5", effort="medium",
+                prompt_versions={"e": "1"}, normalization_version="n.1",
+                escalation=Policy().as_dict())
+    return RaterIdentity(**(base | over))
+
+
+def test_two_configurations_differing_only_in_budget_are_different_raters():
+    """They hashed the SAME until now, and migration 0027 wrote down why it was deferring the
+    question rather than winning it. The deferral is over: a budget of 0 and a budget of 2 produce
+    different bodies of scores on the same papers, so they are different raters — and a
+    measurement system that hashes them alike averages them together as one.
+    """
+    tight = _identity(escalation=Policy(budget=0).as_dict())
+    loose = _identity(escalation=Policy(budget=2).as_dict())
+    assert tight.definition_hash != loose.definition_hash
+
+
+def test_the_escalated_effort_is_part_of_it_too():
+    """Escalating to `high` and escalating to `medium` are different second looks."""
+    a = _identity(escalation=Policy(escalated_effort="high").as_dict())
+    b = _identity(escalation=Policy(escalated_effort="medium").as_dict())
+    assert a.definition_hash != b.definition_hash
+
+
+def test_the_triggers_are_part_of_it_too():
+    a = _identity(escalation=Policy(triggers=("abstained",)).as_dict())
+    b = _identity(escalation=Policy(triggers=DEFAULT_TRIGGERS).as_dict())
+    assert a.definition_hash != b.definition_hash
+
+
+def test_declaring_nothing_and_declaring_the_defaults_are_the_same_rater():
+    """The reason the RESOLVED policy is hashed rather than the raw column. A configuration with a
+    NULL escalation behaves exactly like one that spells the defaults out; only one of them says
+    so. Hashing the raw column would split one rater into two and break the connectivity that
+    puts them on a single scale."""
+    declared_nothing = _identity(escalation=Policy.from_config(None).as_dict())
+    spelled_out = _identity(escalation=Policy.from_config(
+        {"budget": 2, "triggers": list(DEFAULT_TRIGGERS), "escalated_effort": "high",
+         "terminal_action": "route_to_human"}).as_dict())
+    assert declared_nothing.definition_hash == spelled_out.definition_hash
+
+
+def test_the_config_id_is_not_in_the_hash():
+    """The hash describes what the rater IS, so two configurations that are the same rater under
+    different ids must collide — that is how a replay proves it replayed the same thing."""
+    assert _identity(config_id="cfg-1").definition_hash == \
+           _identity(config_id="cfg-2").definition_hash

@@ -81,13 +81,15 @@ _TRAIT_SET = text("""
 """)
 
 _ACTIVE_CONFIG = text("""
-    SELECT config_id, model_id, effort, prompt_versions, normalization_version, escalation
+    SELECT config_id, model_id, effort, prompt_versions, normalization_version,
+           escalation, definition_hash
       FROM registry_scoring_configuration
      WHERE config_key = :config_key AND status = 'active'
 """)
 
 _CONFIG_BY_ID = text("""
-    SELECT config_id, model_id, effort, prompt_versions, normalization_version, escalation
+    SELECT config_id, model_id, effort, prompt_versions, normalization_version,
+           escalation, definition_hash
       FROM registry_scoring_configuration
      WHERE config_id = :config_id
 """)
@@ -291,8 +293,15 @@ def next_state(outcomes: list[Outcome]) -> tuple[str, str | None]:
     return "scored", None
 
 
-def check_configuration(identity: RaterIdentity) -> None:
-    """Refuse a configuration whose prompt text has moved since it was promoted."""
+def check_configuration(identity: RaterIdentity, stored_hash: str | None = None) -> None:
+    """Refuse a configuration that is not the rater it was promoted as.
+
+    Two checks, and the second was missing entirely. `definition_hash` is documented as the thing
+    that makes a configuration edited in place stop matching its own description — and nothing
+    ever compared the stored value to the computed one, so the hash was decorative. A guard that
+    is never evaluated is not a guard, which is the same shape of defect as a trigger created
+    without error that never fires.
+    """
     live, stamped = fingerprint(), identity.prompt_versions
     if stamped != live:
         raise ConfigurationError(
@@ -300,6 +309,13 @@ def check_configuration(identity: RaterIdentity) -> None:
             f"fingerprint {live}. The rater is not the one that was promoted. Either restore the "
             f"text, or bump the prompt version and promote a new configuration — do not score "
             f"papers with a rater nobody approved.")
+    if stored_hash is not None and stored_hash != identity.definition_hash:
+        raise ConfigurationError(
+            f"configuration {identity.config_id} stores definition_hash {stored_hash} but its "
+            f"parts hash to {identity.definition_hash}. Some part of the rater — model, effort, "
+            f"prompts, normalisation, escalation — was edited after it was promoted. Promote a "
+            f"new configuration rather than scoring with one whose description no longer "
+            f"matches it.")
 
 
 # ------------------------------------------------------------------ database reads
@@ -360,14 +376,15 @@ def resolve_configuration(conn, *, tenant: str, section_id: str | None, task_id:
             f"expected exactly one configuration for {params}, found {len(rows)}. "
             f"An ambiguous rater is not a rater.")
     r = rows[0]
+    # The policy first, because it is part of the rater rather than a setting applied to one. A
+    # row with no policy gets the default, which is what every configuration written before the
+    # column existed has.
+    policy = escalate.Policy.from_config(r.get("escalation"))
     identity = RaterIdentity(config_id=r["config_id"], model_id=r["model_id"], effort=r["effort"],
                              prompt_versions=dict(r["prompt_versions"]),
-                             normalization_version=r["normalization_version"])
-    check_configuration(identity)
-    # Escalation behaviour is a property of the published configuration somebody approved, not of
-    # whichever constants were in this file that week. A row with no policy gets the default,
-    # which is what every configuration written before this column existed has.
-    policy = escalate.Policy.from_config(r.get("escalation"))
+                             normalization_version=r["normalization_version"],
+                             escalation=policy.as_dict())
+    check_configuration(identity, r["definition_hash"])
     return identity, policy
 
 

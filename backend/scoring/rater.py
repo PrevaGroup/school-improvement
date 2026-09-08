@@ -64,6 +64,27 @@ class RaterIdentity:
     effort: str | None
     prompt_versions: dict
     normalization_version: str
+    # The RESOLVED escalation policy, as `escalate.Policy.as_dict()` — how deep this rater is
+    # allowed to look.
+    #
+    # Migration 0027 deliberately left this out and wrote the counter-argument down rather than
+    # winning it: escalation decides how many chances a criterion gets to produce a score, which
+    # is adjacent to what a score MEANS rather than the same thing, and the per-event stamps
+    # (`scrutiny_passes`, `escalation_trigger`, the escalated `effort`) already make what happened
+    # recoverable row by row. The cost of including it — raising a budget re-rates every paper
+    # ever scored — was judged too big to decide quietly inside a migration.
+    #
+    # It is included now because that deferred decision has been made: the HARNESS is the rater.
+    # Two configurations differing only in budget produce different bodies of scores, so they are
+    # different raters, and a measurement system that hashes them the same averages them together
+    # as one.
+    #
+    # RESOLVED rather than the raw column, so a NULL escalation and one spelling out the defaults
+    # hash identically. They are the same rater; only one of them says so out loud.
+    #
+    # Required, with no default. A default would let a construction site stay silent about part of
+    # the rater it is defining, which is the thing this field exists to stop.
+    escalation: dict
 
     def __post_init__(self) -> None:
         if any(a in self.model_id for a in _ALIASES):
@@ -77,7 +98,8 @@ class RaterIdentity:
         return hashlib.sha256(
             json.dumps({"model_id": self.model_id, "effort": self.effort,
                         "prompt_versions": self.prompt_versions,
-                        "normalization_version": self.normalization_version},
+                        "normalization_version": self.normalization_version,
+                        "escalation": self.escalation},
                        sort_keys=True, separators=(",", ":")).encode("utf8")
         ).hexdigest()[:32]
 
