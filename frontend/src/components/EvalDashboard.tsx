@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { fmtNum, fmtCostUSD } from "../format";
+import { StopConditions } from "./StopConditions";
 import type {
   EvalSummary, EvalTraceRow, EvalCaseRow, EvalRunRow, EvalResultRow, EvalTraceDetail, EvalTraceEvent,
   EvalGraderCatalogEntry, EvalGraderScore, EvalGraderStat, EvalCaseDetail, EvalCaseHistoryRow,
@@ -10,9 +11,10 @@ import type {
 // The admin eval workbench: a master-detail (list | detail) view per section, chosen by the
 // section nav in App.tsx. Every stage is read-only and pseudonymous (no identity stored or shown).
 
-export type EvalSection = "traces" | "evals" | "results" | "graders";
+export type EvalSection = "release" | "traces" | "evals" | "results" | "graders";
 
 export function EvalWorkbench({ section }: { section: EvalSection }) {
+  if (section === "release") return <StopConditions />;
   if (section === "traces") return <TracesWB />;
   if (section === "evals") return <EvalsWB />;
   if (section === "results") return <ResultsWB />;

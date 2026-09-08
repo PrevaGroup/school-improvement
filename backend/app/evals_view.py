@@ -199,6 +199,72 @@ def evals_cases(limit: int = 200, _: dict = Depends(require_admin),
     return {"available": True, "cases": cases, "by_status": by_status}
 
 
+# The five conditions, as they last stood. DISTINCT ON gives the newest row per condition, which
+# is the question a person opens this page with; the history behind it answers the second one,
+# which is when it changed.
+_STOP_LATEST = text("""
+    SELECT DISTINCT ON (condition)
+           condition, verdict, observed, threshold_value, agreed_by, agreed_on,
+           n, detail, breakdown, created_at, eval_run_id
+      FROM eval_stop_condition
+     ORDER BY condition, created_at DESC
+""")
+
+# When each condition last changed its verdict — the difference between "fine for three months"
+# and "nobody has run it since June", which a single latest row cannot tell apart.
+_STOP_HISTORY = text("""
+    SELECT condition, verdict, observed, created_at
+      FROM eval_stop_condition
+     ORDER BY created_at DESC
+     LIMIT :n
+""")
+
+# Named here rather than derived from the rows, so a condition that has NEVER run appears on the
+# page as never run. Deriving the list from what is in the table would show four conditions and
+# look complete.
+STOP_CONDITIONS = ("cohort_invariance", "matched_pairs", "severity_uniformity",
+                   "abstention_subgroup", "teacher_acceptance")
+
+
+@router.get("/stop-conditions")
+def evals_stop_conditions(history: int = 200, _: dict = Depends(require_admin),
+                          db: Session = Depends(get_db_public)) -> dict:
+    """Whether scores may be released, and on whose authority.
+
+    Four states, and conflating any two of them is the failure this page exists to prevent:
+    `holds` (measured, within an agreed threshold), `triggered` (measured, past it — stop),
+    `uncommitted` (measured, and nobody has agreed what it would mean), `insufficient` (there was
+    nothing to measure). A condition that has never run at all is listed separately again.
+    """
+    try:
+        latest = [dict(r) for r in db.execute(_STOP_LATEST).mappings()]
+        recent = [dict(r) for r in db.execute(
+            _STOP_HISTORY, {"n": max(1, min(history, 1000))}).mappings()]
+    except SQLAlchemyError:
+        return {"available": False, "conditions": [], "never_run": list(STOP_CONDITIONS)}
+
+    for r in latest + recent:
+        r["created_at"] = r["created_at"].isoformat() if r.get("created_at") else None
+        if r.get("observed") is not None:
+            r["observed"] = float(r["observed"])
+    for r in latest:
+        r["threshold_value"] = float(r["threshold_value"])
+        # The pre-commitment fact, computed here so the console cannot get it wrong: a condition
+        # with no signatory is reporting, not gating, whatever its verdict says.
+        r["can_gate"] = bool(r.get("agreed_by") and r.get("agreed_on"))
+
+    seen = {r["condition"] for r in latest}
+    return {
+        "available": True,
+        "conditions": latest,
+        # A condition absent from the table has never been run, which is not a pass and must not
+        # be inferable only from a missing row.
+        "never_run": [c for c in STOP_CONDITIONS if c not in seen],
+        "stop_release": any(r["verdict"] == "triggered" for r in latest),
+        "history": recent,
+    }
+
+
 @router.get("/runs")
 def evals_runs(limit: int = 50, _: dict = Depends(require_admin),
                db: Session = Depends(get_db_public)) -> dict:

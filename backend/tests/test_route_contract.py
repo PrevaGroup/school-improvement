@@ -54,6 +54,8 @@ EXPECTED: dict[str, set[str]] = {
     "/api/evals/traces": {"GET"},
     "/api/evals/traces/{trace_id}": {"GET"},
     "/api/evals/graders": {"GET"},
+    # Whether scores may be released, and on whose authority. Phase 5.
+    "/api/evals/stop-conditions": {"GET"},
     # --- serving: the loop's later stages (cases -> runs -> per-case results) ---
     "/api/evals/cases": {"GET"},
     "/api/evals/cases/{eval_case_id}": {"GET"},

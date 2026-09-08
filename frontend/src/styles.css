@@ -497,3 +497,46 @@
   /* The highlight is the only colour in the paper, so it needs no border to be found. Kept light
      enough that the student's words stay the thing being read. */
   .rv-marked mark { background: #fbe6b8; color: inherit; padding: 1px 0; border-radius: 2px; }
+
+  /* May scores be released? Five states, and four of them are commonly read as the fifth — so
+     no two share a colour or a word. */
+  .sc { flex: 1; overflow-y: auto; padding: 22px 28px 60px; min-width: 0; }
+  .sc-lede { max-width: 62ch; margin-bottom: 18px; }
+  .sc-lede h2 { margin: 0 0 6px; font-size: 20px; }
+  .sc-lede p { margin: 0; color: var(--muted); font-size: 13px; }
+  .sc-banner { padding: 12px 14px; border-radius: 8px; font-size: 13.5px; margin-bottom: 18px;
+               background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--green); }
+  .sc-banner.sc-stop { border-left-color: var(--red); background: #fdf0ef; }
+  .sc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .sc-list li { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line);
+                border-radius: 8px; padding: 13px 15px; }
+  .sc-list li.sc-holds       { border-left-color: var(--green); }
+  .sc-list li.sc-triggered   { border-left-color: var(--red); }
+  .sc-list li.sc-uncommitted { border-left-color: var(--amber); }
+  .sc-list li.sc-insufficient{ border-left-color: var(--muted); }
+  .sc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .sc-chip { font-size: 11px; padding: 2px 9px; border-radius: 999px; border: 1px solid currentColor;
+             white-space: nowrap; }
+  .sc-chip-holds       { color: var(--green); }
+  .sc-chip-triggered   { color: var(--red); font-weight: 700; }
+  .sc-chip-uncommitted { color: var(--amber); }
+  .sc-chip-insufficient{ color: var(--muted); }
+  .sc-protects { margin: 5px 0 0; font-size: 12.5px; color: var(--muted); max-width: 74ch; }
+  .sc-nums { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; font-size: 12px;
+             color: var(--muted); font-variant-numeric: tabular-nums; }
+  .sc-agreed { color: var(--green); }
+  .sc-unagreed { color: var(--amber); }
+  .sc-detail { margin: 7px 0 0; font-size: 13px; }
+  .sc-list details, .sc-history { margin-top: 8px; }
+  .sc-list summary, .sc-history summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+  .sc-list pre { font-size: 11.5px; background: var(--bg); padding: 8px 10px; border-radius: 6px;
+                 overflow-x: auto; margin: 6px 0 0; }
+  /* Never run gets its own block and its own words. An absent row shows nothing at all, which is
+     the one state a reader mistakes for a pass without noticing they did. */
+  .sc-neverrun { margin-top: 18px; padding: 13px 15px; border: 1px solid var(--amber);
+                 border-left-width: 4px; border-radius: 8px; background: #fdf7ec; font-size: 13px; }
+  .sc-neverrun ul { margin: 8px 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+  .sc-neverrun small { color: var(--muted); }
+  .sc-history table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  .sc-history td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line);
+                   font-variant-numeric: tabular-nums; }
