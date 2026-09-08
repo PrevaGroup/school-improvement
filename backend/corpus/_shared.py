@@ -249,10 +249,10 @@ _PAPER = text("""
     INSERT INTO corpus_paper
         (paper_id, source_id, external_id, text, text_hash, prompt_name, task_type,
          grade_level, word_count, partition, gender, ell_status, race_ethnicity,
-         economically_disadvantaged, student_disability_status)
+         economically_disadvantaged, disability_status)
     VALUES (:paper_id, :source_id, :external_id, :text, :text_hash, :prompt_name, :task_type,
             :grade_level, :word_count, :partition, :gender, :ell_status, :race_ethnicity,
-            :economically_disadvantaged, :student_disability_status)
+            :economically_disadvantaged, :disability_status)
     ON CONFLICT (source_id, external_id) DO UPDATE SET
         text = EXCLUDED.text, text_hash = EXCLUDED.text_hash,
         prompt_name = EXCLUDED.prompt_name, task_type = EXCLUDED.task_type,
@@ -260,7 +260,7 @@ _PAPER = text("""
         partition = EXCLUDED.partition, gender = EXCLUDED.gender,
         ell_status = EXCLUDED.ell_status, race_ethnicity = EXCLUDED.race_ethnicity,
         economically_disadvantaged = EXCLUDED.economically_disadvantaged,
-        student_disability_status = EXCLUDED.student_disability_status
+        disability_status = EXCLUDED.disability_status
 """)
 
 # Scores and spans are DELETED for the papers in this load and re-inserted, rather than upserted.

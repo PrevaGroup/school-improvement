@@ -137,3 +137,59 @@ def test_the_declared_overlap_is_written_whether_or_not_it_resolves():
     assert '"overlaps_source_id": spec.overlaps_source_id' in src
     # And not conditional on the other corpus existing.
     assert "if linked else None" not in src
+
+
+# ------------------------------------------------------------------ the INSERT and the table
+
+def test_every_column_the_paper_insert_names_exists_on_the_table():
+    """The INSERT said `student_disability_status` — the CSV's column name — where the table has
+    `disability_status`. It failed at bind-parameter construction against the real instance, after
+    a four-minute read of an 800MB file, which is the most expensive place to find a typo.
+
+    Derived from the model rather than listed, so a column renamed in a migration cannot leave
+    this passing.
+    """
+    import re
+
+    from corpus._shared import _PAPER
+    from corpus.models import CorpusPaper
+
+    named = set(re.search(r"INSERT INTO corpus_paper\s*\((.*?)\)",
+                          str(_PAPER), re.S).group(1).replace("\n", " ").split(","))
+    named = {c.strip() for c in named if c.strip()}
+    actual = set(CorpusPaper.__table__.columns.keys())
+    assert named <= actual, f"the insert names columns the table does not have: {named - actual}"
+
+
+def test_the_paper_insert_and_its_parameters_agree():
+    """A column list and a VALUES list that drift produce either a silent NULL or an error at
+    execution — never at import, and never in a unit test that does not touch a database."""
+    import re
+
+    from corpus._shared import _PAPER
+
+    sql = str(_PAPER)
+    cols = {c.strip() for c in re.search(
+        r"INSERT INTO corpus_paper\s*\((.*?)\)", sql, re.S).group(1).replace("\n", " ").split(",")}
+    binds = set(re.findall(r":(\w+)", sql.split("ON CONFLICT")[0]))
+    assert cols == binds, f"columns and parameters differ: {cols ^ binds}"
+
+
+def test_the_mapper_supplies_every_parameter_the_insert_binds():
+    """The other half: a bind parameter the mapper never sets raises `A value is required for bind
+    parameter`, which is what happened. Checked against the real mapper's output shape."""
+    import re
+
+    from corpus._shared import _PAPER
+    from corpus.load_persuade import _paper
+
+    row = {"essay_id_comp": "E1", "full_text": "an essay", "prompt_name": "p",
+           "task": "Independent", "grade_level": "10", "word_count": "2",
+           "gender": "F", "ell_status": "No", "race_ethnicity": "X",
+           "economically_disadvantaged": "No", "student_disability_status": "None"}
+    mapped = _paper(row)
+    # The loader adds these four after the mapper returns.
+    mapped |= {"text_hash": "h", "source_id": "s", "partition": "calibration", "paper_id": "p"}
+
+    binds = set(re.findall(r":(\w+)", str(_PAPER).split("ON CONFLICT")[0]))
+    assert binds <= set(mapped), f"the mapper never sets: {binds - set(mapped)}"
