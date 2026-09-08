@@ -18,8 +18,9 @@ import pytest
 from app.vocab import SCORE_STATUS_IDS
 from scoring.prompts import fingerprint
 from scoring.rater import RaterIdentity
-from scoring.run_scoring import (ConfigurationError, check_configuration, enters_calibration,
-                                 event_rows, idempotency_key, next_state, trait_set_version)
+from scoring.run_scoring import (AlreadyRunning, ConfigurationError, check_configuration,
+                                 enters_calibration, event_rows, idempotency_key, next_state,
+                                 score_pending, trait_set_version)
 from scoring.score import Outcome
 
 ARTIFACT = {
@@ -279,3 +280,111 @@ def test_scoring_reads_the_corpus_table_rather_than_importing_it():
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             imported.add(node.module.split(".")[0])
     assert "corpus" not in imported
+
+
+# ------------------------------------------------------------------ one scorer per tenant
+
+class _Result:
+    def __init__(self, value=None, rows=()):
+        self._value, self._rows = value, rows
+
+    def scalar(self):
+        return self._value
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return list(self._rows)
+
+
+class _Conn:
+    """Records every statement, answers the lock with whatever the engine was told to say."""
+
+    def __init__(self, eng):
+        self.eng = eng
+
+    def execute(self, stmt, params=None):
+        sql = str(stmt)
+        self.eng.statements.append(sql)
+        if "pg_try_advisory_lock" in sql:
+            return _Result(self.eng.lock_granted)
+        return _Result(rows=self.eng.pending)
+
+    def close(self):
+        self.eng.closed += 1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+class _Engine:
+    def __init__(self, *, lock_granted=True, pending=()):
+        self.lock_granted, self.pending = lock_granted, list(pending)
+        self.statements, self.closed = [], 0
+
+    def connect(self):
+        return _Conn(self)
+
+
+@pytest.fixture
+def fake_engine(monkeypatch):
+    def install(**kw):
+        eng = _Engine(**kw)
+        monkeypatch.setattr("scoring.run_scoring.engine", lambda: eng)
+        return eng
+    return install
+
+
+def test_a_second_scorer_on_the_same_tenant_is_refused(fake_engine):
+    """The money is the reason. `_PENDING` selects artifacts in `bound`, and an artifact stays
+    `bound` until its last trait lands — so two scorers minutes apart select the SAME papers and
+    both pay for them. The unique constraint on `idempotency_key` blocks the duplicate row, and it
+    blocks it after the call has been billed."""
+    fake_engine(lock_granted=False)
+    with pytest.raises(AlreadyRunning):
+        score_pending(tenant="corpus", config_key="writing-default")
+
+
+def test_the_refusal_names_the_tenant_and_where_to_look(fake_engine):
+    """It fires at 1am when somebody has forgotten a shell is still running. A bare exception
+    class sends them to read this file."""
+    fake_engine(lock_granted=False)
+    with pytest.raises(AlreadyRunning) as e:
+        score_pending(tenant="corpus", config_key="writing-default")
+    assert "corpus" in str(e.value)
+    assert "pg_locks" in str(e.value)
+
+
+def test_the_lock_is_released_even_when_it_was_never_acquired(fake_engine):
+    """The refusal path closes its connection too. Leaking one per refusal would exhaust the pool
+    on a job that retries."""
+    eng = fake_engine(lock_granted=False)
+    with pytest.raises(AlreadyRunning):
+        score_pending(tenant="corpus", config_key="writing-default")
+    assert eng.closed >= 1
+
+
+def test_the_lock_connection_outlives_the_query_that_selects_the_batch(fake_engine):
+    """A session-level advisory lock dies with its session. Taking it on the connection that reads
+    `_PENDING` — which is opened and closed in a `with` — would release it before the first paper
+    was scored, and the guard would be decorative."""
+    eng = fake_engine(lock_granted=True, pending=())
+    score_pending(tenant="corpus", config_key="writing-default")
+    lock_at = next(i for i, s in enumerate(eng.statements) if "pg_try_advisory_lock" in s)
+    pending_at = next(i for i, s in enumerate(eng.statements) if "FROM artifact" in s)
+    assert lock_at < pending_at
+    # Two connections: the one holding the lock, and the one that read the batch.
+    assert eng.closed == 2
+
+
+def test_the_lock_is_per_tenant_not_global(fake_engine):
+    """Corpus scoring and a district's scoring are unrelated work on disjoint artifacts. One
+    global lock would make a two-hour anchor run block a teacher's papers."""
+    eng = fake_engine(lock_granted=True)
+    score_pending(tenant="corpus", config_key="writing-default")
+    lock = next(s for s in eng.statements if "pg_try_advisory_lock" in s)
+    assert "hashtext(:tenant)" in lock

@@ -374,36 +374,77 @@ def resolve_configuration(conn, *, tenant: str, section_id: str | None, task_id:
 # ------------------------------------------------------------------ the loop
 
 
+class AlreadyRunning(RuntimeError):
+    """Another scorer holds this tenant's lock. See `_LOCK_NS`."""
+
+
+# One scorer per tenant at a time, enforced by Postgres rather than by remembering.
+#
+# `_PENDING` selects artifacts in `bound`, and an artifact stays `bound` until every one of its
+# traits is written. So two scorers started minutes apart select the SAME papers and both pay for
+# them. The unique constraint on `idempotency_key` stops the duplicate ROW, and it stops it after
+# the API call has been made and billed — the protection is against a corrupt table, not against
+# the money.
+#
+# It became a live risk the moment there were two ways to launch: a shell and a Cloud Run job.
+# Nobody holds both in their head at 1am.
+#
+# An advisory lock rather than a row: it is released when the connection dies, so a killed job —
+# which is exactly how the first corpus run ended — leaves nothing to clean up by hand. A lock
+# row would need a heartbeat and a reaper, and a stale one would block every future run.
+_LOCK_NS = 0x5C04  # "SCOR", so a `pg_locks` reading names the owner
+_LOCK = text("SELECT pg_try_advisory_lock(:ns, hashtext(:tenant))")
+
+
 def score_pending(*, tenant: str, config_key: str, run_id: str | None = None,
                   limit: int = 50, dry_run: bool = False, rater_factory=AnthropicRater) -> dict:
-    """Score every `bound` artifact for one tenant. Returns a summary the caller can log."""
+    """Score every `bound` artifact for one tenant. Returns a summary the caller can log.
+
+    Raises `AlreadyRunning` if another scorer holds this tenant — refusing costs a re-run, and
+    proceeding costs the price of every paper twice.
+    """
     eng = engine()
     total, scored, skipped, failed = Usage(), 0, 0, []
 
-    with eng.connect() as conn:
-        conn.execute(text("SELECT set_config('app.tenant', :t, true)"), {"t": tenant})
-        pending = conn.execute(
-            _PENDING, {"tenant": tenant, "run_id": run_id, "limit": limit}).mappings().all()
-    log.info("%d artifact(s) in bound", len(pending))
+    # Held for the whole batch, so it must be its own connection — the per-artifact connections
+    # below are opened and closed inside the loop, and a session lock dies with its session.
+    lock_conn = eng.connect()
+    try:
+        if not lock_conn.execute(_LOCK, {"ns": _LOCK_NS, "tenant": tenant}).scalar():
+            raise AlreadyRunning(
+                f"another scorer already holds tenant {tenant!r}. Two scorers select the same "
+                f"`bound` artifacts and both pay for them, so this one is refusing. If you are "
+                f"sure the other is gone, its lock died with its connection — check "
+                f"`SELECT * FROM pg_locks WHERE locktype = 'advisory'`.")
 
-    for row in pending:
-        artifact = dict(row)
-        try:
-            usage = _score_one(eng, artifact, tenant=tenant, config_key=config_key,
-                               dry_run=dry_run, rater_factory=rater_factory)
-        except Exception as exc:                      # one bad artifact must not stop the batch
-            log.error("artifact %s: %s", artifact["artifact_id"], exc)
-            failed.append({"artifact_id": artifact["artifact_id"], "error": str(exc)})
-            continue
-        if usage is None:
-            skipped += 1
-        else:
-            scored += 1
-            total = total + usage
+        with eng.connect() as conn:
+            conn.execute(text("SELECT set_config('app.tenant', :t, true)"), {"t": tenant})
+            pending = conn.execute(
+                _PENDING, {"tenant": tenant, "run_id": run_id, "limit": limit}).mappings().all()
+        log.info("%d artifact(s) in bound", len(pending))
 
-    return {"pending": len(pending), "scored": scored, "skipped": skipped,
-            "failed": failed, "calls": total.calls,
-            "input_tokens": total.input_tokens, "output_tokens": total.output_tokens}
+        for row in pending:
+            artifact = dict(row)
+            try:
+                usage = _score_one(eng, artifact, tenant=tenant, config_key=config_key,
+                                   dry_run=dry_run, rater_factory=rater_factory)
+            except Exception as exc:                  # one bad artifact must not stop the batch
+                log.error("artifact %s: %s", artifact["artifact_id"], exc)
+                failed.append({"artifact_id": artifact["artifact_id"], "error": str(exc)})
+                continue
+            if usage is None:
+                skipped += 1
+            else:
+                scored += 1
+                total = total + usage
+
+        return {"pending": len(pending), "scored": scored, "skipped": skipped,
+                "failed": failed, "calls": total.calls,
+                "input_tokens": total.input_tokens, "output_tokens": total.output_tokens}
+    finally:
+        # Closing releases the session's advisory locks, including on the path where acquiring it
+        # failed — where `close()` is all this does.
+        lock_conn.close()
 
 
 def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
@@ -591,8 +632,13 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
-    summary = score_pending(tenant=args.tenant, config_key=args.config_key, run_id=args.run_id,
-                            limit=args.limit, dry_run=args.dry_run)
+    try:
+        summary = score_pending(tenant=args.tenant, config_key=args.config_key,
+                                run_id=args.run_id, limit=args.limit, dry_run=args.dry_run)
+    except AlreadyRunning as exc:
+        # A refusal, not a crash. On a Cloud Run job a traceback reads as a bug and gets retried;
+        # this exits non-zero with the reason on one line.
+        raise SystemExit(str(exc))
     print(json.dumps(summary, indent=1))
 
 

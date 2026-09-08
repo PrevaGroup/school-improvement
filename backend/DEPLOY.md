@@ -425,6 +425,158 @@ identity Cloud Scheduler uses to **invoke** it (that's the `run.invoker` binding
 >     --format='value(spec.template.spec.containers[0].image)')"
 > ```
 
+## Scoring a corpus wave (Cloud Run job, on demand)
+
+`scoring.run_scoring` is hours of work that spends real money — roughly **$0.23 a paper** for the
+eight PERSUADE traits, measured, so an anchor wave of ~330 papers is about **$77 and two hours**.
+
+**It cannot live in Cloud Shell.** The first corpus wave was started there with `nohup` and died
+at paper 31: `nohup` survives a hangup, but the Cloud Shell VM itself is ephemeral and goes away
+when the session ends. The log persisted (`$HOME` is on a persistent disk) and ended mid-flight
+with a successful API call, no summary and no traceback — which is what a killed process looks
+like, and is easy to mistake for a crash. So this is a **Cloud Run Job**, same as trace ingest,
+for the same reason `evals.ingest_traces` is one: batch work with no HTTP surface.
+
+Unlike ingest it is **not scheduled**. Every execution spends money, and a cron that quietly bills
+$77 because a wave got re-bound is not a thing to leave running.
+
+The same two facts from the ingest section apply, and one more:
+
+1. **DB connection is the Cloud SQL socket, not the Connector.** `scoring/_db.py` builds its engine
+   from `settings.migration_database_url` — plain host:port, none of `app/db.py`'s Connector logic.
+   Set `DB_HOST=/cloudsql/<ICN>`; psycopg reads a `/`-prefixed host as a socket directory.
+2. **It connects as the migrator role**, so the SA needs `secretAccessor` on
+   `sip-migrator-password`.
+3. **It needs the Anthropic key.** `scoring/rater.py` resolves it through `app.config`, which reads
+   Secret Manager over ADC — so `secretAccessor` on `anthropic-api-key` and `GCP_PROJECT` set is
+   all it takes. No `--set-secrets` mount, and no key in an env var.
+
+### Its own service account, because this one spends money
+
+`eval-runner` runs the hourly trace ingest and does **not** hold the Anthropic key. Giving it one
+would put a money-spending credential on an unattended hourly schedule. Scoring gets its own
+identity, so it can be audited and revoked on its own:
+
+```bash
+gcloud iam service-accounts create score-runner \
+  --project school-improvement-501916 \
+  --display-name "Corpus / batch scoring — holds the Anthropic key"
+SCORE_SA=score-runner@school-improvement-501916.iam.gserviceaccount.com
+```
+
+Exactly what it needs — DB connect, the migrator password, the Anthropic key:
+
+```bash
+gcloud projects add-iam-policy-binding school-improvement-501916 \
+  --member=serviceAccount:$SCORE_SA --role=roles/cloudsql.client
+gcloud secrets add-iam-policy-binding sip-migrator-password \
+  --member=serviceAccount:$SCORE_SA --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding anthropic-api-key \
+  --member=serviceAccount:$SCORE_SA --role=roles/secretmanager.secretAccessor
+```
+
+> No `storage.*` and no `run.invoker`: it reads no bucket and nothing schedules it. Deploying a job
+> that **runs as** `$SCORE_SA` needs `iam.serviceAccounts.actAs` on it — project owners have it.
+
+### The job
+
+Reuse the deployed `sip-api` image, override the entrypoint. `--task-timeout 6h` against a measured
+two hours leaves room for a slow wave; **24h is the Cloud Run maximum** and a wave that needs more
+should be split.
+
+```bash
+IMAGE=$(gcloud run services describe sip-api --region us-central1 \
+  --format='value(spec.template.spec.containers[0].image)')
+
+gcloud run jobs create sip-score-corpus \
+  --region us-central1 \
+  --image "$IMAGE" \
+  --command python \
+  --args=-m,scoring.run_scoring,--tenant,corpus,--config-key,writing-default,--limit,400 \
+  --set-cloudsql-instances school-improvement-501916:us-central1:school-improvement-sql \
+  --set-env-vars GCP_PROJECT=school-improvement-501916,DB_NAME=sip,DB_HOST=/cloudsql/school-improvement-501916:us-central1:school-improvement-sql \
+  --service-account $SCORE_SA \
+  --max-retries 1 --task-timeout 6h
+```
+
+`--max-retries 1` is safe here and would not be in a naive scorer: the resume check is **per
+trait**, so a retry skips every trait already written and pays only for what is genuinely missing.
+
+**Smoke-test for free.** `--limit 0` selects zero artifacts, so it exercises the image, the service
+account, the Cloud SQL socket, both secrets and the tenant lock without making a single API call:
+
+```bash
+gcloud run jobs execute sip-score-corpus --region us-central1 --wait --args=-m,scoring.run_scoring,--tenant,corpus,--config-key,writing-default,--limit,0
+```
+
+Expect exit 0 and `"pending": 0` in the summary. **Do this before the real run** — a
+misconfigured SA otherwise announces itself two hours and seventy dollars in.
+
+Then the real one:
+
+```bash
+gcloud run jobs execute sip-score-corpus --region us-central1
+```
+
+Without `--wait` it returns immediately and the job keeps going; that is the entire point. Follow
+it:
+
+```bash
+gcloud beta run jobs logs tail sip-score-corpus --region us-central1
+```
+
+### One scorer per tenant, enforced by the database
+
+`score_pending` takes a Postgres advisory lock on the tenant and **refuses** if another scorer
+holds it (`AlreadyRunning`, exit non-zero with the reason on one line).
+
+This is about money, not about table corruption. The pending query selects artifacts in `bound`,
+and an artifact stays `bound` until its last trait is written — so two scorers started minutes
+apart select the *same* papers and both pay for them. The unique constraint on `idempotency_key`
+does stop the duplicate row, and it stops it *after* the call has been billed.
+
+It became a live risk the moment there were two ways to launch: a shell and this job.
+
+An advisory lock rather than a lock row, because it is released when the connection dies — a
+killed job, which is exactly how the first wave ended, leaves nothing to clean up. To see one:
+
+```bash
+psql "host=127.0.0.1 dbname=sip user=sip_migrator" -c "SELECT * FROM pg_locks WHERE locktype = 'advisory'"
+```
+
+> **A shell run started before this landed holds no lock.** The guard protects two processes that
+> both have it; it cannot protect against an older binary. Check `pgrep -f run_scoring` on any
+> Cloud Shell session before executing the job for the first time.
+
+### Overriding the wave at execution time
+
+`--args` on `execute` replaces the baked arguments for that one run — a different tenant, a
+different configuration, a smaller limit:
+
+```bash
+gcloud run jobs execute sip-score-corpus --region us-central1 --args=-m,scoring.run_scoring,--tenant,corpus,--config-key,writing-default,--limit,50
+```
+
+> **The job pins the image at creation — it does NOT track new `sip-api` deploys.** Same caveat as
+> trace ingest, and it matters more here: a prompt change that is live on the website will not be
+> in the scorer, and the scores would be attributed to a configuration that never produced them.
+> After a deploy whose changes belong in scoring:
+> ```bash
+> gcloud run jobs update sip-score-corpus --region us-central1 \
+>   --image "$(gcloud run services describe sip-api --region us-central1 \
+>     --format='value(spec.template.spec.containers[0].image)')"
+> ```
+
+### Reading the result
+
+```bash
+python -m measurement.corpus_agreement
+```
+
+Agreement, severity and ELL bias per trait against the PERSUADE human scores. If it says
+`No scored corpus papers found`, the job reported success without doing the job — which has
+happened on this project before, in a different form, and is the reason that sentence exists.
+
 ## Chat UI (`GET /` + `POST /chat`)
 
 The UI is the React + Vite SPA in [`frontend/`](../frontend), built into the image and served
