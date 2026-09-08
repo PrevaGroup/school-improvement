@@ -221,3 +221,22 @@ def test_every_declared_constraint_name_exists_in_a_migration():
         "constraints declared in the models under names no migration creates:\n  "
         + "\n  ".join(sorted(missing))
         + "\n\nThe database and the models disagree about what these are called.")
+
+
+def test_no_check_constraint_uses_a_subquery():
+    """Postgres refuses one: `cannot use subquery in check constraint`. Migration 0037 shipped
+    with `SELECT bool_and(...) FROM jsonb_object_keys(...)` and failed on the real database, after
+    passing every test here — because nothing in this suite executes a migration.
+
+    Grepping is a weak substitute for running them and it catches this one shape. It is what can
+    run without a Postgres.
+    """
+    for path in _migration_files():
+        src = path.read_text(encoding="utf8")
+        for i, chunk in enumerate(src.split("create_check_constraint")):
+            if i == 0:
+                continue
+            # The constraint expression is the argument list up to the closing call.
+            head = chunk[:chunk.find(")\n")] if ")\n" in chunk else chunk[:2000]
+            assert "SELECT" not in head.upper(), (
+                f"{path.name}: a CHECK constraint contains a subquery, which Postgres refuses")
