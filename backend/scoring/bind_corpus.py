@@ -28,6 +28,24 @@ than two iterations of one, because independent and text-dependent are different
 rather than two attempts at the same one, and `iteration` means draft-versus-final everywhere else
 in this system.
 
+## Created `bound`, because there was never an unbound period
+
+A student's paper starts `unbound` because the system does not yet know whose it is, and a teacher
+resolving that is the decision the transition trigger protects. This code tried to make that move
+as a machine and the database refused it — correctly, and the comment claiming `unbound -> bound`
+was a machine move was simply wrong.
+
+A corpus paper has no such period. PERSUADE states the binding, there is no teacher, and there is
+no ambiguity for one to resolve. Moving it would fabricate a decision nobody made, and the only
+way to make that move legal would be to claim a teacher actor, which is worse than fabricating it
+quietly. So the artifact is created `bound`, and how it got there lives in `resolution_path` —
+every part `declared`, with the corpus id as the basis — rather than in a transition row. No
+decision happened, so there is nothing to attribute.
+
+Migration 0033 makes that the only exception: every other artifact must be inserted `unbound`.
+Before it, any code could insert one already `released` and skip the teacher check entirely, since
+the transition trigger is BEFORE UPDATE and says nothing about how an artifact arrives.
+
 ## The student id is the paper id
 
 A PERSUADE essay was written by a real student whose identity nobody has. `student_id` is the
@@ -80,15 +98,7 @@ _INSERT = text("""
          state_reason_code, tenant_id, visibility)
     VALUES (:artifact_id, :run_id, :student_id, :section_id, :task_id, :iteration, NULL,
             :content_hash, :source_uri, NULL, NULL, CAST(:resolution_path AS jsonb),
-            'unbound', NULL, :tenant_id, 'public')
-""")
-
-# Bound in the same transaction as the insert. There is no teacher here to make the move, and no
-# ambiguity for one to resolve: the corpus says whose paper it is. Writing it `unbound` and leaving
-# it there would put 664 papers into a queue waiting for a decision nobody can make.
-_BIND = text("""
-    UPDATE artifact SET state = 'bound'
-     WHERE artifact_id = :artifact_id AND state = 'unbound'
+            'bound', NULL, :tenant_id, 'public')
 """)
 
 
@@ -146,13 +156,8 @@ def bind(paper_ids: list[str], *, run_id: str, dry_run: bool = False) -> dict:
     if not dry_run and rows:
         with eng.begin() as conn:
             conn.execute(text("SELECT set_config('app.tenant', :t, true)"), {"t": TENANT})
-            # The corpus states whose paper this is, so the machine may make the move a teacher
-            # would otherwise make. `app.actor_type` stays machine and the transition trigger is
-            # satisfied because unbound -> bound is not the move it reserves for a person.
-            conn.execute(text("SELECT set_config('app.actor_type', 'machine', true)"))
             for r in rows:
                 conn.execute(_INSERT, r)
-                conn.execute(_BIND, {"artifact_id": r["artifact_id"]})
 
     return {
         "asked": len(paper_ids),

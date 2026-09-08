@@ -84,17 +84,47 @@ def test_each_artifact_gets_its_own_id():
 
 # ------------------------------------------------------------------ the pipeline is not bypassed
 
-def test_the_artifact_is_written_unbound_then_bound():
-    """Through the state machine, not around it. The insert is `unbound` and a separate UPDATE
-    makes the move, so the transition trigger sees it — the same path a teacher's resolve takes."""
+def test_the_artifact_is_created_bound_and_never_transitioned():
+    """A student's paper starts `unbound` because nobody knows whose it is yet, and a teacher
+    resolving that is the decision the transition trigger protects. The first version of this
+    module tried to make that move as a machine; the database refused it, correctly.
+
+    A corpus paper has no unbound period — PERSUADE states the binding. Moving it would fabricate
+    a decision nobody made, and the only way to make the move legal would be to claim a teacher
+    actor, which is worse. So it is created `bound`, with `resolution_path` carrying how.
+    """
     import inspect
 
     from scoring import bind_corpus
 
     src = inspect.getsource(bind_corpus)
-    assert "'unbound', NULL" in src
-    assert "SET state = 'bound'" in src
-    assert "AND state = 'unbound'" in src
+    assert "'bound', NULL" in src
+    assert "SET state = 'bound'" not in src, "still trying to transition"
+    assert "set_config('app.actor_type', 'teacher'" not in src, "claiming a teacher decided"
+
+
+def test_only_a_corpus_paper_may_be_created_in_a_state_other_than_unbound():
+    """Migration 0033. Before it, any code could insert an artifact already `released` and skip
+    the teacher check, the state history, and every guard the state machine provides — the
+    transition trigger is BEFORE UPDATE and says nothing about how an artifact arrives."""
+    import importlib.util
+    import pathlib as _p
+
+    spec = importlib.util.spec_from_file_location(
+        "m33", _p.Path(__file__).resolve().parents[1]
+        / "migrations" / "0033_artifacts_start_unbound.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    issued = []
+    m.op = type("op", (), {"execute": staticmethod(issued.append)})
+    m.upgrade()
+    sql = " ".join(issued)
+    assert "BEFORE INSERT ON artifact" in sql
+    assert "NEW.state = 'unbound'" in sql
+    assert "NEW.tenant_id = 'corpus'" in sql
+    # And the exception says what would have been skipped, not just that it was refused.
+    assert "skip the teacher check" in sql
 
 
 def test_it_does_not_write_score_events_or_compositions():
