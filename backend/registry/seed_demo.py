@@ -128,7 +128,7 @@ def _read_registry(conn, acks: dict[str, dict]) -> Registry:
 # The consistency test compares them.
 # `scoring.rater.STAGES`, written out for the same boundary reason. The seed declares no
 # per-stage overrides, so every stage resolves to MODEL_ID.
-STAGES = ("fit", "evidence", "score", "feedback")
+STAGES = ("fit", "evidence", "score", "band", "feedback")
 
 DEFAULT_ESCALATION = {"budget": 2,
                       "triggers": ["abstained", "no_verified_evidence"],
@@ -149,7 +149,8 @@ def seed(prompt_versions: dict) -> dict:
     definition_hash = hashlib.sha256(
         json.dumps({"models": {s: MODEL_ID for s in STAGES}, "effort": EFFORT,
                     "prompt_versions": prompt_versions,
-                    "normalization_version": "1", "escalation": DEFAULT_ESCALATION},
+                    "normalization_version": "1", "escalation": DEFAULT_ESCALATION,
+                    "level_method": "category", "level_threshold": 0.5},
                    sort_keys=True,
                    separators=(",", ":")).encode("utf8")).hexdigest()[:32]
 

@@ -30,7 +30,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .prompts import EVIDENCE_SCHEMA, FEEDBACK_SCHEMA, FIT_SCHEMA, SCORE_SCHEMA
+from .prompts import (BAND_SCHEMA, EVIDENCE_SCHEMA, FEEDBACK_SCHEMA, FIT_SCHEMA,
+                      SCORE_SCHEMA)
 
 SECRET_NAME = "anthropic-api-key"
 
@@ -43,7 +44,10 @@ _ALIASES = ("latest", "-latest")
 # They are the keys `prompts.fingerprint()` already uses, deliberately: the prompt for a stage and
 # the model that reads it are two halves of the same choice, and having them keyed differently is
 # how a config ends up overriding a stage whose prompt it never saw.
-STAGES = ("fit", "evidence", "score", "feedback")
+STAGES = ("fit", "evidence", "score", "band", "feedback")
+
+# How stage D produces a band. See `RaterIdentity.level_method`.
+LEVEL_METHODS = ("category", "cumulative")
 
 
 @dataclass(frozen=True)
@@ -108,6 +112,25 @@ class RaterIdentity:
     # The RESOLVED map is what gets hashed, so declaring nothing and declaring the same model
     # everywhere are the same rater — the same reasoning as the escalation policy above.
     stage_models: dict | None = None
+    # How stage D turns evidence into a band.
+    #
+    #   "category"   — one call naming a band. What every score before this used.
+    #   "cumulative" — one call per band asking whether the writing meets or exceeds it, with the
+    #                  band computed from the answers.
+    #
+    # Part of the identity because it is the largest single difference between two raters this
+    # system can express. On the first anchor wave the category form used 17% of the scale the
+    # humans used and awarded no 6s at all across 334 papers; the span diagnostic then showed the
+    # evidence was not the limit. Two configurations differing only in this produce entirely
+    # different bodies of scores.
+    #
+    # Defaults, unlike `escalation`, because there is no ambiguity to resolve: an unspecified
+    # method IS the category form, which is what every existing configuration ran.
+    level_method: str = "category"
+    # The probability a band must clear. Meaningless under "category" and hashed anyway — a rater
+    # is its parameters, and pretending a field is absent because the current method ignores it is
+    # how a hash stops describing a rater when the method changes.
+    level_threshold: float = 0.5
 
     @property
     def models(self) -> dict:
@@ -116,6 +139,15 @@ class RaterIdentity:
                 for stage in STAGES}
 
     def __post_init__(self) -> None:
+        if self.level_method not in LEVEL_METHODS:
+            raise ValueError(
+                f"unknown level_method {self.level_method!r}; the methods are "
+                f"{list(LEVEL_METHODS)}.")
+        if not 0 < self.level_threshold < 1:
+            raise ValueError(
+                f"level_threshold {self.level_threshold!r} is not a probability strictly between "
+                f"0 and 1. At 0 every band clears and every paper is a 6; at 1 none does and "
+                f"every paper is a 1.")
         unknown = set(self.stage_models or {}) - set(STAGES)
         if unknown:
             raise ValueError(
@@ -141,7 +173,9 @@ class RaterIdentity:
             json.dumps({"models": self.models, "effort": self.effort,
                         "prompt_versions": self.prompt_versions,
                         "normalization_version": self.normalization_version,
-                        "escalation": self.escalation},
+                        "escalation": self.escalation,
+                        "level_method": self.level_method,
+                        "level_threshold": self.level_threshold},
                        sort_keys=True, separators=(",", ":")).encode("utf8")
         ).hexdigest()[:32]
 
@@ -159,6 +193,11 @@ class Rater(Protocol):
     def propose_spans(self, prompt: str) -> tuple[list[str], Usage]: ...
 
     def assign_level(self, prompt: str) -> tuple[dict, Usage]: ...
+
+    # Stage D, cumulative form: the probability that the writing meets or exceeds ONE band.
+    # Separate from `assign_level` rather than a mode of it, so a fake rater has to be explicit
+    # about which stage-D question it is answering and cannot satisfy a test by accident.
+    def judge_band(self, prompt: str) -> tuple[dict, Usage]: ...
 
     # Stage E. Named rather than folded into a generic call so a fake rater has to be explicit
     # about which stage it is answering, and a test cannot accidentally answer the wrong one.
@@ -191,6 +230,9 @@ class AnthropicRater:
 
     def assign_level(self, prompt: str) -> tuple[dict, Usage]:
         return self._call(prompt, SCORE_SCHEMA, "score")
+
+    def judge_band(self, prompt: str) -> tuple[dict, Usage]:
+        return self._call(prompt, BAND_SCHEMA, "band")
 
     def write_feedback(self, prompt: str) -> tuple[dict, Usage]:
         return self._call(prompt, FEEDBACK_SCHEMA, "feedback")

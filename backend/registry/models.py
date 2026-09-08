@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (CheckConstraint, ForeignKey, Index, Integer, Text, text, TIMESTAMP,
+from sqlalchemy import (CheckConstraint, ForeignKey, Index, Integer, Numeric, Text, text, TIMESTAMP,
                         UniqueConstraint)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -338,6 +338,14 @@ class ScoringConfiguration(Base):
     # visibly; level assignment is checked by nothing, so it is not the place to economise.
     # The RESOLVED map is part of `definition_hash` — see `scoring.rater.RaterIdentity.models`.
     stage_models: Mapped[dict | None] = mapped_column(JSONB)
+    # How stage D turns evidence into a band: `category` (one call names it) or `cumulative` (one
+    # call per band asks whether the writing meets or exceeds it, and the band is computed).
+    # The largest difference between two raters this system can express — see migration 0038.
+    level_method: Mapped[str] = mapped_column(Text, nullable=False, server_default="category")
+    # The probability a band must clear under `cumulative`. Hashed under both methods: a rater is
+    # its parameters, and a hash that drops a field the current method ignores stops describing
+    # the rater the moment the method changes.
+    level_threshold: Mapped[float] = mapped_column(Numeric, nullable=False, server_default="0.5")
     definition_hash: Mapped[str] = mapped_column(Text, nullable=False)
 
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")

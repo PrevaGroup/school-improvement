@@ -82,14 +82,16 @@ _TRAIT_SET = text("""
 
 _ACTIVE_CONFIG = text("""
     SELECT config_id, model_id, effort, prompt_versions, normalization_version,
-           escalation, stage_models, definition_hash
+           escalation, stage_models, level_method, level_threshold,
+           definition_hash
       FROM registry_scoring_configuration
      WHERE config_key = :config_key AND status = 'active'
 """)
 
 _CONFIG_BY_ID = text("""
     SELECT config_id, model_id, effort, prompt_versions, normalization_version,
-           escalation, stage_models, definition_hash
+           escalation, stage_models, level_method, level_threshold,
+           definition_hash
       FROM registry_scoring_configuration
      WHERE config_id = :config_id
 """)
@@ -302,7 +304,9 @@ def check_configuration(identity: RaterIdentity, stored_hash: str | None = None)
     is never evaluated is not a guard, which is the same shape of defect as a trigger created
     without error that never fires.
     """
-    live, stamped = fingerprint(), identity.prompt_versions
+    # The fingerprint of the prompts THIS rater uses. A cumulative rater never sends the category
+    # stage-D prompt and vice versa, so comparing against both would fail every configuration.
+    live, stamped = fingerprint(identity.level_method), identity.prompt_versions
     if stamped != live:
         raise ConfigurationError(
             f"configuration {identity.config_id} stamps {stamped} but the prompts on disk "
@@ -384,7 +388,10 @@ def resolve_configuration(conn, *, tenant: str, section_id: str | None, task_id:
                              prompt_versions=dict(r["prompt_versions"]),
                              normalization_version=r["normalization_version"],
                              escalation=policy.as_dict(),
-                             stage_models=r["stage_models"])
+                             stage_models=r["stage_models"],
+                             level_method=r["level_method"] or "category",
+                             level_threshold=float(r["level_threshold"]
+                                                   if r["level_threshold"] is not None else 0.5))
     check_configuration(identity, r["definition_hash"])
     return identity, policy
 

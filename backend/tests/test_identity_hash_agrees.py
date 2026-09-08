@@ -27,7 +27,8 @@ def test_the_seed_and_the_rater_hash_the_same_parts():
         json.dumps({"models": {stage: seed_demo.MODEL_ID for stage in STAGES},
                     "effort": seed_demo.EFFORT,
                     "prompt_versions": prompt_versions, "normalization_version": "1",
-                    "escalation": seed_demo.DEFAULT_ESCALATION},
+                    "escalation": seed_demo.DEFAULT_ESCALATION,
+                    "level_method": "category", "level_threshold": 0.5},
                    sort_keys=True, separators=(",", ":")).encode("utf8")).hexdigest()[:32]
 
     rater = RaterIdentity(config_id="cfg", model_id=seed_demo.MODEL_ID, effort=seed_demo.EFFORT,

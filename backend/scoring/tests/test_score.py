@@ -338,3 +338,137 @@ def test_one_criterion_does_not_open_a_pool():
     rater = _SlowRater(1)
     score_artifact("the cat sat on the mat", _criteria(1), rater, concurrency=8)
     assert rater.peak == 1
+
+
+# ------------------------------------------------------------------ stage D, cumulative
+
+from scoring.score import (DEFAULT_THRESHOLD, build_band_prompt,  # noqa: E402
+                           level_from, score_criterion_cumulative)
+
+SIX = (1, 2, 3, 4, 5, 6)
+
+
+def test_the_band_is_the_top_of_an_unbroken_ladder():
+    """A paper is at band k if it cleared every band up to k. Not the highest band that happened
+    to clear — see the incoherence test below for why that distinction is the whole design."""
+    d = level_from({2: 0.9, 3: 0.8, 4: 0.7, 5: 0.2, 6: 0.1}, SIX, 0.5)
+    assert d["level"] == 4.0
+    assert d["decided_at"] == 5.0 and d["decided_p"] == 0.2
+
+
+def test_an_incoherent_high_band_does_not_promote():
+    """"Meets or exceeds 6" cannot be true while "meets or exceeds 4" is false. The ladder rule
+    makes a contradiction harmless instead of a promotion — and counts it, because a rater whose
+    bands contradict each other is a fact worth having."""
+    d = level_from({2: 0.9, 3: 0.8, 4: 0.2, 5: 0.1, 6: 0.99}, SIX, 0.5)
+    assert d["level"] == 3.0
+    assert d["monotonicity_violations"] == 1
+
+
+def test_both_ends_of_the_scale_are_reachable():
+    """The failure this exists to fix. The category form awarded ZERO 6s across 334 papers and
+    used 17% of the range the humans used; a scoring rule that cannot reach its own extremes is
+    not a scale."""
+    assert level_from({b: 0.99 for b in SIX[1:]}, SIX, 0.5)["level"] == 6.0
+    assert level_from({b: 0.01 for b in SIX[1:]}, SIX, 0.5)["level"] == 1.0
+
+
+def test_the_bottom_band_is_never_asked_about():
+    """P(meets or exceeds the lowest band) is 1 by construction. Asking spends a call on a known
+    answer, and a model that said 0.3 to it would be answering a different question."""
+    d = level_from({2: 0.2}, (1, 2, 3), 0.5)
+    assert d["level"] == 1.0
+    assert "1" not in d["probabilities"]
+
+
+def test_a_band_nobody_answered_stops_the_ladder():
+    """A missing answer is not a pass. Treating absence as clearance would promote on silence."""
+    d = level_from({2: 0.9, 4: 0.9, 5: 0.9, 6: 0.9}, SIX, 0.5)
+    assert d["level"] == 2.0
+    assert d["decided_at"] == 3.0 and d["decided_p"] is None
+    assert d["confidence"] == "low"
+
+
+def test_confidence_comes_from_the_margin_at_the_deciding_band():
+    """A band that landed on 0.51 against a threshold of 0.5 was decided by a coin flip. The level
+    still stands — it is the best reading of the evidence — and the teacher deciding how hard to
+    look is exactly who this field is for."""
+    assert level_from({2: 0.9, 3: 0.51}, SIX, 0.5)["confidence"] == "low"
+    assert level_from({2: 0.9, 3: 0.36}, SIX, 0.5)["confidence"] == "medium"
+    assert level_from({2: 0.9, 3: 0.05}, SIX, 0.5)["confidence"] == "high"
+
+
+def test_the_threshold_moves_the_band():
+    """It is a parameter of the rater, not a constant, which is why it is in the identity hash."""
+    probs = {2: 0.9, 3: 0.7, 4: 0.6, 5: 0.4, 6: 0.2}
+    assert level_from(probs, SIX, 0.5)["level"] == 4.0
+    assert level_from(probs, SIX, 0.65)["level"] == 3.0
+    assert level_from(probs, SIX, 0.95)["level"] == 1.0
+
+
+def test_one_band_prompt_shows_one_descriptor():
+    """Showing the whole scale is what makes the category form a gestalt. A model that can see
+    band 6 while judging band 3 is comparing, and comparison is where the middle comes from."""
+    c = criterion(cats=(1, 2, 3, 4))
+    p = build_band_prompt(c, [{"span": "a verified sentence"}], 3)
+    assert "level 3 descriptor" in p
+    for other in ("level 1 descriptor", "level 2 descriptor", "level 4 descriptor"):
+        assert other not in p
+    assert "a verified sentence" in p
+
+
+class _BandRater:
+    """Answers each band from a script keyed by the band number in the prompt."""
+
+    def __init__(self, by_band, spans=("the cat sat",)):
+        self.identity = IDENTITY
+        self.by_band = by_band
+        self.spans = list(spans)
+        self.band_prompts = []
+
+    def propose_spans(self, prompt):
+        return list(self.spans), Usage(1, 10, 5)
+
+    def judge_band(self, prompt):
+        self.band_prompts.append(prompt)
+        band = int(prompt.split("THE BAND — level ")[1].split(":")[0])
+        return {"probability": self.by_band[band], "reason": f"band {band}"}, Usage(1, 10, 5)
+
+
+def test_the_cumulative_path_scores_and_records_every_band():
+    c = criterion(cats=(1, 2, 3, 4))
+    rater = _BandRater({2: 0.9, 3: 0.8, 4: 0.1})
+    out, usage = score_criterion_cumulative("the cat sat on the mat", c, rater,
+                                            threshold=DEFAULT_THRESHOLD, concurrency=1)
+    assert out.status == "scored" and out.level == 3.0
+    # One evidence call plus one per band above the floor.
+    assert usage.calls == 4
+    assert out.evidence["bands"] == {"2": 0.9, "3": 0.8, "4": 0.1}
+    assert out.evidence["threshold"] == DEFAULT_THRESHOLD
+
+
+def test_no_verified_evidence_still_abstains_before_any_band_is_asked():
+    """Abstention is an outcome, not a low score — and paying for five band questions about an
+    empty evidence list would be paying to not find out."""
+    c = criterion(cats=(1, 2, 3, 4))
+    rater = _BandRater({2: 0.9}, spans=("a sentence that is not in the paper",))
+    out, usage = score_criterion_cumulative("the cat sat on the mat", c, rater, concurrency=1)
+    assert out.status == "no_verified_evidence" and out.level is None
+    assert usage.calls == 1
+    assert rater.band_prompts == []
+
+
+def test_the_contradiction_is_named_in_the_reason_a_teacher_reads():
+    c = criterion(cats=(1, 2, 3, 4))
+    out, _ = score_criterion_cumulative(
+        "the cat sat on the mat", c, _BandRater({2: 0.9, 3: 0.1, 4: 0.99}), concurrency=1)
+    assert out.level == 2.0
+    assert "contradicted a lower band" in out.reason
+
+
+def test_the_bands_of_one_criterion_go_out_together():
+    c = criterion(cats=(1, 2, 3, 4, 5, 6))
+    rater = _BandRater({b: 0.9 for b in range(2, 7)})
+    out, _ = score_criterion_cumulative("the cat sat on the mat", c, rater, concurrency=5)
+    assert out.level == 6.0
+    assert len(rater.band_prompts) == 5

@@ -113,7 +113,7 @@ _STUDENT = text("SELECT display_name FROM roster_student WHERE student_id = :stu
 # strand finished work behind a check about producing levels rather than describing them.
 _CONFIG = text("""
     SELECT config_id, model_id, effort, prompt_versions, normalization_version, escalation,
-           stage_models
+           stage_models, level_method, level_threshold
       FROM registry_scoring_configuration WHERE config_id = :config_id
 """)
 
@@ -326,7 +326,9 @@ def _compose_one(eng, artifact: dict, *, tenant: str, dry_run: bool, rater_facto
                              normalization_version=cfg["normalization_version"],
                              escalation=escalate.Policy.from_config(
                                  cfg.get("escalation")).as_dict(),
-                             stage_models=cfg.get("stage_models"))
+                             stage_models=cfg.get("stage_models"),
+                             level_method=cfg.get("level_method") or "category",
+                             level_threshold=float(cfg.get("level_threshold") or 0.5))
     drafted, usage = feedback.draft(body, packet, rater_factory(identity), student_name)
     holds = feedback.check(drafted, body)
 
