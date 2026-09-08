@@ -99,11 +99,16 @@ def upgrade() -> None:
                   sa.Column("stage_models", postgresql.JSONB()))
     # A stage that does not exist is a model nobody calls, and nothing would say so. The valid
     # stages are checked in `scoring/rater.py` too; this is the copy the database can enforce.
+    # Key subtraction rather than a subquery: Postgres refuses a subquery in a CHECK constraint
+    # ("cannot use subquery in check constraint"), and the first version of this used one.
+    # `jsonb - text[]` removes those keys, so an empty object left over means every key was in the
+    # allowed set. `jsonb_typeof` is there because `-` on a non-object would error rather than
+    # fail the check.
     op.create_check_constraint(
         "stage_models_names_real_stages", "registry_scoring_configuration",
         "stage_models IS NULL OR ("
-        " SELECT bool_and(k IN ('fit','evidence','score','feedback'))"
-        " FROM jsonb_object_keys(stage_models) AS k)")
+        "  jsonb_typeof(stage_models) = 'object'"
+        "  AND stage_models - ARRAY['fit','evidence','score','feedback'] = '{}'::jsonb)")
     _stamp(op.get_bind(), with_stages=True)
 
 
