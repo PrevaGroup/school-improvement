@@ -80,8 +80,11 @@ class CorpusSource(Base):
     # Non-independence, recorded. ASAP2 shares 12,725 essays with PERSUADE at identical scores and
     # every one of its prompts is a PERSUADE prompt — a calibrate/validate split across the two
     # would be half-circular.
-    overlaps_source_id: Mapped[str | None] = mapped_column(
-        ForeignKey("corpus_source.source_id"))
+    # A DECLARATION, not a reference: the corpus it names may not be loaded here, and the fact
+    # that two corpora overlap is most needed BEFORE the second one is loaded and treated as
+    # independent. Migration 0031 dropped the foreign key that made load order decide whether the
+    # fact could be recorded at all.
+    overlaps_source_id: Mapped[str | None] = mapped_column(Text)
     overlap_note: Mapped[str | None] = mapped_column(Text)
     loaded_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default="now()")

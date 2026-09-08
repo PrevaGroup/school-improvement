@@ -153,6 +153,12 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
         if paper is None:
             counts.skip("mapper rejected the row")
             continue
+        if paper["external_id"] in papers:
+            # Keyed by external id, so a second row with the same id would REPLACE the first and
+            # `loaded` would count both. That is a loader reporting more rows than it wrote —
+            # found when a foreign-key error dumped paper_count 25,990 beside "loaded 25,994".
+            counts.skip("duplicate external id within this source")
+            continue
         h = text_hash(paper["text"])
         if h in hashes:
             counts.skip("duplicate essay text within this source")
@@ -170,6 +176,14 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
         papers[paper["external_id"]] = paper
         counts.loaded += 1
     counts.report("papers")
+
+    # The count and the thing counted, checked against each other. A loader whose report and whose
+    # output disagree is worse than one that fails: the number looks right and is used.
+    if counts.loaded != len(papers):
+        raise RuntimeError(
+            f"the loader counted {counts.loaded:,} papers and holds {len(papers):,}. Something "
+            f"replaced a paper instead of skipping it, so the report overstates what would be "
+            f"written. Refusing to load.")
 
     split = {"calibration": 0, "validation": 0}
     for p in papers.values():
@@ -285,6 +299,12 @@ def write(spec: CorpusSpec, papers: dict, span_rows: list, raw: dict,
     done = {"papers": 0, "scores": 0, "spans": 0}
 
     with eng.begin() as conn:
+        # `overlaps_source_id` names a corpus that may not be in this database. That is not a
+        # dangling reference to be prevented — it is the fact: PERSUADE overlaps ASAP2 whether or
+        # not ASAP2 has been loaded here, and the note explaining why they cannot be used as
+        # independent sources is exactly what a person needs BEFORE loading the second one.
+        # Migration 0031 drops the foreign key that made load order decide whether the fact could
+        # be recorded.
         conn.execute(_SOURCE, {
             "source_id": spec.source_id, "name": spec.name, "snapshot": spec.snapshot,
             "licence": spec.licence, "url": spec.url, "paper_count": len(papers),
