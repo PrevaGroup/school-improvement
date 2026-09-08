@@ -201,9 +201,11 @@ _STUCK = text("""
 # Order and words are the contract with the bar: the console renders these left to right and
 # never invents a label. "Stuck" sits second because it is where the paper stopped, not where it
 # is furthest along — the bar is a pipeline, not a ranking.
+# The words are a teacher's, not the pipeline's. "Stuck" described how the system felt about the
+# paper rather than what the teacher has to do about it, and "attached" is a database verb.
 PIPELINE_STAGES: tuple[tuple[str, str], ...] = (
     ("working",   "Being scored"),
-    ("stuck",     "Stuck"),
+    ("stuck",     "Missing information"),
     ("ready",     "Scored, ready for you"),
     ("reviewed",  "You reviewed"),
     ("delivered", "Feedback on the doc"),

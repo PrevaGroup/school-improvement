@@ -56,7 +56,7 @@ type ManifestDetail = ManifestRow & {
 // Every outcome named in words a teacher would use. None of them is "missing" — the whole point
 // of five statuses is that a folder never quietly becomes a smaller number of papers.
 const STATUS: Record<string, { label: string; hint: string }> = {
-  resolved:         { label: "Attached", hint: "we know whose this is" },
+  resolved:         { label: "Named", hint: "we know whose this is" },
   unresolved:       { label: "Needs you", hint: "nothing in the file said whose it is" },
   not_student_work: { label: "Not a submission", hint: "the assignment, or a template" },
   unreadable:       { label: "Could not open", hint: "a format or a permission, not an absence" },
@@ -323,7 +323,7 @@ function FileRowView({ f, roster, locked, busy, onAssign }: {
               </select>
               <button disabled={busy || !picked}
                       onClick={() => { onAssign(f.file_id, picked); setOpen(false); }}>
-                Attach
+                Save name
               </button>
               {f.display_name && (
                 <button disabled={busy}
