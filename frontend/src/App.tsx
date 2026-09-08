@@ -29,10 +29,14 @@ type Section = "workspace" | "folders" | "review" | EvalSection;
 // no way to reach their own students' work — the product's whole point, invisible, with nothing
 // on screen suggesting anything was missing.
 const TEACHER_SECTIONS: Section[] = ["workspace", "folders", "review"];
-const ADMIN_SECTIONS: Section[] = ["traces", "evals", "results", "graders"];
+// Release sits FIRST among the admin sections: whether scores may go to students at all is
+// the question the others exist to answer, and it should not be reachable only by scrolling
+// past three debugging screens.
+const ADMIN_SECTIONS: Section[] = ["release", "traces", "evals", "results", "graders"];
 const SECTION_LABEL: Record<Section, string> = {
   workspace: "Workspace", folders: "Folders", review: "Student work",
-  traces: "Traces", evals: "Evals", results: "Results", graders: "Graders",
+  release: "Release", traces: "Traces", evals: "Evals", results: "Results",
+  graders: "Graders",
 };
 
 const DEMO_DISTRICT = "0622500"; // Long Beach Unified (NCES LEAID) — the demo default

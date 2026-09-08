@@ -9,10 +9,14 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import os
 import sys
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Mapping
+
+from sqlalchemy import text
 
 csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 
@@ -74,9 +78,37 @@ class CorpusSpec:
     map_span: Callable[[Mapping[str, str]], dict[str, Any] | None] = None
 
 
+# A stable namespace, so `paper_id` is a pure function of (source, external id). Re-running a
+# load must produce the same ids or every re-run doubles the corpus and every score written
+# against a paper points at a row that no longer exists.
+_NS = uuid.UUID("6ba7b812-9dad-11d1-80b4-00c04fd430c8")
+
+
+def paper_id_for(source_id: str, external_id: str) -> str:
+    return str(uuid.uuid5(_NS, f"corpus:{source_id}:{external_id}"))
+
+
+def open_rows(path: str):
+    """A local path or a gs:// URI.
+
+    The corpus is 880MB and lives wherever it was downloaded; the loader runs against Cloud SQL
+    from Cloud Shell. Requiring the file to be on the same machine as the database connection
+    would mean pushing a gigabyte through a home directory to load it. `fsspec` is already a
+    dependency and reads both, so the source is a URI rather than a path.
+    """
+    if "://" in path:
+        import fsspec
+
+        return fsspec.open(path, "rt", encoding="utf8", errors="replace", newline="").open()
+    return open(path, encoding="utf8", errors="replace", newline="")
+
+
 def rows(path: str) -> Iterator[dict[str, str]]:
-    with open(path, encoding="utf8", errors="replace", newline="") as fh:
+    fh = open_rows(path)
+    try:
         yield from csv.DictReader(fh)
+    finally:
+        fh.close()
 
 
 def blank_to_none(v: str | None) -> str | None:
@@ -91,6 +123,9 @@ def args():
     p.add_argument("--data-dir", default=os.environ.get("CORPUS_DIR", "."))
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--batch", type=int, default=1000,
+                   help="rows per INSERT. 26,000 papers in one statement is a memory problem "
+                        "on the client and a lock held for minutes on the server.")
     return p.parse_args()
 
 
@@ -109,6 +144,7 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
         print(f"  ! overlaps {spec.overlaps_source_id}: {spec.overlap_note}")
 
     counts, hashes, papers = Counts(), {}, {}
+    raw_by_id: dict[str, Mapping[str, str]] = {}
     for i, row in enumerate(rows(papers_path)):
         if a.limit and i >= a.limit:
             break
@@ -125,6 +161,12 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
         paper["text_hash"] = h
         paper["source_id"] = spec.source_id
         paper["partition"] = partition_for(spec.source_id, paper["external_id"])
+        # Derived, never generated: re-running a load must produce the same ids, or the second run
+        # doubles the corpus and every score written against a paper points at a row that is gone.
+        paper["paper_id"] = paper_id_for(spec.source_id, paper["external_id"])
+        # The raw row is kept OUT of the paper dict — it is not a column, and a stray key reaches
+        # the INSERT as a bind parameter nobody declared.
+        raw_by_id[paper["external_id"]] = row
         papers[paper["external_id"]] = paper
         counts.loaded += 1
     counts.report("papers")
@@ -135,7 +177,7 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
     print(f"      partition: {split['calibration']:,} calibration / "
           f"{split['validation']:,} validation")
 
-    spans = Counts()
+    spans, span_rows = Counts(), []
     if spec.spans_file:
         spans_path = os.path.join(a.data_dir, spec.spans_file)
         for i, row in enumerate(rows(spans_path)):
@@ -148,9 +190,134 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
             elif span["external_id"] not in papers:
                 spans.skip("span for a paper not in this load")
             else:
+                ext = span.pop("external_id")
+                span["paper_id"] = papers[ext]["paper_id"]
+                # A span has no natural key that survives a re-issue — its identity is its
+                # offsets, and those move when an essay is re-tokenised. So the id is derived from
+                # the whole triple, which makes a re-load of the SAME segmentation idempotent and
+                # a genuinely changed segmentation a different row.
+                span["span_id"] = paper_id_for(
+                    spec.source_id,
+                    f"{ext}:{span['discourse_type']}:{span['start_char']}:{span['end_char']}")
+                span_rows.append(span)
                 spans.loaded += 1
         spans.report("spans")
 
     if a.dry_run:
         print("  DRY RUN — nothing written")
-    return {"papers": counts.loaded, "spans": spans.loaded, "partition": split}
+        return {"papers": counts.loaded, "spans": spans.loaded, "partition": split,
+                "written": False}
+
+    written = write(spec, papers, span_rows, raw_by_id, batch=a.batch)
+    return {"papers": counts.loaded, "spans": spans.loaded, "partition": split,
+            "written": True, **written}
+
+
+# ------------------------------------------------------------------ the write path
+
+_SOURCE = text("""
+    INSERT INTO corpus_source
+        (source_id, name, snapshot, licence, url, paper_count,
+         overlaps_source_id, overlap_note)
+    VALUES (:source_id, :name, CAST(:snapshot AS date), :licence, :url, :paper_count,
+            :overlaps_source_id, :overlap_note)
+    ON CONFLICT (source_id) DO UPDATE SET
+        name = EXCLUDED.name, snapshot = EXCLUDED.snapshot, licence = EXCLUDED.licence,
+        url = EXCLUDED.url, paper_count = EXCLUDED.paper_count,
+        overlaps_source_id = EXCLUDED.overlaps_source_id, overlap_note = EXCLUDED.overlap_note
+""")
+
+# ON CONFLICT on the NATURAL key, not the surrogate one. `paper_id` is derived from the same two
+# columns, so either would work today — but a corpus re-issued with new ids and the same essays
+# would silently double under a surrogate-key conflict, and the unique constraint that actually
+# expresses "one essay per source" is the natural one.
+_PAPER = text("""
+    INSERT INTO corpus_paper
+        (paper_id, source_id, external_id, text, text_hash, prompt_name, task_type,
+         grade_level, word_count, partition, gender, ell_status, race_ethnicity,
+         economically_disadvantaged, student_disability_status)
+    VALUES (:paper_id, :source_id, :external_id, :text, :text_hash, :prompt_name, :task_type,
+            :grade_level, :word_count, :partition, :gender, :ell_status, :race_ethnicity,
+            :economically_disadvantaged, :student_disability_status)
+    ON CONFLICT (source_id, external_id) DO UPDATE SET
+        text = EXCLUDED.text, text_hash = EXCLUDED.text_hash,
+        prompt_name = EXCLUDED.prompt_name, task_type = EXCLUDED.task_type,
+        grade_level = EXCLUDED.grade_level, word_count = EXCLUDED.word_count,
+        partition = EXCLUDED.partition, gender = EXCLUDED.gender,
+        ell_status = EXCLUDED.ell_status, race_ethnicity = EXCLUDED.race_ethnicity,
+        economically_disadvantaged = EXCLUDED.economically_disadvantaged,
+        student_disability_status = EXCLUDED.student_disability_status
+""")
+
+# Scores and spans are DELETED for the papers in this load and re-inserted, rather than upserted.
+# Neither has a natural key that survives a corpus re-issue — a span is identified by its offsets,
+# which move when an essay is re-tokenised — so an upsert would accumulate the old segmentation
+# beside the new one and every count downstream would drift upward on each load.
+_CLEAR_SCORES = text("DELETE FROM corpus_score WHERE paper_id = ANY(:paper_ids)")
+_CLEAR_SPANS = text("DELETE FROM corpus_discourse_span WHERE paper_id = ANY(:paper_ids)")
+
+_SCORE = text("""
+    INSERT INTO corpus_score
+        (corpus_score_id, paper_id, kind, label, value, scale_min, scale_max, rater_id)
+    VALUES (:corpus_score_id, :paper_id, :kind, :label, :value, :scale_min, :scale_max, :rater_id)
+""")
+
+_SPAN = text("""
+    INSERT INTO corpus_discourse_span
+        (span_id, paper_id, discourse_type, start_char, end_char, text, effectiveness)
+    VALUES (:span_id, :paper_id, :discourse_type, :start_char, :end_char, :text, :effectiveness)
+""")
+
+
+def write(spec: CorpusSpec, papers: dict, span_rows: list, raw: dict,
+          *, batch: int = 1000) -> dict:
+    """Upsert one corpus. Idempotent: running it twice leaves the same rows.
+
+    Idempotence is not a nicety here. A bulk load of 26,000 papers WILL be re-run — a connection
+    drops, a mapper is corrected, a snapshot is re-issued — and a loader that doubles its corpus on
+    the second run corrupts every downstream count in a way nothing detects, because the numbers
+    stay plausible.
+    """
+    from ._db import _engine
+
+    eng = _engine()
+    ids = [p["paper_id"] for p in papers.values()]
+    done = {"papers": 0, "scores": 0, "spans": 0}
+
+    with eng.begin() as conn:
+        conn.execute(_SOURCE, {
+            "source_id": spec.source_id, "name": spec.name, "snapshot": spec.snapshot,
+            "licence": spec.licence, "url": spec.url, "paper_count": len(papers),
+            "overlaps_source_id": spec.overlaps_source_id, "overlap_note": spec.overlap_note})
+
+        values = list(papers.values())
+        for i in range(0, len(values), batch):
+            conn.execute(_PAPER, values[i:i + batch])
+            done["papers"] += len(values[i:i + batch])
+
+        # Clear before re-inserting, and only for the papers this load carries. A blanket delete by
+        # source would remove rows belonging to a partial earlier load that this run does not
+        # replace, turning a resumed load into a smaller corpus.
+        for i in range(0, len(ids), batch):
+            chunk = ids[i:i + batch]
+            conn.execute(_CLEAR_SCORES, {"paper_ids": chunk})
+            conn.execute(_CLEAR_SPANS, {"paper_ids": chunk})
+
+        scores = []
+        if spec.map_scores:
+            for p in values:
+                for sc in spec.map_scores(raw[p["external_id"]], p["paper_id"]):
+                    sc["corpus_score_id"] = paper_id_for(
+                        spec.source_id, f"{p['external_id']}:{sc['kind']}:{sc.get('label') or ''}")
+                    scores.append(sc)
+        for i in range(0, len(scores), batch):
+            conn.execute(_SCORE, scores[i:i + batch])
+            done["scores"] += len(scores[i:i + batch])
+
+        for i in range(0, len(span_rows), batch):
+            conn.execute(_SPAN, span_rows[i:i + batch])
+            done["spans"] += len(span_rows[i:i + batch])
+
+    print(f"  written: {done['papers']:,} papers · {done['scores']:,} scores · "
+          f"{done['spans']:,} spans")
+    return done

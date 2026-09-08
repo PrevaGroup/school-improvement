@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Float, Integer, SmallInteger, Text, TIMESTAMP, text
+from sqlalchemy import CheckConstraint, Float, Index, Integer, SmallInteger, Text, TIMESTAMP, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -77,6 +77,15 @@ class EvalCase(Base):
     source: Mapped[str] = mapped_column(Text, nullable=False)         # 'seed' | 'mined:<trace_id>'
     status: Mapped[str] = mapped_column(Text, nullable=False,         # candidate -> active -> retired;
                                         server_default="candidate")   # a human promotes (and scrubs, §6)
+    # mined from real traffic | seeded by hand | one arm of a paired comparison. Not bookkeeping:
+    # a suite made only of seeded cases measures what its author thought to ask.
+    kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="seeded")
+    # Three of the five stop conditions are comparisons, not measurements — the same paper in
+    # different company, with conventions errors added, or at two scrutiny levels. The interesting
+    # number is a DELTA and neither arm alone means anything, so the pairing is a column rather
+    # than something reconstructed from tags afterwards. Migration 0030.
+    pair_id: Mapped[str | None] = mapped_column(Text)
+    arm: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text))       # 'honesty', 'tool:<name>', 'equity', ...
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -124,3 +133,53 @@ class Feedback(Base):
     principal_hash: Mapped[str | None] = mapped_column(Text)
     ts: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False,
                                          server_default=text("now()"))
+
+
+class StopConditionFinding(Base):
+    """What one run of one stop condition found. The audit record of whether release was allowed.
+
+    Until this table the findings evaporated the moment they were computed, which made the most
+    important question about a gate unanswerable: has it ever held, and when did it start failing?
+    A green result with no history cannot be told apart from a check nobody has run since June.
+
+    THE THRESHOLD IS COPIED, NOT REFERENCED. `threshold_value`, `agreed_by` and `agreed_on` record
+    the number that was in force when the measurement was taken. Reading the current threshold
+    instead would let somebody relax a line in January and have December's runs retroactively
+    pass, which is exactly the "explained rather than acted on" failure the pre-commitment rule
+    exists to prevent. Migration 0030.
+    """
+    __tablename__ = "eval_stop_condition"
+
+    finding_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    eval_run_id: Mapped[str] = mapped_column(Text, nullable=False)
+    condition: Mapped[str] = mapped_column(Text, nullable=False)
+    verdict: Mapped[str] = mapped_column(Text, nullable=False)
+    observed: Mapped[float | None] = mapped_column(Float)
+
+    threshold_value: Mapped[float] = mapped_column(Float, nullable=False)
+    agreed_by: Mapped[str | None] = mapped_column(Text)
+    agreed_on: Mapped[str | None] = mapped_column(Text)
+
+    n: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    detail: Mapped[str] = mapped_column(Text, nullable=False)
+    # The numbers under the number. A verdict with no breakdown is the uninformative summary that
+    # `teacher_acceptance` exists to detect, arriving one layer up.
+    breakdown: Mapped[dict | None] = mapped_column(JSONB)
+
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
+    tenant_id: Mapped[str] = mapped_column(Text, nullable=False, server_default="public")
+
+    __table_args__ = (
+        CheckConstraint("verdict IN ('holds','triggered','uncommitted','insufficient')",
+                        name="verdict"),
+        # The pre-commitment rule in the database, not only in Python: the module is one way to
+        # write this table and a script is another. Same argument as the release trigger.
+        CheckConstraint(
+            "verdict <> 'triggered' OR (agreed_by IS NOT NULL AND agreed_on IS NOT NULL)",
+            name="a_stop_names_who_agreed_to_it"),
+        CheckConstraint("verdict <> 'insufficient' OR observed IS NULL",
+                        name="insufficient_has_no_number"),
+        Index("ix_eval_stop_condition_run", "eval_run_id", "condition"),
+        Index("ix_eval_stop_condition_history", "tenant_id", "condition", "created_at"),
+    )
