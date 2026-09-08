@@ -51,7 +51,8 @@ from app.models import Base, PRIVATE_TABLES, SCHOOL_SCOPED_TABLES
 # "prove" that 7 tables had vanished. If env.py's import list changes, change it here too.
 import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goal, plan_action
 import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
-import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback
+import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback,
+#                                          eval_stop_condition (6)
 import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_state_transition
 import roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
 import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
@@ -110,6 +111,9 @@ EXPECTED_TABLES: dict[str, str] = {
     "eval_case": "evals",
     "eval_run": "evals",
     "eval_result": "evals",
+    # What each run of the five stop conditions found. The audit record of whether release
+    # was allowed; the threshold is copied onto the row, not referenced. Migration 0030.
+    "eval_stop_condition": "evals",
     "feedback": "evals",
     # --- scoring's tables — declared in scoring/models.py. Hold identifiable student
     #     writing and carry tenant_id, but are NOT in PRIVATE_TABLES: turning RLS on is a
@@ -211,6 +215,7 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "eval_case": "0006_eval_tables.py",
     "eval_run": "0006_eval_tables.py",
     "eval_result": "0006_eval_tables.py",
+    "eval_stop_condition": "0030_stop_conditions.py",
     "feedback": "0006_eval_tables.py",
     "artifact": "0008_scoring_tables.py",
     "score_event": "0008_scoring_tables.py",

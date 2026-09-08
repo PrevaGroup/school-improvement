@@ -262,3 +262,79 @@ def test_the_breakdown_is_never_a_single_number():
     f = teacher_acceptance(reviews, Threshold(0.90, agreed_by="T", agreed_on="2026-09-07"))
     assert "override_rate_by_criterion" in f.breakdown
     assert len(f.breakdown) >= 3
+
+
+# ------------------------------------------------------------------ the findings are recorded
+
+def test_the_threshold_is_copied_onto_the_row_not_referenced():
+    """A finding records the number that was in force when it was measured. Referencing the
+    current threshold instead would let somebody relax a line in January and have December's runs
+    retroactively pass — the pre-commitment failure arriving through a foreign key."""
+    from evals.record_stop_conditions import rows_for
+
+    data = {"matched_pairs": [{"pair_id": "p", "node_id": "n", "clean": 3, "errored": 1}]}
+    rows = rows_for("run-1", data, {"matched_pairs": AGREED})
+    row = next(r for r in rows if r["condition"] == "matched_pairs")
+    assert row["threshold_value"] == AGREED.value
+    assert row["agreed_by"] == "Tim Kinkead" and row["agreed_on"] == "2026-09-07"
+    assert row["verdict"] == TRIGGERED
+
+
+def test_an_uncommitted_finding_records_with_no_signatory():
+    """It still gets a row — the history of a condition nobody has agreed a threshold for is
+    exactly what somebody needs in order to agree one."""
+    from evals.record_stop_conditions import rows_for
+
+    data = {"matched_pairs": [{"pair_id": "p", "node_id": "n", "clean": 3, "errored": 1}]}
+    row = rows_for("run-1", data)[0]
+    assert row["verdict"] == UNCOMMITTED
+    assert row["agreed_by"] is None and row["agreed_on"] is None
+    assert row["observed"] == 2.0   # |1 - 3|
+
+
+def test_the_database_refuses_a_stop_nobody_agreed_to():
+    """The pre-commitment rule in the schema, not only in Python: this module is one way to write
+    that table and a script is another. Same argument as the release-authority trigger."""
+    import importlib.util
+    import pathlib
+
+    spec = importlib.util.spec_from_file_location(
+        "m30", pathlib.Path(__file__).resolve().parents[1]
+        / "migrations" / "0030_stop_conditions.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    issued: list[str] = []
+    created: list = []
+
+    class FakeOp:
+        @staticmethod
+        def add_column(*a, **k): pass
+
+        @staticmethod
+        def execute(sql): issued.append(str(sql))
+
+        @staticmethod
+        def create_index(*a, **k): pass
+
+        @staticmethod
+        def create_table(name, *cols, **k): created.append((name, cols))
+
+    m.op = FakeOp
+    m.upgrade()
+
+    checks = [str(c.sqltext) for _, cols in created for c in cols
+              if hasattr(c, "sqltext")]
+    # The vocabulary CHECK also contains the word, so match the constraint that CONSTRAINS it.
+    stop_check = [c for c in checks if "verdict <> 'triggered'" in c]
+    assert stop_check, f"no CHECK constrains a triggered verdict; saw {checks}"
+    assert "agreed_by" in stop_check[0] and "agreed_on" in stop_check[0]
+
+
+def test_a_finding_with_no_number_carries_no_number():
+    """`insufficient` means there was nothing to measure. A row with a verdict of insufficient and
+    an observed value would be a number invented by the recorder."""
+    from evals.record_stop_conditions import rows_for
+
+    row = rows_for("run-1", {"matched_pairs": []}, {"matched_pairs": AGREED})[0]
+    assert row["verdict"] == INSUFFICIENT and row["observed"] is None
