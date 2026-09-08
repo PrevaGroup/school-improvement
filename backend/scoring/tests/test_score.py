@@ -525,3 +525,29 @@ def test_the_ends_of_the_range_are_allowed():
     c = criterion(cats=(1, 2, 3))
     out, _ = score_criterion_cumulative(TEXT, c, _BandRater({2: 1.0, 3: 0.0}), concurrency=1)
     assert out.level == 2.0
+
+
+def test_a_failed_band_call_names_which_band_of_which_criterion():
+    """The batch loop catches per ARTIFACT, so an unwrapped failure says only that a paper failed
+    — not which of its nineteen calls did, nor with what in front of it. A wave that failed on a
+    quarter of its papers was undiagnosable without running another one."""
+    from scoring.score import BandCallFailed
+
+    class _Boom:
+        identity = CUMULATIVE_IDENTITY
+
+        def propose_spans(self, prompt):
+            return ["Tinker set the standard"], Usage(1, 10, 5)
+
+        def judge_band(self, prompt):
+            raise RuntimeError("Error code: 400 - Invalid request data")
+
+    with pytest.raises(BandCallFailed) as e:
+        score_criterion_cumulative(TEXT, criterion(label="use of evidence", cats=(1, 2, 3)),
+                                   _Boom(), concurrency=1)
+
+    msg = str(e.value)
+    assert "use of evidence" in msg          # which criterion
+    assert "band 2" in msg                   # which band
+    assert "Invalid request data" in msg     # what the API said
+    assert "chars" in msg and "verified span" in msg   # the shape of what was sent
