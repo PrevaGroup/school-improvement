@@ -68,7 +68,7 @@ export type Scope = {
 // segment is different from its neighbour, not what it means.
 const STAGE_NOTE: Record<string, string> = {
   working: "Handed in, being scored. Nothing for you to do yet.",
-  stuck: "Stopped before scoring: we do not know whose it is, or we could not read it.",
+  stuck: "We need something from you before this can be scored — usually whose paper it is.",
   ready: "Scored and waiting on you. This is the only segment that is a request.",
   reviewed: "You decided. The feedback has not gone to the student yet.",
   delivered: "The student has it.",
@@ -76,9 +76,9 @@ const STAGE_NOTE: Record<string, string> = {
 
 // The two things a paper can be stopped by, said plainly. The reason code is a machine's word.
 const STUCK_WHY: Record<string, string> = {
-  unbound: "We do not know whose this is",
-  blocked: "Scored, but something in the feedback needs you before it can go",
-  not_scorable: "There was no attempt to score",
+  unbound: "We don't know whose paper this is",
+  blocked: "Scored, but the feedback needs your eyes before it goes out",
+  not_scorable: "Nothing was handed in to score",
 };
 
 function label(a: AssignmentRow): string {
@@ -170,10 +170,10 @@ export function AssignmentHome({ onOpenSet, onOpenPaper }: {
         </div>
       )}
 
-      <h3 className="ah-head">Stuck</h3>
+      <h3 className="ah-head">Missing information</h3>
       {home.stuck.length === 0 ? (
         <p className="rv-mut">
-          Nothing is stuck. Everything that arrived has a name and an assignment on it.
+          Nothing is missing. Everything that arrived has a name and an assignment on it.
         </p>
       ) : (
         <ul className="ah-stuck">
@@ -226,7 +226,7 @@ export function AssignmentHome({ onOpenSet, onOpenPaper }: {
                         {/* Counts in the order the work happens, and the ones that are a
                             request to a person are bold. The rest are description. */}
                         {a.ready > 0 && <b>{a.ready} require your review. </b>}
-                        {a.stuck > 0 && <b>{a.stuck} stuck. </b>}
+                        {a.stuck > 0 && <b>{a.stuck} missing information. </b>}
                         {a.working > 0 && <span>{a.working} still scoring · </span>}
                         <span>{a.reviewed + a.delivered} of {a.total} reviewed</span>
                         <span> · {a.delivered} of {a.total} with feedback on the doc</span>

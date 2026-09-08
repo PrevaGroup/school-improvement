@@ -471,10 +471,10 @@ function Stuck({ d, busy, onResolve }: {
       </header>
 
       <div className="rv-holds">
-        <b>This paper is not attached to anyone yet.</b>
+        <b>We don't know whose paper this is.</b>
         <p>
-          Nothing in the file said whose it is, so it is waiting rather than guessed at. Nobody is
-          scored until you say.
+          Nothing in the file said whose it is, so it is waiting rather than guessed at. Nobody
+          is scored until you say.
         </p>
         {f?.reason_code && <small><code>{f.reason_code}</code></small>}
       </div>
@@ -511,10 +511,10 @@ function Stuck({ d, busy, onResolve }: {
             ))}
           </select>
           <button disabled={busy || !picked} onClick={() => onResolve(picked)}>
-            Attach it
+            Save name
           </button>
           <small>
-            Once attached this cannot be reassigned — a paper that already carries scores and
+            Once saved this cannot be changed — a paper that already carries scores and
             feedback describes one student's writing.
           </small>
         </div>
