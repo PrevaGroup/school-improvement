@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from dataclasses import dataclass, field
 
-from .prompts import EVIDENCE_PROMPT, SCORE_PROMPT, render_scale
+from .prompts import BAND_PROMPT, EVIDENCE_PROMPT, SCORE_PROMPT, render_scale
 from .rater import Rater, Usage
 from .verify import NORM_VERSION, normalize, verify_all
 
@@ -91,8 +91,174 @@ def build_score_prompt(criterion: Criterion, kept: list[dict]) -> str:
         evidence="\n".join('{}. "{}"'.format(i + 1, k["span"]) for i, k in enumerate(kept)))
 
 
+DEFAULT_THRESHOLD = 0.5
+
+# A band whose probability sits this close to the threshold was decided by a coin flip in all but
+# name. Recorded as confidence rather than as an abstention: the level is still the best reading
+# of the evidence, and a teacher deciding how hard to look is exactly who the field is for.
+_CLEAR_MARGIN = 0.25
+_SOME_MARGIN = 0.10
+
+
+def build_band_prompt(criterion: Criterion, kept: list[dict], band) -> str:
+    """One band's question. The descriptor for THIS band only — the others are not shown.
+
+    Showing the whole scale is what makes the category form a gestalt judgment. A model that can
+    see band 6 while judging band 3 is comparing, and comparison is where the middle comes from.
+    """
+    return BAND_PROMPT.format(
+        name=criterion.criterion_label,
+        band=band,
+        descriptor=criterion.descriptors.get(str(band), f"(no descriptor for level {band})"),
+        evidence="\n".join(f"- {k['span']}" for k in kept))
+
+
+def level_from(probabilities: dict, categories: list, threshold: float) -> dict:
+    """The band, from the probabilities. Pure, so the decision can be argued with directly.
+
+    ## The rule: the highest band whose whole ladder was climbed
+
+    A paper is at band k if it cleared band 2, and band 3, ... and band k. NOT simply the highest
+    band that happened to clear the threshold: a stray confident answer at band 6 under a failing
+    band 4 does not promote anything, because "meets or exceeds 6" cannot be true while "meets or
+    exceeds 4" is false. The ladder rule is what makes an incoherent answer harmless instead of
+    a promotion.
+
+    The bottom band needs no question. P(meets or exceeds the lowest band) is 1 by construction —
+    everything meets the floor — so asking would spend a call on a known answer.
+
+    ## Monotonicity is a free diagnostic
+
+    Cumulative probabilities must be non-increasing as the bands rise. Violations are counted and
+    reported rather than smoothed away: they say the descriptors are being read inconsistently,
+    which is a fact about the rubric and the rater, and no single-category answer can produce it.
+    """
+    cats = sorted(float(c) for c in categories)
+    probs = {float(k): float(v) for k, v in probabilities.items()}
+
+    level, decided_at, decided_p = cats[0], None, None
+    for c in cats[1:]:
+        p_c = probs.get(c)
+        if p_c is None or p_c < threshold:
+            decided_at, decided_p = c, p_c
+            break
+        level = c
+    else:
+        # Every band cleared. The margin that matters is the top one's.
+        decided_at, decided_p = cats[-1], probs.get(cats[-1])
+
+    ordered = [probs[c] for c in cats[1:] if c in probs]
+    violations = sum(1 for a, b in zip(ordered, ordered[1:]) if b > a + 1e-9)
+
+    margin = None if decided_p is None else abs(decided_p - threshold)
+    confidence = ("low" if margin is None or margin < _SOME_MARGIN
+                  else "high" if margin >= _CLEAR_MARGIN else "medium")
+
+    return {"level": level, "confidence": confidence,
+            "decided_at": decided_at, "decided_p": decided_p,
+            "monotonicity_violations": violations,
+            "probabilities": {str(_fmt(c)): probs[c] for c in cats if c in probs}}
+
+
+def score_criterion_cumulative(text: str, criterion: Criterion, rater: Rater, *,
+                               threshold: float = DEFAULT_THRESHOLD,
+                               concurrency: int = 8) -> tuple[Outcome, Usage]:
+    """Stage C, then one call per band above the floor, then arithmetic.
+
+    The model never chooses a level here. It answers a yes/no question with a probability, once
+    per band, and the level is computed — so the step where a category was being hedged toward the
+    middle no longer exists.
+    """
+    proposed, usage = rater.propose_spans(build_evidence_prompt(criterion, text))
+    kept, dropped = verify_all(proposed, text)
+    evidence = {"proposed": len(proposed), "kept": kept, "dropped": dropped,
+                "norm_version": NORM_VERSION}
+
+    if not kept:
+        return (Outcome(
+            node_id=criterion.node_id, node_version_id=criterion.node_version_id,
+            status="no_verified_evidence", level=None,
+            reason=("No proposed span survived verification. This is not a low score — the "
+                    "criterion routes to a human."),
+            reason_code=NO_SPANS_PROPOSED if not proposed else NO_VERIFIED_EVIDENCE,
+            evidence=evidence), usage)
+
+    bands = sorted(float(c) for c in criterion.categories)[1:]
+    jobs = [(lambda b=b: _one_band(rater, criterion, kept, b)) for b in bands]
+    answers, band_usage = _gather_bands(jobs, concurrency)
+    usage = usage + band_usage
+
+    probs = {b: a["probability"] for b, a in zip(bands, answers)}
+    decided = level_from(probs, criterion.categories, threshold)
+
+    evidence |= {"bands": decided["probabilities"], "threshold": threshold,
+                 "decided_at": decided["decided_at"], "decided_p": decided["decided_p"],
+                 "monotonicity_violations": decided["monotonicity_violations"],
+                 "band_reasons": {str(b): a.get("reason") for b, a in zip(bands, answers)}}
+
+    at, p_at = decided["decided_at"], decided["decided_p"]
+    reason = (f"Cleared every band up to {decided['level']:g}. "
+              + (f"Band {at:g} came back at p={p_at:.2f} against a threshold of {threshold:g}."
+                 if p_at is not None else f"Band {at:g} was not answered."))
+    if decided["monotonicity_violations"]:
+        # Named in the reason, not just the evidence blob. A rater whose bands contradict each
+        # other produced this level, and whoever reads it should know that before trusting it.
+        reason += (f" {decided['monotonicity_violations']} band(s) contradicted a lower band, "
+                   f"which should be impossible for a cumulative judgment.")
+
+    return (Outcome(node_id=criterion.node_id, node_version_id=criterion.node_version_id,
+                    status="scored", level=decided["level"],
+                    confidence=decided["confidence"], reason=reason, evidence=evidence),
+            usage)
+
+
+def _one_band(rater: Rater, criterion: Criterion, kept: list[dict], band: float) -> dict:
+    raw, usage = rater.judge_band(build_band_prompt(criterion, kept, _fmt(band)))
+    return {"probability": float(raw.get("probability", 0.0)),
+            "reason": raw.get("reason"), "_usage": usage}
+
+
+def _fmt(band: float):
+    """Descriptors are keyed by the category as written — "3", not "3.0"."""
+    return int(band) if float(band).is_integer() else band
+
+
+def _gather_bands(jobs: list, concurrency: int) -> tuple[list[dict], Usage]:
+    """Same shape as `gather_criteria`, and separate because the payloads differ.
+
+    The bands of ONE criterion go out together. They are independent questions about the same
+    evidence — nothing in band 4's answer belongs in band 5's context, and running them
+    concurrently makes that structural rather than merely true.
+    """
+    if concurrency <= 1 or len(jobs) <= 1:
+        answers = [j() for j in jobs]
+    else:
+        with ThreadPoolExecutor(max_workers=min(concurrency, len(jobs))) as pool:
+            answers = list(pool.map(lambda j: j(), jobs))
+    total = Usage()
+    for a in answers:
+        total = total + a.pop("_usage")
+    return answers, total
+
+
 def score_criterion(text: str, criterion: Criterion, rater: Rater) -> tuple[Outcome, Usage]:
-    """One criterion, two calls at most. The second is not made when the first yields nothing
+    """One criterion, by whichever stage-D form this rater is.
+
+    The method comes off the rater's own identity rather than being passed down. A rater IS its
+    method — two configurations differing only in it produce different bodies of scores, so they
+    hash differently and MFRM holds them apart — and threading it through every caller would let
+    the two disagree.
+    """
+    identity = getattr(rater, "identity", None)
+    if identity is not None and getattr(identity, "level_method", "category") == "cumulative":
+        return score_criterion_cumulative(
+            text, criterion, rater, threshold=identity.level_threshold)
+    return _score_criterion_category(text, criterion, rater)
+
+
+def _score_criterion_category(text: str, criterion: Criterion,
+                              rater: Rater) -> tuple[Outcome, Usage]:
+    """The original form: one call that names a band. The second is not made when the first yields nothing
     verifiable — there is no point paying a model to judge an empty evidence list, and a model
     handed one will produce a level anyway."""
     proposed, usage = rater.propose_spans(build_evidence_prompt(criterion, text))

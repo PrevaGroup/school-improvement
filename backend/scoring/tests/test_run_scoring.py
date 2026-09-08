@@ -477,3 +477,55 @@ def test_each_stage_actually_calls_its_own_model():
     rater.propose_spans("p")
     rater.assign_level("p")
     assert rater._client.seen == ["claude-haiku-4-5-20251001", "claude-opus-5"]
+
+
+# ------------------------------------------------------------------ the stage-D method
+
+def test_the_method_is_part_of_the_rater():
+    """The largest difference between two raters this system can express — larger than a model
+    change. Two configurations differing only in it produce entirely different bodies of scores,
+    so MFRM has to hold them apart rather than average them together."""
+    cat = _ident(prompt_versions=fingerprint("category"))
+    cum = _ident(prompt_versions=fingerprint("cumulative"), level_method="cumulative")
+    assert cat.definition_hash != cum.definition_hash
+
+
+def test_the_threshold_is_part_of_it_even_under_the_category_method():
+    """A rater is its parameters. A hash that drops a field because the current method ignores it
+    stops describing the rater the moment the method changes."""
+    assert _ident(level_threshold=0.5).definition_hash != \
+           _ident(level_threshold=0.6).definition_hash
+
+
+def test_a_method_nobody_implemented_is_refused():
+    with pytest.raises(ValueError, match="unknown level_method"):
+        _ident(level_method="vibes")
+
+
+def test_a_threshold_at_the_ends_is_refused():
+    """At 0 every band clears and every paper is a 6; at 1 none does and every paper is a 1. Both
+    score without judging."""
+    for bad in (0.0, 1.0, -0.1, 1.5):
+        with pytest.raises(ValueError, match="not a probability"):
+            _ident(level_threshold=bad)
+
+
+def test_each_method_fingerprints_only_the_stage_d_prompt_it_uses():
+    """A cumulative rater never sends the category prompt and vice versa. Fingerprinting both
+    would make every existing configuration stop matching itself the moment the other prompt was
+    added — and would claim a rater was promoted against text it never saw."""
+    assert set(fingerprint("category")) == {"fit", "evidence", "score"}
+    assert set(fingerprint("cumulative")) == {"fit", "evidence", "band"}
+
+
+def test_a_cumulative_configuration_passes_its_own_prompt_check():
+    check_configuration(_ident(prompt_versions=fingerprint("cumulative"),
+                               level_method="cumulative"))
+
+
+def test_a_configuration_stamped_for_the_other_method_is_refused():
+    """The check compares against the prompts THIS rater uses, so a configuration promoted as
+    `category` and then switched to `cumulative` in place no longer matches itself."""
+    with pytest.raises(ConfigurationError, match="not the one that was promoted"):
+        check_configuration(_ident(prompt_versions=fingerprint("category"),
+                                   level_method="cumulative"))

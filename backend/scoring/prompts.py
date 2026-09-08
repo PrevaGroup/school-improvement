@@ -112,6 +112,47 @@ Judge only this criterion. Say nothing about spelling, grammar or punctuation: t
 scale, and the paper must not move up or down for them. The reason should be one or two sentences a
 teacher could check against the evidence above."""
 
+BAND_VERSION = "bd.1"
+
+# Stage D, the cumulative form. ONE band, ONE question, one call.
+#
+# The category form asks "which of these six bands is this?" and the answer clusters in the
+# middle: measured on the first anchor wave, humans used a range of 5 points and we used 0.87 —
+# 17% of their scale — with zero 6s awarded across 334 papers. The span diagnostic then showed the
+# evidence was not the problem: verified characters rise monotonically with the human score, and
+# in 9 of 10 traits that evidence predicts the HUMAN score better than our own score does. The
+# signal arrives and is discarded at the moment it becomes a category.
+#
+# So the model is never asked to pick a band. It is asked, separately per band, whether the
+# writing clears it — and the band is computed from the answers. There is no middle to retreat to
+# in a question that has no middle.
+#
+# MEETS OR EXCEEDS, not "is exactly this band". That is what makes the answers cumulative and
+# therefore checkable: they must be non-increasing as the bands rise, and a set that is not is
+# incoherent in a way a single category answer can never be.
+BAND_PROMPT = """You are judging ONE band of ONE criterion for ONE piece of student writing.
+
+CRITERION: {name}
+
+THE BAND — level {band}:
+{descriptor}
+
+VERIFIED EVIDENCE — confirmed to appear verbatim in the student's writing:
+{evidence}
+
+Answer one question: what is the probability that this writing MEETS OR EXCEEDS this band?
+
+Meets or exceeds, not "is exactly this band". Writing that clearly surpasses this descriptor still
+meets it, so strong writing should score high on every band below its own.
+
+Give a probability between 0 and 1, and use the whole range. 0.95 when the evidence plainly
+satisfies the descriptor; 0.05 when it plainly does not. Answers clustered near 0.5 are not
+caution — they are a refusal to judge, and they give every piece of writing the same score.
+
+Judge only this band of this criterion, on this evidence. Say nothing about spelling, grammar or
+punctuation: they are not on this scale. The reason should be one sentence a teacher could check
+against the evidence above."""
+
 FEEDBACK_VERSION = "fb.2"
 
 # Versioned SEPARATELY from the scoring prompts, and stamped on the composition rather than on
@@ -191,6 +232,18 @@ EVIDENCE_SCHEMA: dict = {
     "additionalProperties": False,
 }
 
+BAND_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        # A number, not a category. The whole point is to defer the category decision to code
+        # that cannot hedge.
+        "probability": {"type": "number", "minimum": 0, "maximum": 1},
+        "reason": {"type": "string"},
+    },
+    "required": ["probability", "reason"],
+    "additionalProperties": False,
+}
+
 SCORE_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -252,18 +305,25 @@ def feedback_fingerprint() -> dict:
     return {"feedback": {"version": FEEDBACK_VERSION, "sha256": _sha(FEEDBACK_PROMPT)}}
 
 
-def fingerprint() -> dict:
+def fingerprint(level_method: str = "category") -> dict:
     """Version AND hash of each prompt, as the scoring configuration stamps it.
 
     The hash is what makes the version honest. A configuration carrying a version whose text has
     since moved is a rater that no longer matches its own description, and the driver treats that
     as a stop rather than a warning.
     """
-    return {
+    out = {
         "fit": {"version": FIT_VERSION, "sha256": _sha(FIT_PROMPT)},
         "evidence": {"version": EVIDENCE_VERSION, "sha256": _sha(EVIDENCE_PROMPT)},
-        "score": {"version": SCORE_VERSION, "sha256": _sha(SCORE_PROMPT)},
     }
+    # ONLY the stage-D prompt this rater actually uses. A cumulative rater never sends
+    # SCORE_PROMPT and a category rater never sends BAND_PROMPT, so listing both would make every
+    # existing configuration stop matching its own fingerprint the moment the other prompt was
+    # added — and would claim a rater was promoted against text it never saw.
+    out |= ({"band": {"version": BAND_VERSION, "sha256": _sha(BAND_PROMPT)}}
+            if level_method == "cumulative"
+            else {"score": {"version": SCORE_VERSION, "sha256": _sha(SCORE_PROMPT)}})
+    return out
 
 
 def _sha(s: str) -> str:
