@@ -10,9 +10,7 @@ import pathlib
 
 import pytest
 
-from corpus._shared import (VALIDATION_SHARE, blank_to_none, partition_for,
-                            read_licence, text_hash)
-from corpus import load_persuade
+from corpus._shared import (VALIDATION_SHARE, blank_to_none, partition_for, text_hash)
 from corpus.load_persuade import SPEC, _paper, _scores, _span
 from corpus.models import DISCOURSE_TYPES, PARTITIONS
 
@@ -125,54 +123,37 @@ def test_spec_records_the_asap_overlap():
     assert "circular" in SPEC.overlap_note
 
 
-def test_the_spec_does_not_state_a_licence_itself():
-    """This test previously asserted the OPPOSITE — `SPEC.licence == "CC BY 4.0"` — and so CI
-    defended a claim about somebody else's terms that this project had made from memory.
+def test_this_system_holds_no_licensing_at_all():
+    """Twice wrong before this. First `SPEC.licence = "CC BY 4.0"` — this project stating somebody
+    else's terms from memory, with a test asserting it so CI defended the claim. Then a
+    `licence_file` read from the distribution, which fixed the sourcing and kept the column.
 
-    Nobody here is PERSUADE's licensor. Terms can change between snapshots, and a permissive
-    licence invented on our side is the error that costs something: it authorises redistribution
-    the publisher may not grant. The spec names a FILE that ships with the download; the loader
-    stores what that file says.
+    A better-sourced licence field is still this system holding a fact that belongs elsewhere.
+    Terms are negotiated and they change without the data changing, so a copy here goes stale
+    silently while looking authoritative — and it is read at exactly the moment somebody is
+    deciding whether they may redistribute something.
+
+    Licensing lives in the contracts system. This one records WHO published a corpus, which is
+    provenance; what may be done with it is not ours to answer.
     """
     assert not hasattr(SPEC, "licence")
-    assert SPEC.licence_file
-    src = pathlib.Path(load_persuade.__file__).read_text(encoding="utf8")
-    assert "CC BY" not in src
+    assert not hasattr(SPEC, "licence_file")
+    assert SPEC.url, "provenance stays: who published this is ours to record"
 
 
-def test_a_declared_licence_file_that_is_missing_stops_the_load(tmp_path):
-    """Refusing is the mechanism. A default, a warning, or a NULL all let a load finish with the
-    licence question unanswered — and it only matters at the moment somebody redistributes, long
-    after anybody would think to check."""
-    with pytest.raises(SystemExit) as e:
-        read_licence(str(tmp_path), SPEC)
-    assert "licence" in str(e.value).lower()
+@pytest.mark.parametrize("module", ["corpus/_shared.py", "corpus/load_persuade.py",
+                                     "corpus/models.py", "registry/persuade_rubrics.py",
+                                     "registry/seed_persuade.py"])
+def test_no_licence_is_named_anywhere_in_the_loaders(module):
+    """Named licences specifically, not the word — the surviving mentions are comments explaining
+    why there is no such field, and deleting those would invite the next author to add one back.
 
-
-def test_the_licence_stored_is_what_the_file_says(tmp_path):
-    """Verbatim. Summarising it into a short name is how "CC BY-NC-SA 4.0" becomes "CC BY 4.0"."""
-    d = tmp_path / "persuade20"
-    d.mkdir()
-    (d / "LICENCE.txt").write_text("Some terms, exactly as the corpus states them.",
-                                   encoding="utf8")
-    assert read_licence(str(tmp_path), SPEC) == "Some terms, exactly as the corpus states them."
-
-
-def test_an_empty_licence_file_is_refused_rather_than_stored(tmp_path):
-    """An empty string in the column reads as "we checked and there are no terms"."""
-    d = tmp_path / "persuade20"
-    d.mkdir()
-    (d / "LICENCE.txt").write_text("   ", encoding="utf8")
-    with pytest.raises(SystemExit):
-        read_licence(str(tmp_path), SPEC)
-
-
-def test_a_spec_with_no_licence_file_records_nothing(tmp_path):
-    """Honest for a corpus whose terms genuinely have not been established. What it cannot do is
-    record a guess."""
-    from dataclasses import replace
-
-    assert read_licence(str(tmp_path), replace(SPEC, licence_file=None)) is None
+    This is the guard. The defect was not that somebody picked the wrong licence; it was that
+    picking one here was possible at all.
+    """
+    src = (pathlib.Path(__file__).parent.parent.parent / module).read_text(encoding="utf8")
+    for named in ("CC BY", "CC-BY", "Apache", "MIT License", "GPL", "creativecommons.org"):
+        assert named not in src, f"{module} names a licence: {named}"
 
 
 # --------------------------------------------------------------------------- #
