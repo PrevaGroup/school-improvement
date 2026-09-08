@@ -24,6 +24,8 @@ and keeping the rules separable is what lets them be tested exhaustively without
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -263,24 +265,65 @@ def check_taught_but_unscored(r: Registry) -> list[Finding]:
     return out
 
 
+# Prose that stacks judgments. PERSUADE's holistic descriptors are the case that exposed this:
+# "marked by ONE OR MORE of the following weaknesses:" followed by four semicolon-separated
+# clauses, in every category. Written as a list they would have been flagged; written as a
+# paragraph they passed clean.
+_ENUMERATING = re.compile(
+    r"one or more of the following|any of the following|"
+    r"each of the following|all of the following", re.I)
+# Three or more independent clauses is the same structure the list form has, without the brackets.
+_CLAUSE_SPLIT = re.compile(r";|\band/or\b", re.I)
+_MIN_CLAUSES = 3
+
+
+def count_judgments(descriptor) -> int:
+    """How many separable judgments one rubric cell asks a rater to make.
+
+    A LIST is the obvious case and was the only one this rule saw. PROSE with three or more
+    independent clauses is the same instrument written differently, and a rule that only reads the
+    brackets grades the author's formatting rather than the rubric — the same cell passing or
+    failing depending on how somebody typed it.
+    """
+    if isinstance(descriptor, (list, tuple)):
+        return len(descriptor)
+    text = str(descriptor or "")
+    if not text.strip():
+        return 0
+    clauses = [c for c in _CLAUSE_SPLIT.split(text) if c.strip()]
+    # An explicit enumeration ("ONE OR MORE of the following") is a stacked cell even if the
+    # clauses are comma-separated, because the wording says the rater may pick any of them.
+    if _ENUMERATING.search(text):
+        return max(len(clauses), 2)
+    return len(clauses)
+
+
 def check_stacked_conditionals(r: Registry) -> list[Finding]:
     """A rubric cell holding several conditional judgments.
 
     Two raters can score the same paper on different clauses, which shows up as severe misfit and
     is nearly impossible to diagnose from the estimates alone. The C3 cell the crosswalk found
     stacks three sub-judgments each prefaced 'when relevant'.
+
+    Reads prose as well as lists. The first version only fired on a list, which meant it was
+    checking a representation rather than a property: PERSUADE's holistic descriptors stack four
+    judgments per category and passed clean because they are written as paragraphs. A linter whose
+    verdict depends on formatting is a linter that will be satisfied by reformatting.
     """
     out = []
     for v in r.versions:
         if v.get("status") == "withdrawn":
             continue
         for category, descriptor in (v.get("descriptors") or {}).items():
-            if isinstance(descriptor, (list, tuple)) and len(descriptor) > 1:
+            n = count_judgments(descriptor)
+            listed = isinstance(descriptor, (list, tuple))
+            if n > 1 if listed else n >= _MIN_CLAUSES:
+                shape = "" if listed else " (written as prose, not as a list)"
                 out.append(Finding(
                     "stacked_conditionals", ADVISORY, f"{v['node_version_id']}:{category}",
-                    f"category {category} stacks {len(descriptor)} conditional judgments in one "
-                    f"cell. Two raters can score the same paper on different clauses — split it, "
-                    f"or expect misfit that cannot be diagnosed from the estimates."))
+                    f"category {category} stacks {n} conditional judgments in one "
+                    f"cell{shape}. Two raters can score the same paper on different clauses — "
+                    f"split it, or expect misfit that cannot be diagnosed from the estimates."))
     return out
 
 
