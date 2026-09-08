@@ -156,3 +156,18 @@ def test_the_tables_it_reads_are_named_in_one_place(table):
     a table through an imported helper is how a dependency stops being visible."""
     src = (pathlib.Path(__file__).parent.parent / "corpus_agreement.py").read_text(encoding="utf8")
     assert table in src
+
+
+def test_every_nullable_parameter_is_cast():
+    """`:p IS NULL` with a NULL bind fails on Postgres — it cannot infer the parameter's type and
+    raises `could not determine data type`. It shipped that way: the tests here run against a fake
+    connection, so nothing exercised the SQL, and the default `--run-id` is None which is exactly
+    the failing case.
+
+    Grepping the SQL is a poor substitute for running it, and it is what can run without a
+    database. The real check is that the command works, which is now the first thing done after a
+    scoring run rather than the last."""
+    src = (pathlib.Path(__file__).parent.parent / "corpus_agreement.py").read_text(encoding="utf8")
+    for line in src.splitlines():
+        if "IS NULL" in line and ":" in line and "--" not in line:
+            assert "CAST(" in line, f"untyped nullable parameter: {line.strip()}"
