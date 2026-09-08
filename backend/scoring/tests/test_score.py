@@ -495,3 +495,33 @@ def test_score_artifact_passes_its_concurrency_down():
 
     src = inspect.getsource(score_artifact)
     assert "concurrency=concurrency" in src, "the criteria pool must hand its setting onward"
+
+
+def test_the_band_schema_has_no_range_keywords():
+    """The API refuses them on a number — `For 'number' type, properties maximum, minimum are not
+    supported` — and it refuses at request time, so a wave fails on every paper after paying for
+    its evidence calls. That is what happened."""
+    from scoring.prompts import BAND_SCHEMA
+
+    prop = BAND_SCHEMA["properties"]["probability"]
+    assert prop == {"type": "number"}
+
+
+def test_a_probability_outside_the_range_is_refused_not_clamped():
+    """A rater answering 1.4 to "what is the probability" did not answer the question. Clamping to
+    1.0 would turn a malfunction into a confident pass at that band and every band below it."""
+    from scoring.score import BandOutOfRange
+
+    c = criterion(cats=(1, 2, 3))
+    for bad in (1.4, -0.2, None, "high"):
+        rater = _BandRater({2: bad, 3: 0.5})
+        with pytest.raises(BandOutOfRange):
+            score_criterion_cumulative(TEXT, c, rater, concurrency=1)
+
+
+def test_the_ends_of_the_range_are_allowed():
+    """0 and 1 are probabilities. Refusing them would punish the certainty this design is trying
+    to make available."""
+    c = criterion(cats=(1, 2, 3))
+    out, _ = score_criterion_cumulative(TEXT, c, _BandRater({2: 1.0, 3: 0.0}), concurrency=1)
+    assert out.level == 2.0

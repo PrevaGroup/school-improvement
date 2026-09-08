@@ -87,3 +87,38 @@ def test_the_scale_order_comes_from_the_categories_not_the_dict():
 def test_a_missing_descriptor_is_a_broken_node_not_a_gap_to_render_around():
     with pytest.raises(ValueError, match="no descriptor for category"):
         render_scale("c", {"1": "low"}, [1, 2])
+
+
+# ------------------------------------------------------------------ what the API will accept
+
+def test_no_schema_uses_a_range_keyword():
+    """`minimum`/`maximum` on a number are refused at request time:
+
+        output_config.format.schema: For 'number' type, properties maximum, minimum are not
+        supported
+
+    The cumulative wave shipped with them and failed on every paper AFTER paying for that paper's
+    evidence calls — the failure is per request, so the money is spent before it is discovered.
+
+    A schema is unexecuted text until a request carries it, which is the same shape as the SQL
+    that passed by not being run. This catches the one keyword pair confirmed refused; the real
+    protection is the one-paper smoke test before a wave, which was skipped that time.
+    """
+    import scoring.prompts as prompts
+
+    schemas = {n: v for n, v in vars(prompts).items()
+               if n.endswith("_SCHEMA") and isinstance(v, dict)}
+    assert schemas, "no schemas found — this test would pass by finding nothing"
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for bad in ("minimum", "maximum"):
+                assert bad not in node, f"{path} uses {bad!r}, which the API refuses"
+            for k, v in node.items():
+                walk(v, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, f"{path}[{i}]")
+
+    for name, schema in schemas.items():
+        walk(schema, name)
