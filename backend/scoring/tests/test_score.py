@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -417,11 +418,16 @@ def test_one_band_prompt_shows_one_descriptor():
     assert "a verified sentence" in p
 
 
+# A rater that answers bands IS a cumulative rater, and `score_criterion` dispatches on exactly
+# that. Declaring the wrong method here would send the dispatch test down the category path.
+CUMULATIVE_IDENTITY = replace(IDENTITY, level_method="cumulative")
+
+
 class _BandRater:
     """Answers each band from a script keyed by the band number in the prompt."""
 
-    def __init__(self, by_band, spans=("the cat sat",)):
-        self.identity = IDENTITY
+    def __init__(self, by_band, spans=("Tinker set the standard",)):
+        self.identity = CUMULATIVE_IDENTITY
         self.by_band = by_band
         self.spans = list(spans)
         self.band_prompts = []
@@ -438,7 +444,7 @@ class _BandRater:
 def test_the_cumulative_path_scores_and_records_every_band():
     c = criterion(cats=(1, 2, 3, 4))
     rater = _BandRater({2: 0.9, 3: 0.8, 4: 0.1})
-    out, usage = score_criterion_cumulative("the cat sat on the mat", c, rater,
+    out, usage = score_criterion_cumulative(TEXT, c, rater,
                                             threshold=DEFAULT_THRESHOLD, concurrency=1)
     assert out.status == "scored" and out.level == 3.0
     # One evidence call plus one per band above the floor.
@@ -452,7 +458,7 @@ def test_no_verified_evidence_still_abstains_before_any_band_is_asked():
     empty evidence list would be paying to not find out."""
     c = criterion(cats=(1, 2, 3, 4))
     rater = _BandRater({2: 0.9}, spans=("a sentence that is not in the paper",))
-    out, usage = score_criterion_cumulative("the cat sat on the mat", c, rater, concurrency=1)
+    out, usage = score_criterion_cumulative(TEXT, c, rater, concurrency=1)
     assert out.status == "no_verified_evidence" and out.level is None
     assert usage.calls == 1
     assert rater.band_prompts == []
@@ -461,7 +467,7 @@ def test_no_verified_evidence_still_abstains_before_any_band_is_asked():
 def test_the_contradiction_is_named_in_the_reason_a_teacher_reads():
     c = criterion(cats=(1, 2, 3, 4))
     out, _ = score_criterion_cumulative(
-        "the cat sat on the mat", c, _BandRater({2: 0.9, 3: 0.1, 4: 0.99}), concurrency=1)
+        TEXT, c, _BandRater({2: 0.9, 3: 0.1, 4: 0.99}), concurrency=1)
     assert out.level == 2.0
     assert "contradicted a lower band" in out.reason
 
@@ -469,6 +475,23 @@ def test_the_contradiction_is_named_in_the_reason_a_teacher_reads():
 def test_the_bands_of_one_criterion_go_out_together():
     c = criterion(cats=(1, 2, 3, 4, 5, 6))
     rater = _BandRater({b: 0.9 for b in range(2, 7)})
-    out, _ = score_criterion_cumulative("the cat sat on the mat", c, rater, concurrency=5)
+    out, _ = score_criterion_cumulative(TEXT, c, rater, concurrency=5)
     assert out.level == 6.0
     assert len(rater.band_prompts) == 5
+
+
+def test_the_concurrency_setting_reaches_the_band_calls():
+    """It is the one dial for backing off a rate limit, and the band calls are what multiply:
+    eight criteria each opening their own pool is up to nineteen requests in flight for one paper,
+    not eight. A setting that stops at the criteria level cannot back anything off."""
+    c = criterion(cats=(1, 2, 3, 4, 5, 6))
+    rater = _BandRater({b: 0.9 for b in range(2, 7)})
+    out, _ = score_criterion(TEXT, c, rater, concurrency=1)
+    assert len(rater.band_prompts) == 5
+
+
+def test_score_artifact_passes_its_concurrency_down():
+    import inspect
+
+    src = inspect.getsource(score_artifact)
+    assert "concurrency=concurrency" in src, "the criteria pool must hand its setting onward"

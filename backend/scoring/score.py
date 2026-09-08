@@ -91,6 +91,20 @@ def build_score_prompt(criterion: Criterion, kept: list[dict]) -> str:
         evidence="\n".join('{}. "{}"'.format(i + 1, k["span"]) for i, k in enumerate(kept)))
 
 
+# How many criteria of one artifact are in flight at once. Eight is the PERSUADE trait count, so
+# a paper's whole trait set goes out together and the paper costs about as long as its slowest
+# criterion instead of the sum of all of them.
+#
+# Measured on the first corpus wave: sixteen sequential calls took 72 seconds a paper, which is
+# ~4.5s of waiting per call and no CPU to speak of. Six hours for a 331-paper wave, all of it
+# spent idle. The calls do not become cheaper by overlapping — the token bill is identical — they
+# only stop being consecutive.
+#
+# NOT parallel across artifacts. One artifact is one transaction and one `bound -> scored`
+# transition, and the guard that refuses to write a second rater's scores into a half-scored
+# artifact is worth more than another multiple of speed.
+DEFAULT_CONCURRENCY = 8
+
 DEFAULT_THRESHOLD = 0.5
 
 # A band whose probability sits this close to the threshold was decided by a coin flip in all but
@@ -241,7 +255,8 @@ def _gather_bands(jobs: list, concurrency: int) -> tuple[list[dict], Usage]:
     return answers, total
 
 
-def score_criterion(text: str, criterion: Criterion, rater: Rater) -> tuple[Outcome, Usage]:
+def score_criterion(text: str, criterion: Criterion, rater: Rater, *,
+                    concurrency: int = DEFAULT_CONCURRENCY) -> tuple[Outcome, Usage]:
     """One criterion, by whichever stage-D form this rater is.
 
     The method comes off the rater's own identity rather than being passed down. A rater IS its
@@ -251,8 +266,13 @@ def score_criterion(text: str, criterion: Criterion, rater: Rater) -> tuple[Outc
     """
     identity = getattr(rater, "identity", None)
     if identity is not None and getattr(identity, "level_method", "category") == "cumulative":
+        # The setting has to REACH the band calls. Without this, `--concurrency 1` still fires
+        # every band of a criterion at once, so the one dial for backing off a rate limit does not
+        # reach the calls that multiply: eight criteria each opening their own band pool is up to
+        # nineteen requests in flight for one paper, not eight.
         return score_criterion_cumulative(
-            text, criterion, rater, threshold=identity.level_threshold)
+            text, criterion, rater, threshold=identity.level_threshold,
+            concurrency=concurrency)
     return _score_criterion_category(text, criterion, rater)
 
 
@@ -304,21 +324,6 @@ def _interpret(raw: dict, criterion: Criterion, evidence: dict) -> Outcome:
     return out("scored", level=float(level))
 
 
-# How many criteria of one artifact are in flight at once. Eight is the PERSUADE trait count, so
-# a paper's whole trait set goes out together and the paper costs about as long as its slowest
-# criterion instead of the sum of all of them.
-#
-# Measured on the first corpus wave: sixteen sequential calls took 72 seconds a paper, which is
-# ~4.5s of waiting per call and no CPU to speak of. Six hours for a 331-paper wave, all of it
-# spent idle. The calls do not become cheaper by overlapping — the token bill is identical — they
-# only stop being consecutive.
-#
-# NOT parallel across artifacts. One artifact is one transaction and one `bound -> scored`
-# transition, and the guard that refuses to write a second rater's scores into a half-scored
-# artifact is worth more than another multiple of speed.
-DEFAULT_CONCURRENCY = 8
-
-
 def score_artifact(text: str, criteria: list[Criterion], rater: Rater, *,
                    concurrency: int = DEFAULT_CONCURRENCY) -> tuple[list[Outcome], Usage]:
     """Every criterion of one artifact, independently.
@@ -344,7 +349,8 @@ def score_artifact(text: str, criteria: list[Criterion], rater: Rater, *,
                  for c in criteria], Usage())
 
     return gather_criteria(
-        [(lambda c=c: score_criterion(text, c, rater)) for c in criteria], concurrency)
+        [(lambda c=c: score_criterion(text, c, rater, concurrency=concurrency))
+         for c in criteria], concurrency)
 
 
 def gather_criteria(jobs: list, concurrency: int) -> tuple[list[Outcome], Usage]:
