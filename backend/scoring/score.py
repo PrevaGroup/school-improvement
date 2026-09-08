@@ -230,8 +230,23 @@ class BandOutOfRange(ValueError):
     """A band probability outside [0, 1]. See `_one_band`."""
 
 
+class BandCallFailed(RuntimeError):
+    """A band call failed. Carries WHICH band of WHICH criterion — see `_one_band`."""
+
+
 def _one_band(rater: Rater, criterion: Criterion, kept: list[dict], band: float) -> dict:
-    raw, usage = rater.judge_band(build_band_prompt(criterion, kept, _fmt(band)))
+    prompt = build_band_prompt(criterion, kept, _fmt(band))
+    try:
+        raw, usage = rater.judge_band(prompt)
+    except Exception as exc:
+        # The batch loop catches per ARTIFACT, so an unwrapped failure says only that a paper
+        # failed — not which of its nineteen calls did, nor with what in front of it. A wave that
+        # fails on a quarter of its papers is then undiagnosable without another wave.
+        raise BandCallFailed(
+            f"band {_fmt(band)} of {criterion.criterion_label!r}: {type(exc).__name__}: {exc} "
+            f"[prompt {len(prompt)} chars, {len(kept)} verified span(s), "
+            f"longest {max((len(k.get('span') or '') for k in kept), default=0)} chars]"
+        ) from exc
     p = raw.get("probability")
 
     # Checked here rather than in the schema, because the API refuses `minimum`/`maximum` on a
