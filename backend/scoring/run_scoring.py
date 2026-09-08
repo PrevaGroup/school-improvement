@@ -108,9 +108,16 @@ _PINNED_CONFIG = text("""
 _PENDING = text("""
     SELECT a.artifact_id, a.run_id, a.student_id, a.section_id, a.task_id, a.iteration,
            a.window_label, a.content_hash, a.source_uri, a.intake_file_id, f.text AS intake_text,
+           cp.text AS corpus_text,
            a.tenant_id, a.visibility
       FROM artifact a
       LEFT JOIN intake_file f ON f.file_id = a.intake_file_id
+      -- A reference paper's text is a column in the corpus, not a file. Read with SQL, never by
+      -- importing `corpus` — a produced table is the seam between modules. The join is on
+      -- `student_id` because `bind_corpus` writes the de-identified paper id there, and it is
+      -- narrowed to the corpus tenant so a student id can never collide with a paper id.
+      LEFT JOIN corpus_paper cp
+             ON a.tenant_id = 'corpus' AND cp.paper_id = a.student_id
      WHERE a.tenant_id = :tenant AND a.state = 'bound'
        AND (CAST(:run_id AS text) IS NULL OR a.run_id = CAST(:run_id AS text))
      ORDER BY a.created_at
@@ -543,15 +550,23 @@ def escalate_pass(body: str, criteria: list[Criterion], outcomes: list[Outcome],
 
 
 def read_text(artifact: dict) -> str:
-    """The artifact's text, from the intake row it was bound from.
+    """The artifact's text, from wherever the paper actually is.
 
-    `intake` extracts once at read time and stores it, so this is a column rather than a file. The
-    local-path branch below is what the fixture seeder used before intake existed, and it stays
-    only until that seeder is retired — a batch job had a filesystem and the review console, which
-    reads the same text through the packet, does not.
+    `intake` extracts once at read time and stores it, so a student's paper is a column rather than
+    a file. A reference paper is a column too, in `corpus_paper`. The local-path branch below is
+    what the fixture seeder used before intake existed, and it stays only until that seeder is
+    retired — a batch job had a filesystem and the review console, which reads the same text
+    through the packet, does not.
+
+    The corpus branch exists because `source_uri` on a reference paper is a corpus locator
+    (`corpus:persuade20:E1`), not a path. Falling through to the file branch made the first
+    scoring run fail with `No such file or directory: corpus:persuade20:...` — which was at least
+    loud, and cost nothing because it happened before any model call.
     """
     if artifact.get("intake_text"):
         return artifact["intake_text"]
+    if artifact.get("corpus_text"):
+        return artifact["corpus_text"]
     uri = artifact.get("source_uri")
     if not uri:
         raise RuntimeError(
