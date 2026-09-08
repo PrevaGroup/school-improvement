@@ -330,7 +330,13 @@ def _sha(s: str) -> str:
     return hashlib.sha256(s.encode("utf8")).hexdigest()[:16]
 
 
-if __name__ == "__main__":     # `python -m scoring.prompts` prints what a configuration stamps
+if __name__ == "__main__":     # prints what a configuration stamps, for the promotion CLI
+    import argparse
     import json
 
-    print(json.dumps(fingerprint()))
+    # The METHOD matters: a cumulative rater fingerprints the band prompt and a category rater
+    # fingerprints the score prompt. Stamping the wrong one produces a configuration that refuses
+    # to load at the first paper.
+    _ap = argparse.ArgumentParser(description="the prompt fingerprint a configuration stamps")
+    _ap.add_argument("--method", default="category", choices=("category", "cumulative"))
+    print(json.dumps(fingerprint(_ap.parse_args().method)))

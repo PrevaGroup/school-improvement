@@ -68,7 +68,7 @@ from ._ids import uuid7
 log = logging.getLogger("scoring.bind_corpus")
 
 TENANT = "corpus"
-ITERATION = "anchor"
+DEFAULT_ITERATION = "anchor"
 SECTION_ID = "corpus:persuade20"
 
 # One task per PERSUADE form. The scoring site under each names the traits for that form, so the
@@ -86,9 +86,13 @@ _PAPERS = text("""
 
 # What is already bound, so a re-run adds only what is missing. The anchor set is scored in waves
 # and a second wave must not re-create the first.
+# What is already bound FOR THIS ITERATION. The iteration clause is load-bearing: without it a
+# second rater's binding looks like a re-run of the first and every paper is skipped, so the
+# comparison silently scores nothing. One rater per iteration is how the same papers get scored
+# twice without two configurations colliding inside one binding.
 _EXISTING = text("""
     SELECT student_id FROM artifact
-     WHERE tenant_id = :tenant AND student_id = ANY(:paper_ids)
+     WHERE tenant_id = :tenant AND iteration = :iteration AND student_id = ANY(:paper_ids)
 """)
 
 _INSERT = text("""
@@ -114,7 +118,7 @@ def resolution_path(paper: dict) -> dict:
             "basis": f"corpus:{paper['source_id']}:{paper['external_id']}"}
 
 
-def rows_for(papers: list[dict], run_id: str) -> list[dict]:
+def rows_for(papers: list[dict], run_id: str, iteration: str) -> list[dict]:
     """Artifacts for one wave. Pure, so what gets written can be asserted without a database."""
     out = []
     for p in papers:
@@ -130,7 +134,7 @@ def rows_for(papers: list[dict], run_id: str) -> list[dict]:
             "student_id": p["paper_id"],
             "section_id": SECTION_ID,
             "task_id": task_id,
-            "iteration": ITERATION,
+            "iteration": iteration,
             "content_hash": p["text_hash"],
             "source_uri": f"corpus:{p['source_id']}:{p['external_id']}",
             "resolution_path": json.dumps(resolution_path(p)),
@@ -139,18 +143,20 @@ def rows_for(papers: list[dict], run_id: str) -> list[dict]:
     return out
 
 
-def bind(paper_ids: list[str], *, run_id: str, dry_run: bool = False) -> dict:
+def bind(paper_ids: list[str], *, run_id: str, iteration: str = DEFAULT_ITERATION,
+         dry_run: bool = False) -> dict:
     eng = engine()
     with eng.connect() as conn:
         conn.execute(text("SELECT set_config('app.tenant', :t, true)"), {"t": TENANT})
         papers = [dict(r) for r in conn.execute(
             _PAPERS, {"paper_ids": paper_ids}).mappings()]
         already = {r[0] for r in conn.execute(
-            _EXISTING, {"tenant": TENANT, "paper_ids": paper_ids}).all()}
+            _EXISTING, {"tenant": TENANT, "iteration": iteration,
+                        "paper_ids": paper_ids}).all()}
 
     missing = [p for p in paper_ids if p not in {x["paper_id"] for x in papers}]
     fresh = [p for p in papers if p["paper_id"] not in already]
-    rows = rows_for(fresh, run_id)
+    rows = rows_for(fresh, run_id, iteration)
     unknown_form = [p["paper_id"] for p in fresh if p["task_type"] not in TASKS]
 
     if not dry_run and rows:
@@ -170,6 +176,7 @@ def bind(paper_ids: list[str], *, run_id: str, dry_run: bool = False) -> dict:
         "not_in_corpus": missing,
         "unknown_task_form": unknown_form,
         "tenant": TENANT,
+        "iteration": iteration,
         "dry_run": dry_run,
     }
 
@@ -188,6 +195,9 @@ def main() -> None:
     ap.add_argument("--wave", type=int, default=1,
                     help="which wave of the piped draw to bind (1 or 2)")
     ap.add_argument("--run-id", default=None, help="default: a new id per invocation")
+    ap.add_argument("--iteration", default=DEFAULT_ITERATION,
+                    help="one rater per iteration; a second rater on the same papers needs its "
+                         "own, or the configuration pin refuses the binding")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -204,7 +214,7 @@ def main() -> None:
         raise SystemExit(f"{key} is empty; nothing to bind.")
 
     print(json.dumps(bind(ids, run_id=a.run_id or f"anchor-{uuid7()[:8]}",
-                          dry_run=a.dry_run), indent=1))
+                          iteration=a.iteration, dry_run=a.dry_run), indent=1))
 
 
 if __name__ == "__main__":

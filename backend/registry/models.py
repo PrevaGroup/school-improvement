@@ -330,8 +330,9 @@ class ScoringConfiguration(Base):
     normalization_version: Mapped[str] = mapped_column(Text, nullable=False)  # span verifier rules
     # How deep this rater may look: budget, declared triggers, escalated effort, terminal action.
     # Shape and reasoning in `scoring/escalate.py`; NULL means the default policy, which is what
-    # every configuration written before migration 0027 has. Deliberately NOT in
-    # `definition_hash` — 0027 says why, and states the counter-argument.
+    # every configuration written before migration 0027 has. IS part of `definition_hash` as of
+    # 0036 — 0027 deferred that deliberately and wrote down the counter-argument, and 0036 made
+    # the call: the harness is the rater, so how deep it may look is part of what it is.
     escalation: Mapped[dict | None] = mapped_column(JSONB)
     # Per-stage model overrides, e.g. {"evidence": "claude-haiku-..."}. Absent stages use
     # `model_id`. Span proposal is verified against the paper, so a weaker model there fails

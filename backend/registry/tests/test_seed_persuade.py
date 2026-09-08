@@ -100,7 +100,18 @@ def test_the_site_is_not_a_measurement_occasion():
     """Reference papers, not a declared occasion in anybody's class. A true here would admit them
     to an estimation frame that is about students."""
     src = _sql()
-    assert "'anchor', false" in src
+    assert ":it, false" in src
+
+
+def test_a_site_exists_for_every_corpus_iteration():
+    """One iteration per rater on the anchor papers. `resolve_configuration` pins a binding to the
+    first configuration that scored it, so a second rater needs its own iteration or its binding
+    is refused — and a rater with no site resolves no traits, loudly, but only at run time and
+    only after the papers are bound."""
+    from registry.seed_persuade import CORPUS_ITERATIONS
+
+    assert "anchor" in CORPUS_ITERATIONS and len(CORPUS_ITERATIONS) >= 2
+    assert len(set(CORPUS_ITERATIONS)) == len(CORPUS_ITERATIONS)
 
 
 def test_the_task_ids_match_the_binder():
