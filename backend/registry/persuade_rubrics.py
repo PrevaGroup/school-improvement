@@ -20,10 +20,21 @@ text(s)"; the independent form does not. Those are different constructs, the rat
 different instruments, and a system that could hold only one rubric would have had to pretend
 otherwise. They get separate identifiers.
 
-Whether they should SHARE a trait — which is how this registry declares that two rubrics measure
-one thing, and the only mechanism that could place both halves of PERSUADE on one metric — is a
-judgment for a product manager, not a transcription decision. They are separate here. See
-`registry/CONTRACT.md` on shared traits.
+The two holistic traits stay separate: the whole scale is described differently on each form.
+
+## Six shared element traits, and two evidence traits
+
+The argumentation elements are where the many-to-many earns its keep. Lead, Position, Claim,
+Counterclaim, Rebuttal and Concluding summary mean the same thing whether or not a source text was
+supplied — a counterclaim is a counterclaim. Those six carry ONE identifier each and appear in both
+element rubrics, which is how this registry declares that two rubrics measure one thing, and the
+only mechanism that could place both halves of PERSUADE on one metric.
+
+Evidence is the exception, and it is the same exception the holistic forms make: in a text-
+dependent task the evidence must come from the source. That is a different construct, so it is a
+different trait.
+
+Ten traits, four rubrics. Decided by the product manager, 2026-09-08.
 
 ## Conventions IS on this scale, and that has a consequence
 
@@ -57,9 +68,12 @@ PUBLISHER = "PERSUADE 2.0 (Crossley et al.)"
 LICENCE_NOTE = "CC BY 4.0"
 GRADE_BAND = "6-12"          # the corpus spans grades 6 through 12
 
-# Nodes whose construct INCLUDES conventions. Stop condition 2 must skip these: adding grammar
-# errors is supposed to move a score here, and a trigger would be reporting the instrument.
-CONVENTIONS_IN_CONSTRUCT: set[str] = set()
+# Provenance per trait. `transcribed` is the rating form's own words; `adapted` is authored text
+# following the form's own pattern, and it says who decided. A descriptor nobody can trace is a
+# descriptor that will later be cited as PERSUADE's.
+TRANSCRIBED = "transcribed from the PERSUADE 2.0 rating form"
+ADAPTED = ("adapted from the PERSUADE 2.0 element rubric by adding the source-text requirement "
+           "the holistic text-dependent form uses; decided by the product manager 2026-09-08")
 
 
 def rubric_id(key: str) -> str:
@@ -145,7 +159,6 @@ def holistic(task: str) -> dict:
     source = _SOURCE_CLAUSE if task == "text_dependent" else ""
     key = f"persuade20-holistic-{task}"
     nid = node_id(key)
-    CONVENTIONS_IN_CONSTRUCT.add(nid)
     label = ("Overall argumentative writing quality (source-based)"
              if task == "text_dependent" else "Overall argumentative writing quality")
     return {
@@ -172,6 +185,7 @@ def holistic(task: str) -> dict:
             # exclusion from stop condition 2 is a property of the data rather than a thing
             # somebody has to remember.
             "conventions_in_construct": True,
+            "provenance": TRANSCRIBED,
         }],
     }
 
@@ -185,7 +199,11 @@ def holistic(task: str) -> dict:
 EFFECTIVENESS_SCALE = [1, 2, 3]
 EFFECTIVENESS_WORDS = {3: "Effective", 2: "Adequate", 1: "Ineffective"}
 
-_ELEMENTS = {
+# The six elements whose construct does not change with the task. A counterclaim is a counterclaim
+# whether or not a source text was supplied, so each carries ONE identifier and appears in both
+# element rubrics. That shared identifier is the anchor that can place the two halves of PERSUADE
+# on one metric; own them to a rubric each and the halves float apart forever.
+_SHARED_ELEMENTS = {
     "lead": ("Lead", {
         "3": "The lead grabs the reader's attention and strongly points toward the position.",
         "2": "The lead attempts to grab the reader's attention and points toward the position.",
@@ -212,17 +230,6 @@ _ELEMENTS = {
         "2": ("The rebuttal does not answer the counterclaim directly and it is not strong "
               "and/or valid."),
         "1": "The rebuttal misses the target. It does not refute the counterclaim."}),
-    "evidence": ("Evidence", {
-        "3": ("The evidence is closely relevant to the claim they support and back up the claim "
-              "objectively with concrete facts, examples, research, statistics, or studies. The "
-              "reasons in the evidence support the claim and are sound and well substantiated."),
-        "2": ("The evidence is not closely relevant to the claim it supports. The evidence "
-              "contains some detailed examples but they may not be relevant to each other and "
-              "only loosely bound together. The evidence uses some unsubstantiated or unsound "
-              "claims or assumptions."),
-        "1": ("The evidence is irrelevant to the claim it backs up and provide few valid "
-              "examples. The evidence uses unsubstantiated assumptions that sound quite "
-              "unacceptable.")}),
     "concluding_summary": ("Concluding summary", {
         "3": ("The concluding summary effectively restates the claims using different wording. It "
               "may readdress the claims in light of the evidence provided."),
@@ -232,41 +239,103 @@ _ELEMENTS = {
               "misrepresent the claims.")}),
 }
 
+# Evidence is the exception, and it is the same exception the holistic forms make: a text-dependent
+# task requires the evidence to come from the source. Two constructs, two traits.
+#
+# The rating form has ONE evidence descriptor set, written without a source requirement, so the
+# independent trait is transcribed and the sourced one is ADAPTED — the source clause added
+# following the pattern the holistic text-dependent form uses. Marked as adapted rather than
+# passed off as PERSUADE's, because a descriptor nobody can trace is one that will later be cited
+# as theirs.
+_EVIDENCE = {
+    "3": ("The evidence is closely relevant to the claim they support and back up the claim "
+          "objectively with concrete facts, examples, research, statistics, or studies{source}. "
+          "The reasons in the evidence support the claim and are sound and well substantiated."),
+    "2": ("The evidence is not closely relevant to the claim it supports. The evidence contains "
+          "some detailed examples{source} but they may not be relevant to each other and only "
+          "loosely bound together. The evidence uses some unsubstantiated or unsound claims or "
+          "assumptions."),
+    "1": ("The evidence is irrelevant to the claim it backs up and provide few valid "
+          "examples{source}. The evidence uses unsubstantiated assumptions that sound quite "
+          "unacceptable."),
+}
 
-def effectiveness() -> dict:
-    """The argumentation-elements rubric: seven traits, three levels each.
+_EVIDENCE_SOURCE_CLAUSE = " taken from the source text(s)"
 
-    Registered as the instrument it is. The downloaded release ships segmentation WITHOUT
-    effectiveness ratings, so there is nothing human to compare a model score against yet — the
-    corpus contract records the same absence about `corpus_discourse_span.effectiveness`.
 
-    Conventions is NOT in this construct: every descriptor is about argumentative function.
-    Matched-pairs testing is legitimate against these nodes and not against the holistic ones.
-    """
-    key = "persuade20-argumentation-elements"
+def _trait(key: str, label: str, descriptors: dict, *, ordinal: int,
+           provenance: str) -> dict:
+    return {
+        "node_id": node_id(key),
+        "external_ref": key,
+        "criterion_label": label,
+        "standard_code": "PERSUADE.ELEMENT",
+        "grade_band": GRADE_BAND,
+        "scale_categories": EFFECTIVENESS_SCALE,
+        "kind": "anchor",
+        "source": "PERSUADE argumentation elements rubric (Table 2)",
+        "descriptors": descriptors,
+        "instruction": ("Rate this argumentation element as Effective (3), Adequate (2) or "
+                        "Ineffective (1) using the descriptors below."),
+        # Every element descriptor is about argumentative function, so matched-pairs testing is
+        # legitimate here and not against the holistic nodes.
+        "conventions_in_construct": False,
+        "provenance": provenance,
+        "ordinal": ordinal,
+    }
+
+
+def shared_element_traits() -> list[dict]:
+    """The six traits both element rubrics share. One identifier each."""
+    return [_trait(f"persuade20-element:{slug}", name, desc, ordinal=i, provenance=TRANSCRIBED)
+            for i, (slug, (name, desc)) in enumerate(_SHARED_ELEMENTS.items(), start=1)]
+
+
+def evidence_trait(task: str) -> dict:
+    """The evidence trait for one task form. Two constructs, two identifiers."""
+    if task not in ("independent", "text_dependent"):
+        raise ValueError(f"unknown PERSUADE task form {task!r}")
+    sourced = task == "text_dependent"
+    clause = _EVIDENCE_SOURCE_CLAUSE if sourced else ""
+    return _trait(
+        f"persuade20-element:evidence-{task}",
+        "Evidence (source-based)" if sourced else "Evidence",
+        {k: v.format(source=clause) for k, v in _EVIDENCE.items()},
+        ordinal=7, provenance=ADAPTED if sourced else TRANSCRIBED)
+
+
+def elements(task: str) -> dict:
+    """One element rubric: the six shared traits plus this task's evidence trait."""
+    key = f"persuade20-argumentation-elements-{task}"
     return {
         "rubric_id": rubric_id(key),
-        "name": "PERSUADE 2.0 Argumentation Elements Effectiveness",
+        "name": ("PERSUADE 2.0 Argumentation Elements — Text Dependent" if task == "text_dependent"
+                 else "PERSUADE 2.0 Argumentation Elements — Independent"),
         "publisher": PUBLISHER,
         "external_ref": key,
         "grade_band": GRADE_BAND,
-        "traits": [{
-            "node_id": node_id(f"{key}:{slug}"),
-            "external_ref": f"{key}:{slug}",
-            "criterion_label": name,
-            "standard_code": "PERSUADE.ELEMENT",
-            "grade_band": GRADE_BAND,
-            "scale_categories": EFFECTIVENESS_SCALE,
-            "kind": "anchor",
-            "source": "PERSUADE argumentation elements rubric (Table 2)",
-            "descriptors": desc,
-            "instruction": ("Rate this argumentation element as Effective (3), Adequate (2) or "
-                            "Ineffective (1) using the descriptors below."),
-            "conventions_in_construct": False,
-            "ordinal": i,
-        } for i, (slug, (name, desc)) in enumerate(_ELEMENTS.items(), start=1)],
+        "traits": shared_element_traits() + [evidence_trait(task)],
     }
 
 
 def all_rubrics() -> list[dict]:
-    return [holistic("independent"), holistic("text_dependent"), effectiveness()]
+    """Four rubrics over ten distinct traits: two holistic, six shared elements, two evidence."""
+    return [holistic("independent"), holistic("text_dependent"),
+            elements("independent"), elements("text_dependent")]
+
+
+def distinct_traits() -> dict[str, dict]:
+    """node_id -> trait, deduplicated. The shared six appear in two rubrics and are ONE trait."""
+    out: dict[str, dict] = {}
+    for r in all_rubrics():
+        for t in r["traits"]:
+            out.setdefault(t["node_id"], t)
+    return out
+
+
+# Nodes whose construct INCLUDES conventions. Stop condition 2 must skip these: adding grammar
+# errors is supposed to move a score here, and a trigger would be reporting the instrument rather
+# than a defect. Computed at import from the traits themselves, so a new node cannot be added
+# without landing on the right side of it.
+CONVENTIONS_IN_CONSTRUCT: frozenset[str] = frozenset(
+    nid for nid, t in distinct_traits().items() if t["conventions_in_construct"])
