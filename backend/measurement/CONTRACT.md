@@ -2,9 +2,21 @@
 
 An **engine**, like `likeschools`. No serving surface; `serving` reads these tables with SQL.
 
-The estimator is **not here yet**. Fits, facet estimates, fit statistics and bias interactions
-arrive with Phase 6, when there is something to fit. What this module owns now is the thing that is
-expensive to retrofit: a record of exactly which observations any future estimate was computed over.
+The estimator arrived with Phase 6 (`measurement/mfrm.py`): person and rater measures, fit
+statistics, and rater x subgroup bias interactions. The frame tables remain the thing that was
+expensive to retrofit — a record of exactly which observations an estimate was computed over.
+
+**Two estimators, because the design decides which is correct.** `fit` is joint maximum likelihood
+over any number of raters. `paired_severity` is conditional maximum likelihood for exactly two, and
+it exists because JMLE inflates the severity gap when each paper carries only two ratings —
+measured at +0.86 against a true +0.50, shrinking to +0.46 by four raters. One human pool and one
+model configuration is this project's actual design, so the biased case is the normal case, and
+`paired_severity` eliminates the person measures algebraically rather than estimating them.
+
+**Only the contrast is identifiable with two raters.** "The model is harsh" and "the humans are
+lenient" are the same statement without an external anchor, and a bias interaction in one rater
+appears as its mirror in the other. `fit` centres raters at zero, which is a convention rather than
+a finding.
 
 ## Tables owned
 
