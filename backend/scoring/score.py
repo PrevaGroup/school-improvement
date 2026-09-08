@@ -226,10 +226,24 @@ def score_criterion_cumulative(text: str, criterion: Criterion, rater: Rater, *,
             usage)
 
 
+class BandOutOfRange(ValueError):
+    """A band probability outside [0, 1]. See `_one_band`."""
+
+
 def _one_band(rater: Rater, criterion: Criterion, kept: list[dict], band: float) -> dict:
     raw, usage = rater.judge_band(build_band_prompt(criterion, kept, _fmt(band)))
-    return {"probability": float(raw.get("probability", 0.0)),
-            "reason": raw.get("reason"), "_usage": usage}
+    p = raw.get("probability")
+
+    # Checked here rather than in the schema, because the API refuses `minimum`/`maximum` on a
+    # number. Raised rather than clamped: a rater answering 1.4 to "what is the probability" did
+    # not answer the question, and clamping it to 1.0 turns a malfunction into a confident pass at
+    # every band above it. The batch loop catches this per artifact and names the paper.
+    if p is None or not isinstance(p, (int, float)) or not 0.0 <= float(p) <= 1.0:
+        raise BandOutOfRange(
+            f"band {_fmt(band)} of {criterion.criterion_label!r} came back as {p!r}, which is not "
+            f"a probability. Clamping it would turn a rater malfunction into a confident answer.")
+
+    return {"probability": float(p), "reason": raw.get("reason"), "_usage": usage}
 
 
 def _fmt(band: float):

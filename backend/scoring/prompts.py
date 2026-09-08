@@ -237,7 +237,15 @@ BAND_SCHEMA: dict = {
     "properties": {
         # A number, not a category. The whole point is to defer the category decision to code
         # that cannot hedge.
-        "probability": {"type": "number", "minimum": 0, "maximum": 1},
+        #
+        # NO `minimum`/`maximum`. The API refuses them on a number:
+        #   output_config.format.schema: For 'number' type, properties maximum, minimum are not
+        #   supported
+        # The range is enforced in `scoring.score._one_band` instead, which is the better place
+        # regardless — a schema keyword the server accepts still would not tell us WHICH band came
+        # back out of range, and an out-of-range probability is a rater malfunction worth naming
+        # rather than a request to reject.
+        "probability": {"type": "number"},
         "reason": {"type": "string"},
     },
     "required": ["probability", "reason"],
