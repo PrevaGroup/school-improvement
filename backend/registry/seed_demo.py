@@ -56,6 +56,7 @@ from dataclasses import replace
 from sqlalchemy import text
 
 from ._db import engine
+from . import config_hash
 from .lint import ADVISORY, BLOCKING, Registry, blocks_publication, lint
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "freespeech_rubric.json"
@@ -126,33 +127,20 @@ def _read_registry(conn, acks: dict[str, dict]) -> Registry:
 
 # `scoring.escalate.Policy().as_dict()`, written out because `registry` may not import `scoring`.
 # The consistency test compares them.
-# `scoring.rater.STAGES`, written out for the same boundary reason. The seed declares no
-# per-stage overrides, so every stage resolves to MODEL_ID.
-STAGES = ("fit", "evidence", "score", "band", "feedback")
-
-DEFAULT_ESCALATION = {"budget": 2,
-                      "triggers": ["abstained", "no_verified_evidence"],
-                      "escalated_effort": "high",
-                      "terminal_action": "route_to_human"}
+# Re-exported so the consistency test and any older import keep working; the definitions live
+# in `config_hash` now, so there is one registry-side copy rather than one per writer.
+STAGES = config_hash.STAGES
+DEFAULT_ESCALATION = config_hash.DEFAULT_ESCALATION
 
 
 def seed(prompt_versions: dict) -> dict:
     fx = load()
-    # Must stay byte-identical to `scoring.rater.RaterIdentity.definition_hash`. It is duplicated
-    # rather than imported because `registry` may not import `scoring` — modules integrate through
-    # tables. `tests/test_identity_hash_agrees.py` is what keeps the two from drifting, since a
-    # silent divergence here makes every seeded configuration refuse to load.
-    #
-    # ESCALATION is part of it. This seed declares none, so the hash covers the DEFAULT policy —
-    # resolved, not NULL, because a configuration that declares nothing and one that spells out
-    # the defaults are the same rater.
-    definition_hash = hashlib.sha256(
-        json.dumps({"models": {s: MODEL_ID for s in STAGES}, "effort": EFFORT,
-                    "prompt_versions": prompt_versions,
-                    "normalization_version": "1", "escalation": DEFAULT_ESCALATION,
-                    "level_method": "category", "level_threshold": 0.5},
-                   sort_keys=True,
-                   separators=(",", ":")).encode("utf8")).hexdigest()[:32]
+    # One registry-side copy of the hash, in `config_hash`. It must stay byte-identical to
+    # `scoring.rater.RaterIdentity.definition_hash`, which lives across an import boundary this
+    # module may not cross; `tests/test_identity_hash_agrees.py` is what keeps them in step.
+    definition_hash = config_hash.definition_hash(
+        model_id=MODEL_ID, effort=EFFORT, prompt_versions=prompt_versions,
+        normalization_version="1")
 
     with engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', 'public', true)"))

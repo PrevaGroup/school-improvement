@@ -80,6 +80,12 @@ SOURCE = "PERSUADE 2.0 rating forms, transcribed 2026-09-08"
 # which writes the same task ids onto the artifacts.
 CORPUS_TASK_PREFIX = "corpus:persuade20"
 
+# One iteration per rater on the anchor papers. `anchor` holds the category-form scores already
+# written; `anchor-b` is where a second rater scores the SAME papers, so the two can be estimated
+# side by side and placed on one scale. Adding a third rater means adding an iteration here and
+# re-binding — deliberately a visible edit, because each one costs a full wave.
+CORPUS_ITERATIONS = ("anchor", "anchor-b")
+
 
 def seed(*, dry_run: bool = False) -> dict:
     rubrics = all_rubrics()
@@ -129,10 +135,16 @@ def seed(*, dry_run: bool = False) -> dict:
         # One task and one scoring site per form, so `run_scoring` can resolve the traits through
         # the same join it uses for student work. The site names this form's eight nodes: the
         # holistic trait plus the seven elements, with the evidence trait that matches the form.
-        for form, rubrics_for_form in (("independent", ("independent",)),
-                                       ("text_dependent", ("text_dependent",))):
+        # ONE SITE PER (FORM, ITERATION). The iteration is how the same papers get scored by two
+        # raters: `resolve_configuration` pins a binding to the first configuration that scored
+        # it, so a second rater on the same task and iteration is refused — correctly, because
+        # two raters inside one comparison is the thing the pin exists to prevent. Giving the
+        # second rater its own iteration makes it a separate occasion on the same papers, which
+        # is what a rater facet is, and MFRM connects them through the paper.
+        for form, iteration in ((f, i) for f in ("independent", "text_dependent")
+                                for i in CORPUS_ITERATIONS):
             task_id = f"{CORPUS_TASK_PREFIX}:{form}"
-            site_id = f"{task_id}:anchor"
+            site_id = f"{task_id}:{iteration}"
             holistic_rubric = holistic(form)
             element_rubric = elements(form)
             conn.execute(text("""
@@ -146,9 +158,9 @@ def seed(*, dry_run: bool = False) -> dict:
             conn.execute(text("""
                 INSERT INTO registry_scoring_site
                     (site_id, task_id, rubric_id, iteration, is_measurement_occasion, note)
-                VALUES (:s, :t, :r, 'anchor', false, :note)
+                VALUES (:s, :t, :r, :it, false, :note)
                 ON CONFLICT (site_id) DO NOTHING"""),
-                {"s": site_id, "t": task_id, "r": holistic_rubric["rubric_id"],
+                {"s": site_id, "t": task_id, "r": holistic_rubric["rubric_id"], "it": iteration,
                  # NOT a measurement occasion: reference papers, not a declared occasion in
                  # anybody's class. A true here would admit them to a frame about students.
                  "note": "PERSUADE 2.0 reference papers — corpus tenant, not student work"})
