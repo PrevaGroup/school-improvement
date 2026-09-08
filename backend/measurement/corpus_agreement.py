@@ -85,7 +85,10 @@ _OURS = text("""
       JOIN corpus_paper  p ON p.paper_id    = a.student_id
      WHERE e.tenant_id = :tenant
        AND e.scorer_type = 'ai'
-       AND (:run_id IS NULL OR e.run_id = :run_id)
+       -- CAST because Postgres cannot infer a bare parameter's type, and a NULL one makes
+       -- `$2 IS NULL` ambiguous: `could not determine data type of parameter $2`. Same
+       -- shape as `_PENDING` in `scoring/run_scoring.py`, which already had it.
+       AND (CAST(:run_id AS text) IS NULL OR e.run_id = CAST(:run_id AS text))
        AND NOT EXISTS (SELECT 1 FROM score_event s
                         WHERE s.supersedes_event_id = e.event_id)
 """)
