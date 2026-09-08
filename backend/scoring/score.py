@@ -20,6 +20,8 @@ is built to keep.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from dataclasses import dataclass, field
 
 from .prompts import EVIDENCE_PROMPT, SCORE_PROMPT, render_scale
@@ -136,13 +138,36 @@ def _interpret(raw: dict, criterion: Criterion, evidence: dict) -> Outcome:
     return out("scored", level=float(level))
 
 
-def score_artifact(text: str, criteria: list[Criterion],
-                   rater: Rater) -> tuple[list[Outcome], Usage]:
+# How many criteria of one artifact are in flight at once. Eight is the PERSUADE trait count, so
+# a paper's whole trait set goes out together and the paper costs about as long as its slowest
+# criterion instead of the sum of all of them.
+#
+# Measured on the first corpus wave: sixteen sequential calls took 72 seconds a paper, which is
+# ~4.5s of waiting per call and no CPU to speak of. Six hours for a 331-paper wave, all of it
+# spent idle. The calls do not become cheaper by overlapping — the token bill is identical — they
+# only stop being consecutive.
+#
+# NOT parallel across artifacts. One artifact is one transaction and one `bound -> scored`
+# transition, and the guard that refuses to write a second rater's scores into a half-scored
+# artifact is worth more than another multiple of speed.
+DEFAULT_CONCURRENCY = 8
+
+
+def score_artifact(text: str, criteria: list[Criterion], rater: Rater, *,
+                   concurrency: int = DEFAULT_CONCURRENCY) -> tuple[list[Outcome], Usage]:
     """Every criterion of one artifact, independently.
 
     Independently is the load-bearing word: no criterion's result is passed into the next call,
     and nothing accumulates between them but the token count. Halo is not something a model is
     asked to avoid — it is something the assembly makes unavailable.
+
+    Running them concurrently is that claim made structural rather than merely true. A sequential
+    loop leaves an ordering for a later edit to start depending on; threads leave none, and the
+    only thing joined at the end is a token count, which is a sum and does not care.
+
+    `concurrency=1` is the old sequential path exactly, kept as an argument rather than deleted
+    because it is what a rate limit gets dialled down to, and what a confusing result gets
+    reproduced under.
     """
     if is_non_attempt(text):
         return ([Outcome(node_id=c.node_id, node_version_id=c.node_version_id,
@@ -152,9 +177,30 @@ def score_artifact(text: str, criteria: list[Criterion],
                                    "norm_version": NORM_VERSION})
                  for c in criteria], Usage())
 
-    outcomes, total = [], Usage()
-    for c in criteria:
-        outcome, usage = score_criterion(text, c, rater)
-        outcomes.append(outcome)
+    return gather_criteria(
+        [(lambda c=c: score_criterion(text, c, rater)) for c in criteria], concurrency)
+
+
+def gather_criteria(jobs: list, concurrency: int) -> tuple[list[Outcome], Usage]:
+    """Run the calls, in order out whatever the order back.
+
+    `map` preserves input order, so an outcome list is positionally the criteria list no matter
+    which criterion the model answered first. That matters beyond tidiness: `event_rows` pairs
+    outcomes with criteria, and a scrambled list would attach every score to the wrong trait —
+    silently, and in a way that reads as a terrible rater rather than as a bug.
+
+    An exception propagates, and it propagates from the first job in ORDER rather than the first
+    to fail — which is what the sequential version did too. The difference is that its siblings
+    may already have been paid for by then. One artifact's worth of calls is the cost of a
+    failure, the batch loop above catches it, and that was already true.
+    """
+    if concurrency <= 1 or len(jobs) <= 1:
+        results = [j() for j in jobs]
+    else:
+        with ThreadPoolExecutor(max_workers=min(concurrency, len(jobs))) as pool:
+            results = list(pool.map(lambda j: j(), jobs))
+
+    total = Usage()
+    for _, usage in results:
         total = total + usage
-    return outcomes, total
+    return [outcome for outcome, _ in results], total
