@@ -52,6 +52,7 @@ from sqlalchemy import bindparam, text
 from . import feedback
 from ._db import engine
 from ._ids import uuid7
+from . import escalate
 from .rater import AnthropicRater, RaterIdentity
 from .run_scoring import read_text
 from .verify import NORM_VERSION, normalize
@@ -111,7 +112,7 @@ _STUDENT = text("SELECT display_name FROM roster_student WHERE student_id = :stu
 # are already written, and refusing to compose them because a scoring prompt has since moved would
 # strand finished work behind a check about producing levels rather than describing them.
 _CONFIG = text("""
-    SELECT config_id, model_id, effort, prompt_versions, normalization_version
+    SELECT config_id, model_id, effort, prompt_versions, normalization_version, escalation
       FROM registry_scoring_configuration WHERE config_id = :config_id
 """)
 
@@ -316,9 +317,14 @@ def _compose_one(eng, artifact: dict, *, tenant: str, dry_run: bool, rater_facto
             f"The scores name a rater that does not exist.")
 
     body = read_text(artifact)
+    # Feedback drafting never escalates, but the identity still carries the configuration's
+    # policy: it identifies WHICH rater this is, and a rater is not partly itself depending on
+    # which stage is asking.
     identity = RaterIdentity(config_id=cfg["config_id"], model_id=cfg["model_id"],
                              effort=cfg["effort"], prompt_versions=dict(cfg["prompt_versions"]),
-                             normalization_version=cfg["normalization_version"])
+                             normalization_version=cfg["normalization_version"],
+                             escalation=escalate.Policy.from_config(
+                                 cfg.get("escalation")).as_dict())
     drafted, usage = feedback.draft(body, packet, rater_factory(identity), student_name)
     holds = feedback.check(drafted, body)
 

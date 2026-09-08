@@ -13,7 +13,12 @@ from scoring.feedback import (EMPTY_DRAFT, MENTIONS_CONVENTIONS, OVERLONG_DRAFT,
                               UNDECLARED_QUOTATION, UNVERIFIED_QUOTATION, Draft, build_prompt,
                               check, draft, findings_for_prompt, first_name)
 from scoring.prompts import FEEDBACK_PROMPT, FEEDBACK_VERSION, feedback_fingerprint
+from scoring.escalate import Policy
 from scoring.rater import RaterIdentity, Usage
+
+# The resolved default policy. Part of the rater identity, because the harness — models,
+# prompts, normalisation, and how deep it may look — IS the rater.
+DEFAULT_ESCALATION = Policy().as_dict()
 
 PAPER = (
     "Tinker asked schools to prove something. The exceptions ask students to prove something "
@@ -39,7 +44,8 @@ def make(message: str, quotations=None) -> Draft:
 
 class FakeRater:
     def __init__(self, payload):
-        self.identity = RaterIdentity("cfg-1", "claude-opus-5", "high", {}, "1")
+        self.identity = RaterIdentity("cfg-1", "claude-opus-5", "high", {}, "1",
+                                      DEFAULT_ESCALATION)
         self.payload = payload
         self.prompts: list[str] = []
 

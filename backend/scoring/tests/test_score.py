@@ -15,9 +15,14 @@ import time
 
 import pytest
 
+from scoring.escalate import Policy
 from scoring.rater import RaterIdentity, Usage
 from scoring.score import (Criterion, build_score_prompt, is_non_attempt, score_artifact,
                            score_criterion)
+
+# The resolved default policy. Part of the rater identity, because the harness — models,
+# prompts, normalisation, and how deep it may look — IS the rater.
+DEFAULT_ESCALATION = Policy().as_dict()
 
 TEXT = (
     "The Court held that student speech may be limited when it disrupts school. "
@@ -26,7 +31,7 @@ TEXT = (
     "Later cases narrowed this in ways that are still argued about today."
 )
 
-IDENTITY = RaterIdentity("cfg-test", "claude-opus-5", "high", {}, "1")
+IDENTITY = RaterIdentity("cfg-test", "claude-opus-5", "high", {}, "1", DEFAULT_ESCALATION)
 
 
 def criterion(node_id="n1", label="use of evidence", cats=(1, 2, 3, 4)):

@@ -16,6 +16,7 @@ import re
 import pytest
 
 from app.vocab import SCORE_STATUS_IDS
+from scoring.escalate import Policy
 from scoring.prompts import fingerprint
 from scoring.rater import RaterIdentity
 from scoring.run_scoring import (AlreadyRunning, ConfigurationError, check_configuration,
@@ -23,13 +24,18 @@ from scoring.run_scoring import (AlreadyRunning, ConfigurationError, check_confi
                                  score_pending, trait_set_version)
 from scoring.score import Outcome
 
+# The resolved default policy. Part of the rater identity, because the harness — models,
+# prompts, normalisation, and how deep it may look — IS the rater.
+DEFAULT_ESCALATION = Policy().as_dict()
+
 ARTIFACT = {
     "artifact_id": "art-1", "run_id": "run-9", "student_id": "stu-1", "section_id": "sec-1",
     "task_id": "task-1", "iteration": "final", "window_label": "fall 2026",
     "content_hash": "h", "source_uri": None, "tenant_id": "public", "visibility": "public",
 }
 
-IDENTITY = RaterIdentity("cfg-1", "claude-opus-5", "high", fingerprint(), "1")
+IDENTITY = RaterIdentity("cfg-1", "claude-opus-5", "high", fingerprint(), "1",
+                         DEFAULT_ESCALATION)
 
 
 def outcome(status="scored", level=3.0, node="n1"):
@@ -176,7 +182,8 @@ def test_a_mixture_of_not_scorable_and_scored_is_loud():
 def test_a_configuration_whose_prompts_have_moved_is_refused():
     stale = RaterIdentity("cfg-old", "claude-opus-5", "high",
                           {"evidence": {"version": "ev.1", "sha256": "0000000000000000"},
-                           "score": {"version": "sc.1", "sha256": "1111111111111111"}}, "1")
+                           "score": {"version": "sc.1", "sha256": "1111111111111111"}}, "1",
+                          DEFAULT_ESCALATION)
     with pytest.raises(ConfigurationError, match="not the one that was promoted"):
         check_configuration(stale)
 
@@ -189,7 +196,8 @@ def test_a_floating_model_alias_is_not_a_pinned_rater():
     """An alias that resolves to a new build changes the rater without changing the record, and
     every score before and after looks identical."""
     with pytest.raises(ValueError, match="floating alias"):
-        RaterIdentity("cfg-x", "claude-opus-latest", "high", fingerprint(), "1")
+        RaterIdentity("cfg-x", "claude-opus-latest", "high", fingerprint(), "1",
+                      DEFAULT_ESCALATION)
 
 
 # ------------------------------------------------------------------ the SQL itself
