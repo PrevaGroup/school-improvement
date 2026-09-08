@@ -10,6 +10,9 @@ commit rather than once before a demo.
 """
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from scoring.rater import RaterIdentity, Usage
@@ -219,3 +222,114 @@ def test_every_criterion_gets_an_outcome_and_usage_is_the_sum():
     assert [o.node_id for o in outs] == ["n1", "n2", "n3"]
     assert [o.status for o in outs] == ["scored", "scored", "no_verified_evidence"]
     assert usage.calls == 5, "two calls each for the scored pair, one for the unscorable one"
+
+
+# ------------------------------------------------------------------ concurrent criteria
+
+class _SlowRater:
+    """Answers criteria out of order on purpose, and records the overlap.
+
+    The first criterion asked is answered LAST. If anything downstream depends on completion
+    order, this is the rater that exposes it — a sequential loop cannot produce the interleaving.
+    """
+
+    def __init__(self, criteria_count: int, span="the cat sat"):
+        self.span = span
+        self.n = criteria_count
+        self._lock = threading.Lock()
+        self.peak = 0
+        self._live = 0
+        self.order = []
+        self._seen = 0
+
+    def _enter(self):
+        with self._lock:
+            self._live += 1
+            self.peak = max(self.peak, self._live)
+            mine = self._seen
+            self._seen += 1
+        # Earlier criteria sleep longer, so they finish last.
+        time.sleep(0.05 * (self.n - mine))
+        with self._lock:
+            self._live -= 1
+            self.order.append(mine)
+
+    def propose_spans(self, prompt):
+        self._enter()
+        return [self.span], Usage(1, 10, 5)
+
+    def assign_level(self, prompt):
+        return {"level": 3, "confidence": "high", "reason": "r"}, Usage(1, 10, 5)
+
+
+def _criteria(n):
+    return [criterion(node_id=f"n{i}", label=f"criterion {i}") for i in range(n)]
+
+
+def test_outcomes_come_back_in_criteria_order_however_the_calls_finish():
+    """The one that would be silent. `event_rows` pairs outcomes with criteria positionally, so a
+    scrambled list attaches every score to the wrong trait — and the result reads as a terrible
+    rater rather than as a bug."""
+    crit = _criteria(6)
+    rater = _SlowRater(6)
+    outcomes, _ = score_artifact("the cat sat on the mat", crit, rater, concurrency=6)
+    assert [o.node_id for o in outcomes] == [c.node_id for c in crit]
+    # The rater really did answer out of order, or this proves nothing.
+    assert rater.order != sorted(rater.order)
+
+
+def test_the_criteria_are_actually_in_flight_together():
+    """A `concurrency=8` that quietly ran sequentially would pass every other test here and take
+    six hours in production."""
+    rater = _SlowRater(4)
+    score_artifact("the cat sat on the mat", _criteria(4), rater, concurrency=4)
+    assert rater.peak > 1
+
+
+def test_concurrency_one_is_the_sequential_path():
+    """Kept as an argument rather than deleted: it is what a rate limit gets dialled down to, and
+    what a confusing result gets reproduced under."""
+    rater = _SlowRater(3)
+    outcomes, usage = score_artifact("the cat sat on the mat", _criteria(3), rater, concurrency=1)
+    assert rater.peak == 1
+    assert [o.level for o in outcomes] == [3, 3, 3]
+    assert usage.calls == 6
+
+
+def test_the_token_count_is_the_same_whatever_the_order():
+    """Usage is summed at the end, and addition does not care who finished first."""
+    seq, _ = score_artifact("the cat sat on the mat", _criteria(5), _SlowRater(5), concurrency=1)
+    con, _ = score_artifact("the cat sat on the mat", _criteria(5), _SlowRater(5), concurrency=5)
+    assert [(o.node_id, o.level) for o in seq] == [(o.node_id, o.level) for o in con]
+
+
+class _FailingRater(_SlowRater):
+    def propose_spans(self, prompt):
+        self._enter()
+        if "criterion 2" in prompt:
+            raise RuntimeError("the model refused")
+        return [self.span], Usage(1, 10, 5)
+
+
+def test_a_failure_in_one_criterion_still_fails_the_artifact():
+    """It must not be swallowed into a partial result. A paper scored on six of eight traits,
+    written and moved to `scored`, would never be picked up again — the missing two would just be
+    absent, which is indistinguishable from a trait set that never had them."""
+    with pytest.raises(RuntimeError, match="the model refused"):
+        score_artifact("the cat sat on the mat", _criteria(4), _FailingRater(4), concurrency=4)
+
+
+def test_an_empty_document_still_makes_no_calls():
+    """The short-circuit is before the pool. Spinning up eight threads to not call anything would
+    be harmless and would also mean the check had moved."""
+    rater = _SlowRater(3)
+    outcomes, usage = score_artifact("", _criteria(3), rater, concurrency=8)
+    assert usage.calls == 0
+    assert rater.peak == 0
+    assert all(o.status == "not_scorable" for o in outcomes)
+
+
+def test_one_criterion_does_not_open_a_pool():
+    rater = _SlowRater(1)
+    score_artifact("the cat sat on the mat", _criteria(1), rater, concurrency=8)
+    assert rater.peak == 1

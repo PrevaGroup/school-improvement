@@ -52,7 +52,7 @@ from ._db import engine
 from ._ids import uuid7
 from .prompts import fingerprint
 from .rater import AnthropicRater, RaterIdentity, Usage
-from . import escalate, fit
+from . import escalate, fit, score
 from .score import Criterion, Outcome, score_artifact, score_criterion
 
 log = logging.getLogger("scoring.run_scoring")
@@ -397,7 +397,8 @@ _LOCK = text("SELECT pg_try_advisory_lock(:ns, hashtext(:tenant))")
 
 
 def score_pending(*, tenant: str, config_key: str, run_id: str | None = None,
-                  limit: int = 50, dry_run: bool = False, rater_factory=AnthropicRater) -> dict:
+                  limit: int = 50, dry_run: bool = False, rater_factory=AnthropicRater,
+                  concurrency: int = score.DEFAULT_CONCURRENCY) -> dict:
     """Score every `bound` artifact for one tenant. Returns a summary the caller can log.
 
     Raises `AlreadyRunning` if another scorer holds this tenant — refusing costs a re-run, and
@@ -427,7 +428,8 @@ def score_pending(*, tenant: str, config_key: str, run_id: str | None = None,
             artifact = dict(row)
             try:
                 usage = _score_one(eng, artifact, tenant=tenant, config_key=config_key,
-                                   dry_run=dry_run, rater_factory=rater_factory)
+                                   dry_run=dry_run, rater_factory=rater_factory,
+                                   concurrency=concurrency)
             except Exception as exc:                  # one bad artifact must not stop the batch
                 log.error("artifact %s: %s", artifact["artifact_id"], exc)
                 failed.append({"artifact_id": artifact["artifact_id"], "error": str(exc)})
@@ -447,8 +449,8 @@ def score_pending(*, tenant: str, config_key: str, run_id: str | None = None,
         lock_conn.close()
 
 
-def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
-               dry_run: bool, rater_factory) -> Usage | None:
+def _score_one(eng, artifact: dict, *, tenant: str, config_key: str, dry_run: bool,
+               rater_factory, concurrency: int = score.DEFAULT_CONCURRENCY) -> Usage | None:
     """Score one artifact and write it. Returns None when there was nothing left to do."""
     aid = artifact["artifact_id"]
 
@@ -487,7 +489,8 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
                             evidence=verdict.as_evidence())
                     for c in remaining]
     else:
-        scored_outcomes, score_usage = score_artifact(body, remaining, rater)
+        scored_outcomes, score_usage = score_artifact(
+            body, remaining, rater, concurrency=concurrency)
         outcomes = scored_outcomes
         usage = usage + score_usage
 
@@ -496,7 +499,7 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
     # reasoning lives. A gated paper skips it: `not_scorable` is not a trigger, and paying twice
     # to confirm a document is not an attempt is the opposite of what the gate is for.
     escalated, plan, esc_usage, unchanged = escalate_pass(
-        body, remaining, outcomes, policy, identity, rater_factory)
+        body, remaining, outcomes, policy, identity, rater_factory, concurrency=concurrency)
     usage = usage + esc_usage
 
     # What the record says now, per criterion: the escalated outcome where one stands, the first
@@ -555,8 +558,9 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str,
 
 
 def escalate_pass(body: str, criteria: list[Criterion], outcomes: list[Outcome],
-                  policy: escalate.Policy, identity: RaterIdentity,
-                  rater_factory) -> tuple[list[Outcome], escalate.Plan, Usage, dict[str, str]]:
+                  policy: escalate.Policy, identity: RaterIdentity, rater_factory, *,
+                  concurrency: int = score.DEFAULT_CONCURRENCY,
+                  ) -> tuple[list[Outcome], escalate.Plan, Usage, dict[str, str]]:
     """The second, deeper look. Same criteria, same paper, higher effort.
 
     Returns the outcomes that STAND after escalation, the plan (so the run can report what it
@@ -576,10 +580,14 @@ def escalate_pass(body: str, criteria: list[Criterion], outcomes: list[Outcome],
     by_node = {c.node_id: c for c in criteria}
     first_by_node = {o.node_id: o for o in outcomes}
 
-    stands, total, unchanged = [], Usage(), {}
-    for node_id in p.escalate:
-        second, usage = score_criterion(body, by_node[node_id], rater)
-        total = total + usage
+    # The calls concurrently; the KEEP decisions in plan order afterwards. Splitting it that way
+    # is deliberate — `escalate.keep` is where a first-pass level survives or is replaced, and a
+    # decision like that should not be reached in whatever order the network answered.
+    seconds, total = score.gather_criteria(
+        [(lambda n=n: score_criterion(body, by_node[n], rater)) for n in p.escalate], concurrency)
+
+    stands, unchanged = [], {}
+    for node_id, second in zip(p.escalate, seconds):
         winner, changed = escalate.keep(first_by_node[node_id], second)
         if changed:
             stands.append(winner)
@@ -629,12 +637,15 @@ def main() -> None:
     ap.add_argument("--run-id", default=None, help="limit to one run; default is every bound artifact")
     ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("--dry-run", action="store_true", help="call the model, write nothing")
+    ap.add_argument("--concurrency", type=int, default=score.DEFAULT_CONCURRENCY,
+                    help="criteria of ONE artifact in flight at once (1 = sequential)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     try:
         summary = score_pending(tenant=args.tenant, config_key=args.config_key,
-                                run_id=args.run_id, limit=args.limit, dry_run=args.dry_run)
+                                run_id=args.run_id, limit=args.limit, dry_run=args.dry_run,
+                                concurrency=args.concurrency)
     except AlreadyRunning as exc:
         # A refusal, not a crash. On a Cloud Run job a traceback reads as a bug and gets retried;
         # this exits non-zero with the reason on one line.
