@@ -37,6 +37,14 @@ SECRET_NAME = "anthropic-api-key"
 # A tag is a moving target. Pinning means pinning.
 _ALIASES = ("latest", "-latest")
 
+# The four places this system calls a model. Named rather than inferred, so a configuration cannot
+# assign a model to a stage that does not exist and discover it at run time.
+#
+# They are the keys `prompts.fingerprint()` already uses, deliberately: the prompt for a stage and
+# the model that reads it are two halves of the same choice, and having them keyed differently is
+# how a config ends up overriding a stage whose prompt it never saw.
+STAGES = ("fit", "evidence", "score", "feedback")
+
 
 @dataclass(frozen=True)
 class Usage:
@@ -85,18 +93,52 @@ class RaterIdentity:
     # Required, with no default. A default would let a construction site stay silent about part of
     # the rater it is defining, which is the thing this field exists to stop.
     escalation: dict
+    # Per-stage model overrides, e.g. {"evidence": "claude-haiku-4-5-20251001"}. Absent stages use
+    # `model_id`.
+    #
+    # WHY THIS IS WORTH HAVING. Stage C proposes spans and every span it proposes is then verified
+    # as an exact substring of the paper — so a weaker model's failure there is caught
+    # mechanically and costs verified spans rather than producing a wrong score. Stage D assigns a
+    # level and NOTHING downstream checks it. Those are different risks and they do not deserve
+    # the same model. Stage C also carries the whole essay in its prompt, once per trait, which is
+    # where the input tokens actually are.
+    #
+    # WHY IT IS AN OVERRIDE MAP AND NOT A REQUIRED FOUR. So `model_id` stays the answer to "what
+    # model is this", and a single-model rater does not have to say the same string four times.
+    # The RESOLVED map is what gets hashed, so declaring nothing and declaring the same model
+    # everywhere are the same rater — the same reasoning as the escalation policy above.
+    stage_models: dict | None = None
+
+    @property
+    def models(self) -> dict:
+        """The resolved model per stage. This, not `model_id`, is what actually gets called."""
+        return {stage: (self.stage_models or {}).get(stage) or self.model_id
+                for stage in STAGES}
 
     def __post_init__(self) -> None:
-        if any(a in self.model_id for a in _ALIASES):
+        unknown = set(self.stage_models or {}) - set(STAGES)
+        if unknown:
             raise ValueError(
-                f"model_id {self.model_id!r} looks like a floating alias. A configuration is a "
-                f"rater; an alias that resolves to a new build changes the rater without changing "
-                f"the record, which is the one failure the freeze exists to prevent.")
+                f"unknown scoring stage(s) {sorted(unknown)} in stage_models. The stages are "
+                f"{list(STAGES)}; a model assigned to a stage that does not exist is a model that "
+                f"never gets used, and nothing would say so.")
+        # EVERY resolved model, not just `model_id` — an override is exactly as capable of being
+        # a floating alias, and it is the one nobody would think to check.
+        for stage, model in self.models.items():
+            if any(a in model for a in _ALIASES):
+                raise ValueError(
+                    f"model {model!r} for stage {stage!r} looks like a floating alias. A "
+                    f"configuration is a rater; an alias that resolves to a new build changes the "
+                    f"rater without changing the record, which is the one failure the freeze "
+                    f"exists to prevent.")
 
     @property
     def definition_hash(self) -> str:
         return hashlib.sha256(
-            json.dumps({"model_id": self.model_id, "effort": self.effort,
+            # `models`, not `model_id`: the resolved per-stage map is what was actually called.
+            # A rater declaring one model and a rater declaring that same model at every stage are
+            # the same rater and must collide.
+            json.dumps({"models": self.models, "effort": self.effort,
                         "prompt_versions": self.prompt_versions,
                         "normalization_version": self.normalization_version,
                         "escalation": self.escalation},
@@ -141,21 +183,23 @@ class AnthropicRater:
                                            max_retries=max_retries)
 
     def judge_fit(self, prompt: str) -> tuple[dict, Usage]:
-        return self._call(prompt, FIT_SCHEMA)
+        return self._call(prompt, FIT_SCHEMA, "fit")
 
     def propose_spans(self, prompt: str) -> tuple[list[str], Usage]:
-        out, usage = self._call(prompt, EVIDENCE_SCHEMA)
+        out, usage = self._call(prompt, EVIDENCE_SCHEMA, "evidence")
         return list(out["spans"]), usage
 
     def assign_level(self, prompt: str) -> tuple[dict, Usage]:
-        return self._call(prompt, SCORE_SCHEMA)
+        return self._call(prompt, SCORE_SCHEMA, "score")
 
     def write_feedback(self, prompt: str) -> tuple[dict, Usage]:
-        return self._call(prompt, FEEDBACK_SCHEMA)
+        return self._call(prompt, FEEDBACK_SCHEMA, "feedback")
 
-    def _call(self, prompt: str, schema: dict) -> tuple[dict, Usage]:
+    def _call(self, prompt: str, schema: dict, stage: str) -> tuple[dict, Usage]:
+        # The stage is passed rather than inferred from the schema. A schema is a shape and two
+        # stages could share one; the stage is the thing a configuration assigns a model to.
         r = self._client.messages.create(
-            model=self.identity.model_id,
+            model=self.identity.models[stage],
             max_tokens=self._max_tokens,
             output_config={"effort": self.identity.effort,
                            "format": {"type": "json_schema", "schema": schema}},

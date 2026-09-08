@@ -112,7 +112,8 @@ _STUDENT = text("SELECT display_name FROM roster_student WHERE student_id = :stu
 # are already written, and refusing to compose them because a scoring prompt has since moved would
 # strand finished work behind a check about producing levels rather than describing them.
 _CONFIG = text("""
-    SELECT config_id, model_id, effort, prompt_versions, normalization_version, escalation
+    SELECT config_id, model_id, effort, prompt_versions, normalization_version, escalation,
+           stage_models
       FROM registry_scoring_configuration WHERE config_id = :config_id
 """)
 
@@ -324,7 +325,8 @@ def _compose_one(eng, artifact: dict, *, tenant: str, dry_run: bool, rater_facto
                              effort=cfg["effort"], prompt_versions=dict(cfg["prompt_versions"]),
                              normalization_version=cfg["normalization_version"],
                              escalation=escalate.Policy.from_config(
-                                 cfg.get("escalation")).as_dict())
+                                 cfg.get("escalation")).as_dict(),
+                             stage_models=cfg.get("stage_models"))
     drafted, usage = feedback.draft(body, packet, rater_factory(identity), student_name)
     holds = feedback.check(drafted, body)
 

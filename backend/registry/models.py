@@ -333,6 +333,11 @@ class ScoringConfiguration(Base):
     # every configuration written before migration 0027 has. Deliberately NOT in
     # `definition_hash` — 0027 says why, and states the counter-argument.
     escalation: Mapped[dict | None] = mapped_column(JSONB)
+    # Per-stage model overrides, e.g. {"evidence": "claude-haiku-..."}. Absent stages use
+    # `model_id`. Span proposal is verified against the paper, so a weaker model there fails
+    # visibly; level assignment is checked by nothing, so it is not the place to economise.
+    # The RESOLVED map is part of `definition_hash` — see `scoring.rater.RaterIdentity.models`.
+    stage_models: Mapped[dict | None] = mapped_column(JSONB)
     definition_hash: Mapped[str] = mapped_column(Text, nullable=False)
 
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")

@@ -18,7 +18,7 @@ import pytest
 from app.vocab import SCORE_STATUS_IDS
 from scoring.escalate import Policy
 from scoring.prompts import fingerprint
-from scoring.rater import RaterIdentity
+from scoring.rater import STAGES, RaterIdentity
 from scoring.run_scoring import (AlreadyRunning, ConfigurationError, check_configuration,
                                  enters_calibration, event_rows, idempotency_key, next_state,
                                  score_pending, trait_set_version)
@@ -396,3 +396,84 @@ def test_the_lock_is_per_tenant_not_global(fake_engine):
     score_pending(tenant="corpus", config_key="writing-default")
     lock = next(s for s in eng.statements if "pg_try_advisory_lock" in s)
     assert "hashtext(:tenant)" in lock
+
+
+# ------------------------------------------------------------------ a model per stage
+
+def _ident(**over):
+    base = dict(config_id="cfg-1", model_id="claude-opus-5", effort="high",
+                prompt_versions=fingerprint(), normalization_version="1",
+                escalation=DEFAULT_ESCALATION)
+    return RaterIdentity(**(base | over))
+
+
+def test_a_stage_with_no_override_uses_the_base_model():
+    assert _ident().models == {s: "claude-opus-5" for s in STAGES}
+
+
+def test_an_override_applies_to_its_stage_and_no_other():
+    """Span proposal is verified against the paper, so a weaker model there costs verified spans
+    and routes to abstention. Level assignment is checked by nothing. Different risks, and the
+    override has to be able to tell them apart."""
+    i = _ident(stage_models={"evidence": "claude-haiku-4-5-20251001"})
+    assert i.models["evidence"] == "claude-haiku-4-5-20251001"
+    assert i.models["score"] == "claude-opus-5"
+    assert i.models["fit"] == "claude-opus-5"
+
+
+def test_declaring_no_overrides_and_declaring_the_same_model_everywhere_collide():
+    """What is hashed is what the rater DOES, not how verbosely it was written down. Splitting one
+    rater into two over notation would break the connectivity that puts them on one scale."""
+    assert _ident().definition_hash == _ident(
+        stage_models={s: "claude-opus-5" for s in STAGES}).definition_hash
+
+
+def test_a_different_model_at_one_stage_is_a_different_rater():
+    assert _ident().definition_hash != _ident(
+        stage_models={"evidence": "claude-haiku-4-5-20251001"}).definition_hash
+
+
+def test_a_floating_alias_in_an_override_is_refused_too():
+    """The guard checked `model_id` only. An override is exactly as capable of being an alias that
+    silently resolves to a new build, and it is the one nobody would think to look at."""
+    with pytest.raises(ValueError, match="floating alias"):
+        _ident(stage_models={"evidence": "claude-haiku-latest"})
+
+
+def test_a_model_assigned_to_a_stage_that_does_not_exist_is_refused():
+    """Otherwise it is a model nobody calls, and nothing would say so — the configuration would
+    look like a mixed harness and behave like a single-model one."""
+    with pytest.raises(ValueError, match="unknown scoring stage"):
+        _ident(stage_models={"evidenc": "claude-haiku-4-5-20251001"})
+
+
+class _RecordingClient:
+    """Stands in for the Anthropic client and records which model each stage asked for."""
+
+    class _Messages:
+        def __init__(self, seen):
+            self.seen = seen
+
+        def create(self, *, model, **kw):
+            self.seen.append(model)
+            import types
+            return types.SimpleNamespace(
+                content=[types.SimpleNamespace(type="text", text='{"spans": []}')],
+                usage=types.SimpleNamespace(input_tokens=1, output_tokens=1))
+
+    def __init__(self):
+        self.seen = []
+        self.messages = self._Messages(self.seen)
+
+
+def test_each_stage_actually_calls_its_own_model():
+    """The property that matters, and the one the resolution alone does not prove: a correct
+    `models` map still sends every call to `model_id` if `_call` never reads it."""
+    from scoring.rater import AnthropicRater
+
+    rater = AnthropicRater(_ident(stage_models={"evidence": "claude-haiku-4-5-20251001"}),
+                           api_key="not-used")
+    rater._client = _RecordingClient()
+    rater.propose_spans("p")
+    rater.assign_level("p")
+    assert rater._client.seen == ["claude-haiku-4-5-20251001", "claude-opus-5"]
