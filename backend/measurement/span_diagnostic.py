@@ -87,10 +87,31 @@ def volume(evidence) -> dict:
     """
     ev = evidence if isinstance(evidence, dict) else json.loads(evidence or "{}")
     kept = ev.get("kept") or []
-    texts = [k if isinstance(k, str) else (k.get("text") or "") for k in kept]
     return {"proposed": int(ev.get("proposed") or 0),
             "kept": len(kept),
-            "chars": sum(len(t) for t in texts)}
+            "chars": sum(len(span_text(k)) for k in kept)}
+
+
+# `scoring.verify.verify_all` writes {"span": <the text>, **verdict}. The first version of this
+# file read "text" and got zero characters from every span on every paper — which printed as a
+# clean flat column and a nan correlation, i.e. exactly what "stage C is blind" looks like. A
+# parse failure that is indistinguishable from a finding is the worst kind.
+#
+# `tests/test_span_shape_agrees.py` pins this against the real producer; `measurement` may not
+# import `scoring`, so the shape cannot simply be shared.
+_TEXT_KEYS = ("span", "text", "quote")
+
+
+def span_text(k) -> str:
+    """The text of one kept span, whatever key it arrived under."""
+    if isinstance(k, str):
+        return k
+    if isinstance(k, dict):
+        for key in _TEXT_KEYS:
+            v = k.get(key)
+            if isinstance(v, str):
+                return v
+    return ""
 
 
 def _pearson(xs: list[float], ys: list[float]) -> float:
@@ -162,6 +183,15 @@ def render(rows: list[dict]) -> str:
     if not rows:
         return ("No scored corpus papers with a human holistic score. Nothing to diagnose — run "
                 "the anchor wave first.")
+    # Kept spans with no characters in them is not a finding, it is a parse failure — and it
+    # renders as a flat column and a nan correlation, which is what a real "stage C is blind"
+    # result looks like. Say so instead of publishing it.
+    kept_total = sum(r["kept"] for r in rows)
+    if kept_total and not sum(r["chars"] for r in rows):
+        return (f"{kept_total:,} verified spans carry zero characters between them, which is "
+                f"impossible. `span_text` is not finding the text on this evidence shape — see "
+                f"tests/test_span_shape_agrees.py. Not reporting a diagnosis from it.")
+
     a = analyse(rows)
     (hc, hn), (oc, on) = a["overall"]["human_vs_evidence"], a["overall"]["ours_vs_evidence"]
 
