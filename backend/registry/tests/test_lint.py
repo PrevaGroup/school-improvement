@@ -242,3 +242,77 @@ def test_blocking_findings_sort_first():
     f = lint(r)
     assert f[0].severity == BLOCKING
     assert f[-1].severity == ADVISORY
+
+
+# --------------------------------------------------------------------------- #
+# The rule reads prose, not just lists.
+#
+# PERSUADE's holistic descriptors exposed this: "marked by ONE OR MORE of the following
+# weaknesses" followed by four semicolon-separated clauses, in every category — and they passed
+# the linter clean because they are written as paragraphs. A rule that only fires on a list is
+# checking a REPRESENTATION rather than a property, and the same cell passes or fails depending on
+# how somebody typed it. A linter satisfied by reformatting is not a linter.
+# --------------------------------------------------------------------------- #
+
+def test_a_list_still_counts_as_stacked():
+    from registry.lint import count_judgments
+
+    assert count_judgments(["when relevant, a", "when relevant, b", "c"]) == 3
+    assert count_judgments(["only one"]) == 1
+
+
+def test_prose_with_several_independent_clauses_is_stacked():
+    from registry.lint import count_judgments
+
+    persuade = ("A typical essay develops a point of view and demonstrates competent critical "
+                "thinking; the essay is generally organized and focused; the essay may "
+                "demonstrate inconsistent facility in the use of language; the essay may have "
+                "some errors in grammar, usage, and mechanics.")
+    assert count_judgments(persuade) >= 3
+
+
+def test_an_explicit_enumeration_is_stacked_however_it_is_punctuated():
+    """"ONE OR MORE of the following" says outright that the rater may pick any clause, which is
+    the stacking, whether the clauses are separated by semicolons or commas."""
+    from registry.lint import count_judgments
+
+    assert count_judgments("marked by ONE OR MORE of the following weaknesses: a, b, c") >= 2
+
+
+def test_a_single_judgment_in_prose_is_not_stacked():
+    """The rule must not fire on every descriptor with a comma in it, or it stops being read."""
+    from registry.lint import count_judgments
+
+    assert count_judgments("The lead grabs the reader's attention and points to the position.") < 3
+    assert count_judgments("The counterclaim is neither reasonable nor relevant.") < 3
+    assert count_judgments("") == 0
+    assert count_judgments(None) == 0
+
+
+def test_persuade_holistic_descriptors_are_flagged_and_element_ones_are_not():
+    """The discrimination that matters. The holistic scale stacks four to six judgments per
+    category; the element rubric asks one thing at a time. Both are real instruments and the
+    linter should say so about one and not the other."""
+    from registry.lint import count_judgments
+    from registry.persuade_rubrics import distinct_traits
+
+    for t in distinct_traits().values():
+        counts = [count_judgments(d) for d in t["descriptors"].values()]
+        if t["standard_code"] == "PERSUADE.HOLISTIC":
+            assert min(counts) >= 3, f"{t['criterion_label']} {counts}"
+        else:
+            assert max(counts) < 3, f"{t['criterion_label']} {counts}"
+
+
+def test_the_finding_says_the_descriptor_was_prose():
+    """So a reader can tell why it was not caught before, and does not go looking for a list."""
+    from registry.lint import ADVISORY, Finding, check_stacked_conditionals
+
+    class R:
+        versions = [{"node_version_id": "n:1", "status": "published",
+                     "descriptors": {"3": "a; b; c; d"}}]
+
+    found = check_stacked_conditionals(R())
+    assert len(found) == 1
+    assert found[0].severity == ADVISORY
+    assert "written as prose" in found[0].message
