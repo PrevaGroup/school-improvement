@@ -22,15 +22,30 @@ rubrics under ONE identifier each. The node is inserted once and `registry_rubri
 rows — which is the many-to-many doing exactly what it exists for, and the only thing that can
 place both halves of PERSUADE on one metric.
 
-## No scoring site, and no task
+## A task and a scoring site per form — a reversal, and why
 
-A scoring site says which iterations of a TASK are scored on which rubric, and PERSUADE papers are
-not handed in against a task in this system — they are anchor papers with no class, no iteration
-and no teacher. Inventing a task to hang them from would put anchor papers in the same shape as
-student work and they would eventually be counted as it. The corpus-to-artifact path binds them
-explicitly instead.
+An earlier version of this file refused to write either, on the grounds that a task would put
+corpus papers in the same shape as student work and they would eventually be counted as it. The
+objection was right and the conclusion was wrong.
 
-## No skill
+`run_scoring` resolves WHICH traits to score by joining `registry_scoring_site` on task and
+iteration. That join is the seam. Routing around it would mean a second way of deciding which
+traits apply to a paper, and two ways of deciding that is exactly how two scoring paths drift
+until the severity estimated on one no longer describes the other.
+
+What actually prevents corpus papers being counted as student work is the `corpus` TENANT
+(migration 0032), not the absence of a task. Every artifact carries `tenant_id`, the console scopes
+to `public`, and the counts are then right by construction rather than by a filter somebody
+remembers.
+
+Two tasks rather than two iterations of one: independent and text-dependent are different
+instruments, not two attempts at the same one, and `iteration` means draft-versus-final everywhere
+else in this system. The iteration here is `anchor`.
+
+`is_measurement_occasion` is FALSE on both. These are reference papers, not a declared occasion in
+anybody's class, and a true here would put them in an estimation frame that is about students.
+
+## Still no skill
 
 A skill is a sub-standard: a claim about what a standards document says. PERSUADE's holistic scale
 is its own instrument and its elements are argumentative functions, neither of which is a
@@ -48,10 +63,14 @@ from sqlalchemy import text
 
 from ._db import engine
 from .lint import ADVISORY, BLOCKING, blocks_publication, lint
-from .persuade_rubrics import all_rubrics, distinct_traits
+from .persuade_rubrics import all_rubrics, distinct_traits, elements, holistic
 from .seed_demo import _read_acknowledgments, _read_registry
 
 SOURCE = "PERSUADE 2.0 rating forms (CC BY 4.0), transcribed 2026-09-08"
+
+# The scoring sites corpus papers bind to. Kept in step with `scoring.bind_corpus`,
+# which writes the same task ids onto the artifacts.
+CORPUS_TASK_PREFIX = "corpus:persuade20"
 
 
 def seed(*, dry_run: bool = False) -> dict:
@@ -99,6 +118,39 @@ def seed(*, dry_run: bool = False) -> dict:
                     VALUES (:r, :n, :o) ON CONFLICT DO NOTHING"""),
                     {"r": r["rubric_id"], "n": t["node_id"], "o": t.get("ordinal", 1)})
 
+        # One task and one scoring site per form, so `run_scoring` can resolve the traits through
+        # the same join it uses for student work. The site names this form's eight nodes: the
+        # holistic trait plus the seven elements, with the evidence trait that matches the form.
+        for form, rubrics_for_form in (("independent", ("independent",)),
+                                       ("text_dependent", ("text_dependent",))):
+            task_id = f"{CORPUS_TASK_PREFIX}:{form}"
+            site_id = f"{task_id}:anchor"
+            holistic_rubric = holistic(form)
+            element_rubric = elements(form)
+            conn.execute(text("""
+                INSERT INTO registry_task (task_id, module_key, name, ordinal, grade_band)
+                VALUES (:t, :mk, :n, NULL, :gb)
+                ON CONFLICT (task_id) DO NOTHING"""),
+                {"t": task_id, "mk": "persuade20",
+                 "n": ("PERSUADE 2.0 — text dependent" if form == "text_dependent"
+                       else "PERSUADE 2.0 — independent"),
+                 "gb": holistic_rubric["grade_band"]})
+            conn.execute(text("""
+                INSERT INTO registry_scoring_site
+                    (site_id, task_id, rubric_id, iteration, is_measurement_occasion, note)
+                VALUES (:s, :t, :r, 'anchor', false, :note)
+                ON CONFLICT (site_id) DO NOTHING"""),
+                {"s": site_id, "t": task_id, "r": holistic_rubric["rubric_id"],
+                 # NOT a measurement occasion: reference papers, not a declared occasion in
+                 # anybody's class. A true here would admit them to a frame about students.
+                 "note": "PERSUADE 2.0 reference papers — corpus tenant, not student work"})
+            for ordinal, t in enumerate(
+                    holistic_rubric["traits"] + element_rubric["traits"], start=1):
+                conn.execute(text("""
+                    INSERT INTO registry_scoring_site_node (site_id, node_id, ordinal)
+                    VALUES (:s, :n, :o) ON CONFLICT DO NOTHING"""),
+                    {"s": site_id, "n": t["node_id"], "o": ordinal})
+
         acks = _read_acknowledgments(conn)
         registry = _read_registry(conn, acks)
         findings = lint(registry)
@@ -139,6 +191,7 @@ def seed(*, dry_run: bool = False) -> dict:
         "distinct_traits": len(traits),
         "trait_slots": sum(len(r["traits"]) for r in rubrics),
         "note": note,
+        "tasks": [f"{CORPUS_TASK_PREFIX}:independent", f"{CORPUS_TASK_PREFIX}:text_dependent"],
         "blocking": [str(f) for f in findings if f.severity == BLOCKING],
         "advisory": [str(f) for f in findings if f.severity == ADVISORY],
         # Named, not counted: an acknowledged registry must not report identically to a spotless

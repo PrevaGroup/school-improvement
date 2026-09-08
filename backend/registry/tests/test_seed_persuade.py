@@ -79,13 +79,50 @@ def test_a_dry_run_rolls_back():
 
 # ------------------------------------------------------------------ what it deliberately omits
 
-def test_no_scoring_site_is_created():
-    """A site says which iterations of a TASK are scored on which rubric. PERSUADE papers are not
-    handed in against a task — no class, no iteration, no teacher. Inventing one would put anchor
-    papers in the same shape as student work, and they would eventually be counted as it."""
+def test_a_task_and_a_site_exist_per_form():
+    """This test previously asserted the OPPOSITE, on the grounds that a task would put corpus
+    papers in the same shape as student work. The objection was right and the conclusion was
+    wrong: `run_scoring` resolves which traits to score by joining `registry_scoring_site`, so
+    routing around it would mean a second way of deciding which traits apply — and two ways of
+    deciding that is how two scoring paths drift until the severity estimated on one stops
+    describing the other.
+
+    What keeps corpus papers out of the teacher's counts is the `corpus` tenant (0032), not the
+    absence of a task.
+    """
     src = _sql()
-    assert "registry_scoring_site" not in src
-    assert "registry_task" not in src
+    assert "INSERT INTO registry_task" in src
+    assert "INSERT INTO registry_scoring_site" in src
+    assert "registry_scoring_site_node" in src
+
+
+def test_the_site_is_not_a_measurement_occasion():
+    """Reference papers, not a declared occasion in anybody's class. A true here would admit them
+    to an estimation frame that is about students."""
+    src = _sql()
+    assert "'anchor', false" in src
+
+
+def test_the_task_ids_match_the_binder():
+    """`scoring.bind_corpus` writes these ids onto the artifacts. If they drift, the scorer joins
+    to no site and every corpus paper fails to resolve a trait set — loudly, but only at run
+    time, after the papers are bound."""
+    from registry.seed_persuade import CORPUS_TASK_PREFIX
+    from scoring.bind_corpus import TASKS
+
+    assert set(TASKS.values()) == {f"{CORPUS_TASK_PREFIX}:independent",
+                                   f"{CORPUS_TASK_PREFIX}:text_dependent"}
+
+
+def test_the_site_names_all_eight_traits_for_its_form():
+    """One holistic plus seven elements. The evidence trait is the one that matches the form, so a
+    text-dependent paper is scored on sourced evidence and an independent one is not."""
+    from registry.persuade_rubrics import elements, holistic
+
+    for form in ("independent", "text_dependent"):
+        nodes = ([t["node_id"] for t in holistic(form)["traits"]]
+                 + [t["node_id"] for t in elements(form)["traits"]])
+        assert len(nodes) == 8 and len(set(nodes)) == 8
 
 
 def test_no_skill_is_created():
