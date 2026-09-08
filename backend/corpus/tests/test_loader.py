@@ -10,7 +10,9 @@ import pathlib
 
 import pytest
 
-from corpus._shared import (VALIDATION_SHARE, blank_to_none, partition_for, text_hash)
+from corpus._shared import (VALIDATION_SHARE, blank_to_none, partition_for,
+                            read_licence, text_hash)
+from corpus import load_persuade
 from corpus.load_persuade import SPEC, _paper, _scores, _span
 from corpus.models import DISCOURSE_TYPES, PARTITIONS
 
@@ -123,8 +125,54 @@ def test_spec_records_the_asap_overlap():
     assert "circular" in SPEC.overlap_note
 
 
-def test_spec_records_a_licence():
-    assert SPEC.licence == "CC BY 4.0"
+def test_the_spec_does_not_state_a_licence_itself():
+    """This test previously asserted the OPPOSITE — `SPEC.licence == "CC BY 4.0"` — and so CI
+    defended a claim about somebody else's terms that this project had made from memory.
+
+    Nobody here is PERSUADE's licensor. Terms can change between snapshots, and a permissive
+    licence invented on our side is the error that costs something: it authorises redistribution
+    the publisher may not grant. The spec names a FILE that ships with the download; the loader
+    stores what that file says.
+    """
+    assert not hasattr(SPEC, "licence")
+    assert SPEC.licence_file
+    src = pathlib.Path(load_persuade.__file__).read_text(encoding="utf8")
+    assert "CC BY" not in src
+
+
+def test_a_declared_licence_file_that_is_missing_stops_the_load(tmp_path):
+    """Refusing is the mechanism. A default, a warning, or a NULL all let a load finish with the
+    licence question unanswered — and it only matters at the moment somebody redistributes, long
+    after anybody would think to check."""
+    with pytest.raises(SystemExit) as e:
+        read_licence(str(tmp_path), SPEC)
+    assert "licence" in str(e.value).lower()
+
+
+def test_the_licence_stored_is_what_the_file_says(tmp_path):
+    """Verbatim. Summarising it into a short name is how "CC BY-NC-SA 4.0" becomes "CC BY 4.0"."""
+    d = tmp_path / "persuade20"
+    d.mkdir()
+    (d / "LICENCE.txt").write_text("Some terms, exactly as the corpus states them.",
+                                   encoding="utf8")
+    assert read_licence(str(tmp_path), SPEC) == "Some terms, exactly as the corpus states them."
+
+
+def test_an_empty_licence_file_is_refused_rather_than_stored(tmp_path):
+    """An empty string in the column reads as "we checked and there are no terms"."""
+    d = tmp_path / "persuade20"
+    d.mkdir()
+    (d / "LICENCE.txt").write_text("   ", encoding="utf8")
+    with pytest.raises(SystemExit):
+        read_licence(str(tmp_path), SPEC)
+
+
+def test_a_spec_with_no_licence_file_records_nothing(tmp_path):
+    """Honest for a corpus whose terms genuinely have not been established. What it cannot do is
+    record a guess."""
+    from dataclasses import replace
+
+    assert read_licence(str(tmp_path), replace(SPEC, licence_file=None)) is None
 
 
 # --------------------------------------------------------------------------- #

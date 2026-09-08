@@ -11,9 +11,13 @@ it inherits that.
 ## Not a fixture
 
 `seed_demo` writes synthetic papers and says so in every `source` field. This is a real published
-instrument under CC BY 4.0, used to score real student writing by real raters, and the anchor
-estimates that come out of it are the ones a promotion decision will rest on. The `source` fields
-say that instead.
+instrument, used to score real student writing by real raters, and the anchor estimates that come
+out of it are the ones a promotion decision will rest on. The `source` fields say that instead.
+
+They do NOT say the licence. An earlier version of this file wrote "CC BY 4.0" into every rubric's
+`source`, which was this project asserting somebody else's terms from memory — and a test locked
+it in, so CI defended it. `TERMS_URL` points at the publisher, who can answer; see
+`persuade_rubrics.TERMS_URL` and `corpus._shared.read_licence`.
 
 ## Six shared traits, written once
 
@@ -63,10 +67,12 @@ from sqlalchemy import text
 
 from ._db import engine
 from .lint import ADVISORY, BLOCKING, blocks_publication, lint
-from .persuade_rubrics import all_rubrics, distinct_traits, elements, holistic
+from .persuade_rubrics import (TERMS_URL, all_rubrics, distinct_traits, elements,
+                               holistic)
 from .seed_demo import _read_acknowledgments, _read_registry
 
-SOURCE = "PERSUADE 2.0 rating forms (CC BY 4.0), transcribed 2026-09-08"
+SOURCE = ("PERSUADE 2.0 rating forms, transcribed 2026-09-08 — terms as stated at "
+          f"{TERMS_URL}")
 
 # The scoring sites corpus papers bind to. Kept in step with `scoring.bind_corpus`,
 # which writes the same task ids onto the artifacts.
