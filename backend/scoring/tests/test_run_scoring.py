@@ -212,3 +212,70 @@ def test_no_optional_parameter_is_compared_to_null_without_a_type():
     assert not bare, (
         f"optional bind parameters compared to NULL without a CAST: {bare}. Postgres cannot infer "
         f"a type for them and refuses the statement.")
+
+
+# --------------------------------------------------------------------------- #
+# A reference paper's text is a column, not a file.
+#
+# The first corpus scoring run failed with `No such file or directory:
+# corpus:persuade20:0EC4EF416F2F` — `source_uri` on a reference paper is a corpus locator, not a
+# path, and `read_text` fell through to the file branch. Loud, and free: it happened before any
+# model call.
+# --------------------------------------------------------------------------- #
+
+def test_corpus_text_is_preferred_over_the_file_branch():
+    from scoring.run_scoring import read_text
+
+    assert read_text({"artifact_id": "a", "corpus_text": "the essay",
+                      "source_uri": "corpus:persuade20:E1"}) == "the essay"
+
+
+def test_intake_text_still_wins_for_a_student_paper():
+    """A student paper and a reference paper can never both be present, but the order has to be
+    deliberate rather than incidental."""
+    from scoring.run_scoring import read_text
+
+    assert read_text({"artifact_id": "a", "intake_text": "handed in",
+                      "corpus_text": "reference"}) == "handed in"
+
+
+def test_a_corpus_locator_is_never_opened_as_a_path():
+    """The failure mode, pinned. Without the corpus branch this raises NotImplementedError or
+    FileNotFoundError depending on the locator's shape — both after the artifact was bound and
+    before anything was scored."""
+    import pytest
+
+    from scoring.run_scoring import read_text
+
+    with pytest.raises((NotImplementedError, FileNotFoundError, OSError)):
+        read_text({"artifact_id": "a", "source_uri": "corpus:persuade20:E1"})
+
+
+def test_the_corpus_join_is_scoped_to_the_corpus_tenant():
+    """`bind_corpus` writes the paper id into `student_id`. Joining without the tenant predicate
+    would let a real student id collide with a corpus paper id and silently score a student's
+    paper against a stranger's text."""
+    from scoring.run_scoring import _PENDING
+
+    sql = str(_PENDING)
+    assert "LEFT JOIN corpus_paper" in sql
+    assert "a.tenant_id = 'corpus'" in sql
+    assert "cp.paper_id = a.student_id" in sql
+
+
+def test_scoring_reads_the_corpus_table_rather_than_importing_it():
+    """Modules integrate through produced tables. `scoring` may not import `corpus`, and the
+    boundary test enforces it — this says the same thing about the read path specifically."""
+    import ast
+    import pathlib
+
+    from scoring import run_scoring
+
+    tree = ast.parse(pathlib.Path(run_scoring.__file__).read_text(encoding="utf8"))
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            imported.add(node.module.split(".")[0])
+    assert "corpus" not in imported
