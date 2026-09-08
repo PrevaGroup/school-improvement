@@ -62,11 +62,20 @@ DISCOURSE_TYPES: tuple[str, ...] = (
 
 
 class CorpusSource(Base):
-    """One corpus, at one snapshot, under one licence.
+    """One corpus, at one snapshot.
 
-    Snapshot and licence are columns rather than documentation because both are load-bearing: a
-    figure computed over the November snapshot is a different figure, and a licence nobody recorded
-    is a licence nobody can honour. `overlaps_source_id` records the ASAP2/PERSUADE finding so a
+    Snapshot is a column rather than documentation because it is load-bearing: a figure computed
+    over the November snapshot is a different figure.
+
+    THERE IS NO LICENCE COLUMN, and its absence is deliberate. This system had one, it named a
+    permissive licence for PERSUADE, and that was this project asserting somebody else's terms
+    from memory. The fix is not a better-sourced licence field — it is that licensing is not a fact
+    this system is entitled to hold. Terms are negotiated, they change without the data changing,
+    and a copy here is a second record that goes stale silently while looking authoritative.
+    Licensing lives in the contracts system. `url` points at the publisher; what may be done with
+    what they publish is answered there, not here.
+
+    `overlaps_source_id` records the ASAP2/PERSUADE finding so a
     later reader does not repeat the mistake of treating them as independent.
     """
     __tablename__ = "corpus_source"
@@ -74,7 +83,6 @@ class CorpusSource(Base):
     source_id: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     snapshot: Mapped[date | None] = mapped_column()
-    licence: Mapped[str | None] = mapped_column(Text)
     url: Mapped[str | None] = mapped_column(Text)
     paper_count: Mapped[int | None] = mapped_column(Integer)
     # Non-independence, recorded. ASAP2 shares 12,725 essays with PERSUADE at identical scores and

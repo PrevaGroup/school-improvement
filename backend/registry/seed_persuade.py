@@ -14,10 +14,14 @@ it inherits that.
 instrument, used to score real student writing by real raters, and the anchor estimates that come
 out of it are the ones a promotion decision will rest on. The `source` fields say that instead.
 
-They do NOT say the licence. An earlier version of this file wrote "CC BY 4.0" into every rubric's
-`source`, which was this project asserting somebody else's terms from memory — and a test locked
-it in, so CI defended it. `TERMS_URL` points at the publisher, who can answer; see
-`persuade_rubrics.TERMS_URL` and `corpus._shared.read_licence`.
+They do NOT say anything about licensing. An earlier version wrote a permissive licence name into
+every rubric's `source` — this project asserting somebody else's terms from memory, with a test
+locking it in so CI defended it. Replacing it with a link to the terms was the same mistake one step removed.
+
+Licensing is not a fact this system holds. It is negotiated, it changes without the instrument
+changing, and a copy here is a second record that goes stale silently while looking authoritative.
+It lives in the contracts system. `source` carries PROVENANCE — which rating form, transcribed on
+what date — which is ours to state and does not expire.
 
 ## Six shared traits, written once
 
@@ -67,12 +71,10 @@ from sqlalchemy import text
 
 from ._db import engine
 from .lint import ADVISORY, BLOCKING, blocks_publication, lint
-from .persuade_rubrics import (TERMS_URL, all_rubrics, distinct_traits, elements,
-                               holistic)
+from .persuade_rubrics import all_rubrics, distinct_traits, elements, holistic
 from .seed_demo import _read_acknowledgments, _read_registry
 
-SOURCE = ("PERSUADE 2.0 rating forms, transcribed 2026-09-08 — terms as stated at "
-          f"{TERMS_URL}")
+SOURCE = "PERSUADE 2.0 rating forms, transcribed 2026-09-08"
 
 # The scoring sites corpus papers bind to. Kept in step with `scoring.bind_corpus`,
 # which writes the same task ids onto the artifacts.

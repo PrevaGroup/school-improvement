@@ -67,20 +67,6 @@ class CorpusSpec:
     source_id: str
     name: str
     papers_file: str
-    # The licence as the CORPUS STATES IT, read from a file that ships with the download —
-    # never a string in this repo.
-    #
-    # It was a string, and the string was wrong: PERSUADE was recorded as CC BY 4.0, which this
-    # project asserted about somebody else's terms from memory. Two tests then locked the wrong
-    # value in, so CI defended it. A licence is not the kind of fact a loader gets to originate:
-    # nobody here is the licensor, the terms can change between snapshots, and a permissive
-    # licence invented on our side is the failure that matters — it authorises redistribution the
-    # corpus may not grant.
-    #
-    # A path instead. The operator saves the licence statement from the distribution next to the
-    # data, the loader stores what it says, and the claim in the database is a transcription with
-    # the source sitting beside it rather than an assertion nobody can check.
-    licence_file: str | None = None
     url: str | None = None
     snapshot: str | None = None
     spans_file: str | None = None
@@ -90,34 +76,6 @@ class CorpusSpec:
     map_paper: Callable[[Mapping[str, str]], dict[str, Any] | None] = None
     map_scores: Callable[[Mapping[str, str], str], list[dict[str, Any]]] = None
     map_span: Callable[[Mapping[str, str]], dict[str, Any] | None] = None
-
-
-def read_licence(data_dir: str, spec: CorpusSpec) -> str | None:
-    """The licence text, from the file the distribution ships. Refuses rather than guesses.
-
-    A spec that declares `licence_file` and cannot find it FAILS THE LOAD. That is deliberate and
-    it is the whole mechanism: the easy paths from here are a default, a warning, or a NULL that
-    a later reader mistakes for "this corpus has no terms". Each one lets a load finish with the
-    licence question unanswered, and the answer only matters at the moment somebody redistributes
-    something — long after anybody would think to check.
-
-    A spec with no `licence_file` records nothing, which is honest for a corpus whose terms have
-    genuinely not been established. What it cannot do is record a guess.
-    """
-    if not spec.licence_file:
-        return None
-    path = os.path.join(data_dir, spec.licence_file)
-    if not os.path.exists(path):
-        where = spec.url or "the source"
-        raise SystemExit(
-            f"{spec.source_id}: no licence file at {path}. Save the licence statement as the "
-            f"corpus distributes it — from {where} — to that path, then load again. It is stored "
-            f"verbatim and is what the database will claim about these terms; this repo does not "
-            f"get to state them.")
-    text = pathlib.Path(path).read_text(encoding="utf8").strip()
-    if not text:
-        raise SystemExit(f"{spec.source_id}: the licence file at {path} is empty.")
-    return text
 
 
 # A stable namespace, so `paper_id` is a pure function of (source, external id). Re-running a
@@ -181,7 +139,6 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
     """
     a = args()
     papers_path = os.path.join(a.data_dir, spec.papers_file)
-    licence = read_licence(a.data_dir, spec)
     print(f"{spec.name} ({spec.source_id})")
     if spec.overlaps_source_id:
         print(f"  ! overlaps {spec.overlaps_source_id}: {spec.overlap_note}")
@@ -274,12 +231,12 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
 
 _SOURCE = text("""
     INSERT INTO corpus_source
-        (source_id, name, snapshot, licence, url, paper_count,
+        (source_id, name, snapshot, url, paper_count,
          overlaps_source_id, overlap_note)
-    VALUES (:source_id, :name, CAST(:snapshot AS date), :licence, :url, :paper_count,
+    VALUES (:source_id, :name, CAST(:snapshot AS date), :url, :paper_count,
             :overlaps_source_id, :overlap_note)
     ON CONFLICT (source_id) DO UPDATE SET
-        name = EXCLUDED.name, snapshot = EXCLUDED.snapshot, licence = EXCLUDED.licence,
+        name = EXCLUDED.name, snapshot = EXCLUDED.snapshot,
         url = EXCLUDED.url, paper_count = EXCLUDED.paper_count,
         overlaps_source_id = EXCLUDED.overlaps_source_id, overlap_note = EXCLUDED.overlap_note
 """)
@@ -350,7 +307,7 @@ def write(spec: CorpusSpec, papers: dict, span_rows: list, raw: dict,
         # be recorded.
         conn.execute(_SOURCE, {
             "source_id": spec.source_id, "name": spec.name, "snapshot": spec.snapshot,
-            "licence": licence, "url": spec.url, "paper_count": len(papers),
+            "url": spec.url, "paper_count": len(papers),
             "overlaps_source_id": spec.overlaps_source_id, "overlap_note": spec.overlap_note})
 
         values = list(papers.values())

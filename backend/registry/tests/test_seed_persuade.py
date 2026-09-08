@@ -139,15 +139,17 @@ def test_it_does_not_describe_itself_as_a_fixture():
     assert "fixture" not in seed_persuade.SOURCE.lower()
 
 
-def test_the_source_field_does_not_state_a_licence():
-    """It said "CC BY 4.0", and this test asserted that it did — so the wrong claim was written
-    into every rubric row AND defended by CI.
+def test_the_source_field_carries_provenance_and_no_licensing():
+    """It named a permissive licence, and this test asserted that it did — so the wrong claim was
+    written into every rubric row AND defended by CI. Replacing it with a link to the terms was
+    the same mistake one step removed.
 
-    Nobody in this repo is PERSUADE's licensor, the rating forms need not carry the corpus's
-    terms, and a permissive licence invented on our side authorises redistribution the publisher
-    may not grant. The URL sends a reader to the party who can answer."""
-    assert "CC BY" not in seed_persuade.SOURCE
-    assert seed_persuade.TERMS_URL in seed_persuade.SOURCE
+    Licensing is not a fact this system holds; it lives in the contracts system. What belongs here
+    is which instrument this is and when it was transcribed."""
+    for word in ("cc by", "cc-by", "licence", "license", "terms"):
+        assert word not in seed_persuade.SOURCE.lower()
+    assert "PERSUADE 2.0 rating forms" in seed_persuade.SOURCE
+    assert "transcribed" in seed_persuade.SOURCE
 
 
 # ------------------------------------------------------------------ provenance survives the write
