@@ -137,7 +137,17 @@ def test_it_does_not_describe_itself_as_a_fixture():
     instrument that scored real student writing, and the anchor estimates from it are what a
     promotion decision will rest on."""
     assert "fixture" not in seed_persuade.SOURCE.lower()
-    assert "CC BY 4.0" in seed_persuade.SOURCE
+
+
+def test_the_source_field_does_not_state_a_licence():
+    """It said "CC BY 4.0", and this test asserted that it did — so the wrong claim was written
+    into every rubric row AND defended by CI.
+
+    Nobody in this repo is PERSUADE's licensor, the rating forms need not carry the corpus's
+    terms, and a permissive licence invented on our side authorises redistribution the publisher
+    may not grant. The URL sends a reader to the party who can answer."""
+    assert "CC BY" not in seed_persuade.SOURCE
+    assert seed_persuade.TERMS_URL in seed_persuade.SOURCE
 
 
 # ------------------------------------------------------------------ provenance survives the write

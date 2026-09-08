@@ -65,7 +65,14 @@ import uuid
 NS = uuid.UUID("6f2a1c94-0d3b-4f8e-9a71-5c2d8e4b17aa")
 
 PUBLISHER = "PERSUADE 2.0 (Crossley et al.)"
-LICENCE_NOTE = "CC BY 4.0"
+# The corpus repository, which is where the terms are STATED. Deliberately not a licence name.
+#
+# There was a `LICENCE_NOTE = "CC BY 4.0"` here and it was wrong. Nobody in this repo is the
+# licensor of PERSUADE, the terms can differ between the corpus and the rating forms and can
+# change between snapshots, and a permissive licence invented on our side is the error that
+# matters — it authorises redistribution the publisher may not grant. A URL sends a reader to the
+# party who can actually answer; a string tells them what we remembered.
+TERMS_URL = "https://github.com/scrosseye/persuade_corpus_2.0"
 GRADE_BAND = "6-12"          # the corpus spans grades 6 through 12
 
 # Provenance per trait. `transcribed` is the rating form's own words; `adapted` is authored text

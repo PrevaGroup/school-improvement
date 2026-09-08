@@ -61,7 +61,8 @@ SPEC = CorpusSpec(
     name="PERSUADE 2.0",
     papers_file="persuade20/persuade_2.0_human_scores_demo_id_github.csv",
     spans_file="persuade20/persuade_corpus_1.0.csv",
-    licence="CC BY 4.0",
+    # Saved from the corpus distribution by whoever runs the load; see `read_licence`.
+    licence_file="persuade20/LICENCE.txt",
     url="https://github.com/scrosseye/persuade_corpus_2.0",
     snapshot="2026-09-05",
     overlaps_source_id="asap2",
