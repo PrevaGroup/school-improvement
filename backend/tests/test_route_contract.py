@@ -72,6 +72,10 @@ EXPECTED: dict[str, set[str]] = {
     # parameters — a profile across every assignment in a school would average classes that
     # share no task, no rubric and no week.
     "/api/review/traits": {"GET"},
+    # Papers whose own scores disagree with each other. Read-only: the fit is written by
+    # `measurement.fit_run`, not by an HTTP call, because fitting is a batch job and a
+    # route that triggers one is a route that times out.
+    "/api/review/unexpected": {"GET"},
     "/api/review/queue": {"GET"},
     "/api/review/artifact/{artifact_id}": {"GET"},
     "/api/review/{artifact_id}/state": {"POST"},

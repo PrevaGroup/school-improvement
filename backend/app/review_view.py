@@ -473,3 +473,77 @@ def build_profile(rows: list[dict]) -> list[dict]:
     # Weakest first, which is the order a teacher reads it in. Traits with nothing to judge sort
     # last rather than to the top, where a null would look like a floor.
     return sorted(out, key=lambda t: (t["position"] is None, t["position"], t["label"]))
+
+
+# ------------------------------------------------------------------ scores that do not hang together
+
+# The stored person fit for one assignment, worst first.
+#
+# `outfit` is driven by outliers, which is exactly this case: a paper scoring 3,3,3,1,3,3,3 holds
+# one response the model did not expect. `infit` rides along because a paper that is mildly odd
+# everywhere is a different problem from one that is wildly odd once.
+#
+# The most recent run per scale, because a re-fit supersedes rather than accumulates — an
+# assignment scored again should not show two verdicts.
+_UNEXPECTED = text("""
+    WITH latest AS (
+        SELECT DISTINCT ON (r.scale_categories) r.run_id, r.scale_categories, r.converged,
+               r.observations, r.persons, r.created_at
+          FROM measurement_fit_run r
+         WHERE r.tenant_id = :tenant AND r.section_id = :section_id
+           AND r.task_id = :task_id AND r.iteration = :iteration
+         ORDER BY r.scale_categories, r.created_at DESC
+    )
+    SELECT l.run_id, l.scale_categories, l.converged, l.persons,
+           e.element_id AS artifact_id, e.outfit, e.infit, e.n, e.extreme,
+           s.display_name, a.state
+      FROM latest l
+      JOIN measurement_fit_element e ON e.run_id = l.run_id AND e.facet = 'person'
+      LEFT JOIN artifact a       ON a.artifact_id = e.element_id
+      LEFT JOIN roster_student s ON s.student_id  = a.student_id
+     ORDER BY e.outfit DESC NULLS LAST
+""")
+
+
+@router.get("/unexpected")
+def unexpected(section_id: str, task_id: str, iteration: str,
+               db: Session = Depends(get_db_public),
+               principal: dict = Depends(get_current_principal)) -> dict:
+    """Papers whose own scores disagree with each other, worst first.
+
+    Not papers that scored badly. A paper scoring 1 on everything is perfectly consistent and
+    appears nowhere near the top of this list. What surfaces here is a paper the model could not
+    account for — six threes and a one — where something happened that a mean cannot show and a
+    second look is worth the minute.
+
+    ## It reads; it does not decide
+
+    `outfit` above 2.0 is the conventional reading of a response distorting its measure, and this
+    returns the number rather than a verdict. No flag is stored, because a stored verdict outlives
+    the reasoning that produced it, and whoever reads this page is the one answerable for what
+    they do about it.
+
+    ## Nothing is here until a fit has run
+
+    `python -m measurement.fit_run` writes it. An empty list means no fit, which is not the same as
+    no misfit — so the response says which, rather than letting silence read as a clean bill.
+    """
+    try:
+        rows = [dict(r) for r in db.execute(
+            _UNEXPECTED, {"tenant": "public", "section_id": section_id,
+                          "task_id": task_id, "iteration": iteration}).mappings()]
+    except SQLAlchemyError as exc:
+        db.rollback()
+        return _empty_or_raise(exc, {"papers": [], "fitted": False})
+
+    return {
+        "available": True,
+        "fitted": bool(rows),
+        "distorting_outfit": 2.0,
+        # An assignment nobody has fitted and an assignment with no misfit both return an empty
+        # list, and they mean opposite things.
+        "note": ("no fit has been run for this assignment" if not rows else
+                 "outfit above 2.0 is the conventional reading of a response that distorts its "
+                 "measure"),
+        "papers": rows,
+    }
