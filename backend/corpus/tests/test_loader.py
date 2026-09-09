@@ -179,8 +179,14 @@ def test_real_corpus_conforms():
 
 @needs_corpus
 def test_real_spans_include_the_taught_but_unscored_constructs():
-    """9,534 counterclaims and 7,217 rebuttals — the constructs the crosswalk found taught in three
-    places and scored in none. Presence has ground truth here even though quality does not."""
+    """Counterclaims and rebuttals — the constructs the crosswalk found taught in three places and
+    scored in none. Presence has ground truth here even though quality does not.
+
+    The counts dropped when the span source moved from the 2021 file to the 2.0 TRAIN split:
+    5,817 counterclaims against 9,534, because the split holds 15,594 of the corpus's 25,990
+    essays. That is the trade — 60% coverage WITH human effectiveness ratings, against 100%
+    coverage with none at all.
+    """
     from collections import Counter
 
     from corpus._shared import rows
@@ -189,10 +195,41 @@ def test_real_spans_include_the_taught_but_unscored_constructs():
         s = _span(row)
         if s:
             seen[s["discourse_type"]] += 1
-    assert seen["Counterclaim"] > 9_000
-    assert seen["Rebuttal"] > 7_000
+    assert seen["Counterclaim"] > 5_000
+    assert seen["Rebuttal"] > 4_000
     assert "Unannotated" not in seen
     assert set(seen) <= set(DISCOURSE_TYPES)
+
+
+@pytest.mark.skipif(not HAVE_CORPUS, reason="corpus files not present")
+def test_the_real_span_file_actually_carries_effectiveness():
+    """The reason for the whole change. Asserted against the real file, because a mapper that
+    reads a column no file has is exactly the defect being fixed — and it would look identical to
+    the one before it: every trait reporting `no pairs`."""
+    from collections import Counter
+
+    from corpus._shared import rows
+    rated = Counter()
+    for i, row in enumerate(rows(str(CORPUS_DIR / SPEC.spans_file))):
+        if i >= 20_000:
+            break
+        s = _span(row)
+        if s and s["effectiveness"]:
+            rated[s["effectiveness"]] += 1
+    assert set(rated) == {"Ineffective", "Adequate", "Effective"}
+    assert sum(rated.values()) > 10_000
+
+
+@pytest.mark.skipif(not HAVE_CORPUS, reason="corpus files not present")
+def test_the_span_split_covers_less_than_the_paper_file():
+    """Measured, and the reason the 2.0 file is NOT the papers file: it holds 15,594 essays where
+    the corpus has 25,990. Using it for both passes would shrink the corpus by 40% and the loader
+    would report loading exactly what it was given."""
+    from corpus._shared import rows
+
+    essays = {r["essay_id_comp"] for r in rows(str(CORPUS_DIR / SPEC.spans_file))}
+    assert 15_000 < len(essays) < 17_000
+    assert SPEC.papers_file != SPEC.spans_file
 
 
 # ------------------------------------------------------------------ what was in the file all along
@@ -236,3 +273,47 @@ def test_both_columns_reach_the_upsert():
     for col in ("assignment", "source_text"):
         assert f":{col}" in sql, f"{col} is mapped but never bound"
         assert f"{col} = EXCLUDED.{col}" in sql, f"{col} would not backfill on a re-run"
+
+
+# ------------------------------------------------------------------ the effectiveness rating
+
+def test_the_effectiveness_rating_is_mapped():
+    """NULL through every load before this one, because the 2021 segmentation file has no such
+    column. That is why eight of the ten traits this system scores reported `no pairs` on 334
+    papers scored twice — there was nothing human to compare them against."""
+    span = _span(dict(_row(), discourse_type="Claim", discourse_start="1", discourse_end="9",
+                      discourse_text="cars", discourse_effectiveness="Effective"))
+    assert span["effectiveness"] == "Effective"
+
+
+def test_the_corpus_word_is_kept_rather_than_a_number():
+    """Ordering Ineffective < Adequate < Effective is a scoring decision, and it belongs where the
+    scale is declared. A number in this column would be that decision made invisibly, in the one
+    place nobody would look for it."""
+    for word in ("Ineffective", "Adequate", "Effective"):
+        got = _span(dict(_row(), discourse_type="Lead", discourse_start="1", discourse_end="2",
+                         discourse_text="x", discourse_effectiveness=word))["effectiveness"]
+        assert got == word
+
+
+def test_a_span_with_no_rating_stays_null():
+    """Not every element is rated. Blank must not become a category."""
+    span = _span(dict(_row(), discourse_type="Lead", discourse_start="1", discourse_end="2",
+                      discourse_text="x", discourse_effectiveness=""))
+    assert span["effectiveness"] is None
+
+
+def test_the_word_count_is_read_under_either_name():
+    """The 2021 file said `word_count`; the 2.0 file says `essay_word_count`. A mapper that
+    silently reads None from a renamed column is how this loader once counted 25,994 papers into
+    25,990 rows."""
+    assert _paper(_row(word_count="42"))["word_count"] == 42
+    assert _paper(_row(essay_word_count="321"))["word_count"] == 321
+    assert _paper(_row())["word_count"] is None
+
+
+def test_the_spans_come_from_the_file_that_has_the_ratings():
+    """And the papers do not. The 2.0 file is a train split covering 60% of the corpus; using it
+    for papers as well would drop the other 40% silently."""
+    assert "2.0_train" in SPEC.spans_file
+    assert "human_scores" in SPEC.papers_file

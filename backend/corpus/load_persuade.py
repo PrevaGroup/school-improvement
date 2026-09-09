@@ -1,29 +1,43 @@
 """PERSUADE 2.0 -> corpus tables.
 
-    python -m corpus.load_persuade --data-dir N:/studentworkfeedback/corpus --dry-run
+    python -m corpus.load_persuade --data-dir ~ --dry-run
 
-Two files, one corpus: `persuade_2.0_human_scores_demo_id_github.csv` carries the essays, one
-holistic score each, the demographics, the ASSIGNMENT and the SOURCE TEXT;
-`persuade_corpus_1.0.csv` carries discourse-element segmentation over the same essays. Neither
-carries a rater, and neither carries trait scores.
+Two files, and which one supplies what is the whole point.
 
-## What was in the file and not read
+PAPERS from `persuade_2.0_human_scores_demo_id_github.csv`: all 25,990 essays, one holistic score
+each, the demographics, the assignment and the source text.
 
-`assignment` and `source_text` sat in the essays file through every load and were never mapped.
-That was not visible from anything downstream: a paper with no task statement scores fine, and a
-source-based evidence trait judged without the source produces a number like any other.
+SPANS from `persuade_corpus_2.0_train.csv`: the discourse segmentation AND
+`discourse_effectiveness`, the human rating of each element as Ineffective, Adequate or Effective.
+This is what the 2021 file (`persuade_corpus_1.0.csv`) never had, and its absence is why eight of
+the ten traits this system scores reported `no pairs` on 334 papers scored twice.
 
-Their absence changed what the anchor estimates mean. Without `assignment` the fit gate
-short-circuits, so corpus papers skipped a stage student work does not. Without `source_text` the
-text-dependent evidence trait asked whether a quotation came from a document nobody had shown the
-rater.
+## The 2.0 file is a TRAIN SPLIT and does not cover the corpus
 
-The effectiveness ratings really are absent, and the header confirms it — `discourse_type` and no
-`discourse_effectiveness`, in either file. That comment was right; these two were the mistake.
+Measured: 173,266 rows, 15,594 distinct essays, every one `competition_set = train`. The corpus has
+25,990 papers, so roughly 60% of them can have an element comparator and the rest cannot.
+
+That is why it is not used as the papers file. Doing so would quietly shrink the corpus by 40%,
+and every count downstream would move without anything reporting a problem — the loader would say
+it loaded what it was given.
+
+Papers outside the split keep their 1.0 spans, which carry no effectiveness. A trait comparison on
+them reports `no human rating`, which is the truth.
+
+## Column names moved between the files
+
+`word_count` in the essays file is `essay_word_count` in the 2.0 file. Both are read, because a
+mapper that silently gets None from a renamed column is exactly how this loader once wrote 25,994
+papers into 25,990 rows.
 """
 from __future__ import annotations
 
 from ._shared import CorpusSpec, blank_to_none, run_corpus_loader
+
+
+def _int(raw):
+    raw = (raw or "").strip()
+    return int(raw) if raw.isdigit() else None
 
 
 def _paper(row):
@@ -36,7 +50,10 @@ def _paper(row):
         "prompt_name": blank_to_none(row.get("prompt_name")),
         "task_type": blank_to_none(row.get("task")),
         "grade_level": blank_to_none(row.get("grade_level")),
-        "word_count": int(row["word_count"]) if (row.get("word_count") or "").isdigit() else None,
+        # Either name. The 2021 file said `word_count`; the 2.0 file says `essay_word_count`.
+        # A mapper that silently reads None from a renamed column is how this loader once counted
+        # 25,994 papers into 25,990 rows.
+        "word_count": _int(row.get("word_count") or row.get("essay_word_count")),
         # Blank stays NULL: absence of a label is not a label, and letting it become one would
         # quietly create an "unknown" subgroup in every fairness table.
         "gender": blank_to_none(row.get("gender")),
@@ -79,17 +96,30 @@ def _span(row):
         "start_char": int(float(row["discourse_start"])) if row.get("discourse_start") else None,
         "end_char": int(float(row["discourse_end"])) if row.get("discourse_end") else None,
         "text": row.get("discourse_text"),
-        "effectiveness": None,   # not in this release; the column exists so its absence is visible
+        # THE HUMAN RATING OF THIS ELEMENT: Ineffective, Adequate or Effective.
+        #
+        # NULL through every load before this one, because the 2021 segmentation file has no such
+        # column — so eight of the ten traits this system scores had no comparator, and said so on
+        # every report as `no pairs`.
+        #
+        # Kept as the corpus's own word rather than converted to 1/2/3 here. The ordering is a
+        # decision belonging to whoever scores against it (`registry.persuade_rubrics` maps them),
+        # and a number stored in this column would be that decision made invisibly, in the place
+        # nobody would look for it.
+        "effectiveness": blank_to_none(row.get("discourse_effectiveness")),
     }
 
 
 SPEC = CorpusSpec(
     source_id="persuade20",
     name="PERSUADE 2.0",
+    # PAPERS from the essays file, which has all 25,990. SPANS from the 2.0 train file, which has
+    # the effectiveness ratings and only 15,594 essays. Using the 2.0 file for both would drop 40%
+    # of the corpus without saying so.
     papers_file="persuade20/persuade_2.0_human_scores_demo_id_github.csv",
-    spans_file="persuade20/persuade_corpus_1.0.csv",
+    spans_file="persuade20/persuade_corpus_2.0_train.csv",
     url="https://github.com/scrosseye/persuade_corpus_2.0",
-    snapshot="2026-09-05",
+    snapshot="2026-09-09",
     overlaps_source_id="asap2",
     overlap_note=("ASAP2 shares 12,725 essays byte-identical at identical scores, and every ASAP "
                   "prompt is a PERSUADE prompt — they are not independent sources, so a "
