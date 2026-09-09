@@ -551,3 +551,49 @@ def test_a_failed_band_call_names_which_band_of_which_criterion():
     assert "band 2" in msg                   # which band
     assert "Invalid request data" in msg     # what the API said
     assert "chars" in msg and "verified span" in msg   # the shape of what was sent
+
+
+def test_a_band_call_is_retried_and_the_success_is_visible(caplog):
+    """A retry that WORKED is the evidence separating a flaky service from a bad request. Silent
+    recovery would hide the one fact the diagnosis needs."""
+    import logging
+
+    class _FlakyOnce:
+        identity = CUMULATIVE_IDENTITY
+
+        def __init__(self):
+            self.calls = 0
+
+        def propose_spans(self, prompt):
+            return ["Tinker set the standard"], Usage(1, 10, 5)
+
+        def judge_band(self, prompt):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("400 Invalid request data")
+            return {"probability": 0.9, "reason": "r"}, Usage(1, 10, 5)
+
+    with caplog.at_level(logging.WARNING):
+        out, _ = score_criterion_cumulative(TEXT, criterion(cats=(1, 2)), _FlakyOnce(),
+                                            concurrency=1)
+    assert out.status == "scored"
+    assert any("succeeded on attempt 2" in r.getMessage() for r in caplog.records)
+    assert any("attempt 1 failed" in r.getMessage() for r in caplog.records)
+
+
+def test_a_band_that_fails_every_attempt_still_fails_the_paper():
+    """The mitigation is bounded. A request that is genuinely bad must not be retried forever, and
+    three identical failures on one band is the evidence that it IS the request."""
+    from scoring.score import BandCallFailed
+
+    class _AlwaysBad:
+        identity = CUMULATIVE_IDENTITY
+
+        def propose_spans(self, prompt):
+            return ["Tinker set the standard"], Usage(1, 10, 5)
+
+        def judge_band(self, prompt):
+            raise RuntimeError("400 Invalid request data")
+
+    with pytest.raises(BandCallFailed, match="failed 3 times"):
+        score_criterion_cumulative(TEXT, criterion(cats=(1, 2)), _AlwaysBad(), concurrency=1)

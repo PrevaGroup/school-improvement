@@ -20,6 +20,8 @@ is built to keep.
 """
 from __future__ import annotations
 
+import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from dataclasses import dataclass, field
@@ -104,6 +106,8 @@ def build_score_prompt(criterion: Criterion, kept: list[dict]) -> str:
 # transition, and the guard that refuses to write a second rater's scores into a half-scored
 # artifact is worth more than another multiple of speed.
 DEFAULT_CONCURRENCY = 8
+
+log = logging.getLogger("scoring.score")
 
 DEFAULT_THRESHOLD = 0.5
 
@@ -234,19 +238,51 @@ class BandCallFailed(RuntimeError):
     """A band call failed. Carries WHICH band of WHICH criterion — see `_one_band`."""
 
 
+# How many times a band call is retried before the paper fails.
+#
+# A MITIGATION, NOT A FIX, and the cause is genuinely unresolved. The API returns
+# `400 Invalid request data` on a minority of band calls in Cloud Run — always on a holistic
+# trait, never on an element. It does not reproduce locally: the same prompt succeeds sequentially
+# and concurrently, at 2k and at 5k characters, with synthetic spans and with the whole
+# production path (8 criteria, nested pools, 27 calls) run end to end.
+#
+# Ruled out by direct probing: descriptors, prompt size, span length, empty spans,
+# whitespace-only spans, control characters, non-ASCII text. The two papers that failed were
+# clean ASCII.
+#
+# A 400 is a client error and the SDK does not retry it, correctly — but this one is not
+# deterministic, and a non-deterministic 400 is a fact about the service rather than about the
+# request. So it is retried here, narrowly, and every retry is LOGGED: if the log shows retries
+# succeeding, the cause is transient and the diagnosis continues with that knowledge. If it shows
+# them failing three times on the same band, it is the request after all and the mitigation has
+# told us so.
+_BAND_RETRIES = 2
+_RETRY_PAUSE = 1.0
+
+
 def _one_band(rater: Rater, criterion: Criterion, kept: list[dict], band: float) -> dict:
     prompt = build_band_prompt(criterion, kept, _fmt(band))
-    try:
-        raw, usage = rater.judge_band(prompt)
-    except Exception as exc:
-        # The batch loop catches per ARTIFACT, so an unwrapped failure says only that a paper
-        # failed — not which of its nineteen calls did, nor with what in front of it. A wave that
-        # fails on a quarter of its papers is then undiagnosable without another wave.
-        raise BandCallFailed(
-            f"band {_fmt(band)} of {criterion.criterion_label!r}: {type(exc).__name__}: {exc} "
-            f"[prompt {len(prompt)} chars, {len(kept)} verified span(s), "
-            f"longest {max((len(k.get('span') or '') for k in kept), default=0)} chars]"
-        ) from exc
+    raw = usage = None
+    for attempt in range(_BAND_RETRIES + 1):
+        try:
+            raw, usage = rater.judge_band(prompt)
+            if attempt:
+                # Named at WARNING, because a retry that WORKED is the evidence that separates a
+                # flaky service from a bad request, and it would otherwise leave no trace at all.
+                log.warning("band %s of %r succeeded on attempt %d", _fmt(band),
+                            criterion.criterion_label, attempt + 1)
+            break
+        except Exception as exc:
+            if attempt == _BAND_RETRIES:
+                raise BandCallFailed(
+                    f"band {_fmt(band)} of {criterion.criterion_label!r} failed "
+                    f"{_BAND_RETRIES + 1} times: {type(exc).__name__}: {exc} "
+                    f"[prompt {len(prompt)} chars, {len(kept)} verified span(s), "
+                    f"longest {max((len(k.get('span') or '') for k in kept), default=0)} chars]"
+                ) from exc
+            log.warning("band %s of %r attempt %d failed (%s); retrying", _fmt(band),
+                        criterion.criterion_label, attempt + 1, type(exc).__name__)
+            time.sleep(_RETRY_PAUSE)
     p = raw.get("probability")
 
     # Checked here rather than in the schema, because the API refuses `minimum`/`maximum` on a
