@@ -217,7 +217,7 @@ class TwoPassRater:
         # Exact case: `normalize` folds typography and whitespace and deliberately NOT case,
         # because a scorer shown "the court" where the student wrote "the Court" is being shown
         # something the student did not write.
-        return (["The court said"] if self.identity.effort == "high" else []), Usage(calls=1)
+        return (["The court said"] if self.identity.effort == "high" else []), True, Usage(calls=1)
 
     def assign_level(self, prompt):
         from scoring.rater import Usage

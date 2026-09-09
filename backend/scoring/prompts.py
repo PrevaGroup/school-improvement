@@ -34,8 +34,8 @@ import hashlib
 # Bump the version when the text changes. The test below will tell you if you forgot; the driver
 # will refuse to run if a configuration still stamps the old one.
 FIT_VERSION = "fit.1"
-EVIDENCE_VERSION = "ev.1"
-SCORE_VERSION = "sc.1"
+EVIDENCE_VERSION = "ev.2"
+SCORE_VERSION = "sc.2"
 
 # Stage B. The cheapest call on the path and the one with the worst failure mode, so almost all
 # of this prompt is spent narrowing what "no" is allowed to mean.
@@ -73,24 +73,56 @@ nothing to score, not the ones where there is little.
 
 Give a one-sentence reason a teacher could check against the document."""
 
+# The reading a text-dependent prompt supplied, when there is one.
+#
+# The text-dependent evidence trait is defined as evidence "taken from the source text(s)", and
+# until now nothing in this pipeline had ever seen a source text — so that trait asked whether a
+# quotation came from a document the rater could not read. On 163 of the 334 anchor papers.
+#
+# Empty for an independent prompt, which HAS no source. Not a placeholder saying one is missing:
+# an independent prompt is not missing a source, it does not have one, and telling a rater a
+# document is absent invites it to hold the absence against the writing.
+SOURCE_BLOCK = """SOURCE TEXT the student was given to write from:
+<source>
+{source_text}
+</source>
+
+"""
+
+
+def source_block(source_text: str | None) -> str:
+    return SOURCE_BLOCK.format(source_text=source_text) if source_text else ""
+
+
 EVIDENCE_PROMPT = """You are extracting evidence for ONE criterion from ONE piece of student writing.
 
 CRITERION: {name}
 {levels}
 
-STUDENT TEXT:
+{source}STUDENT TEXT:
 <text>
 {text}
 </text>
 
-Identify the spans of the student's own writing that bear on this criterion — the passages a reader
-would point at to justify any level on this scale, whether they support a high one or a low one.
+First answer whether this criterion is PRESENT in the writing at all.
+
+Some criteria describe a feature a piece of writing either has or does not: a counterclaim, a
+rebuttal, a concluding statement. If the writing contains no such thing, say so — set present to
+false and return no spans. That is a finding about the writing, not a failure to find something,
+and it is more useful to a teacher than a score would be.
+
+Other criteria are about the writing as a whole and are always present. Say true for those.
+
+Then, if it is present, identify the spans of the student's own writing that bear on it — the
+passages a reader would point at to justify any level on this scale, whether they support a high
+one or a low one.
 
 - Every span must be copied EXACTLY from the text above, character for character. A paraphrased or
   reconstructed span will be dropped by a verifier, and the criterion may become unscorable.
 - Prefer whole clauses or sentences over fragments.
 - Return 0 to 5 spans. Zero is correct when the writing genuinely offers nothing on this criterion;
-  do not manufacture evidence to fill the list.
+  do not manufacture evidence to fill the list, and do not offer a nearby passage that is not
+  actually an instance of what this criterion describes.
 - Do not assign a level and do not evaluate quality. That is a separate step."""
 
 SCORE_PROMPT = """You are scoring ONE criterion of ONE piece of student writing against a rubric.
@@ -98,7 +130,7 @@ SCORE_PROMPT = """You are scoring ONE criterion of ONE piece of student writing 
 CRITERION: {name}
 {levels}
 
-VERIFIED EVIDENCE — confirmed to appear verbatim in the student's writing:
+{source}VERIFIED EVIDENCE — confirmed to appear verbatim in the student's writing:
 {evidence}
 
 Assign the level whose descriptor this evidence meets. The scale is criterion-referenced: a level
@@ -112,7 +144,7 @@ Judge only this criterion. Say nothing about spelling, grammar or punctuation: t
 scale, and the paper must not move up or down for them. The reason should be one or two sentences a
 teacher could check against the evidence above."""
 
-BAND_VERSION = "bd.1"
+BAND_VERSION = "bd.2"
 
 # Stage D, the cumulative form. ONE band, ONE question, one call.
 #
@@ -137,7 +169,7 @@ CRITERION: {name}
 THE BAND — level {band}:
 {descriptor}
 
-VERIFIED EVIDENCE — confirmed to appear verbatim in the student's writing:
+{source}VERIFIED EVIDENCE — confirmed to appear verbatim in the student's writing:
 {evidence}
 
 Answer one question: what is the probability that this writing MEETS OR EXCEEDS this band?
@@ -227,8 +259,21 @@ FIT_SCHEMA: dict = {
 
 EVIDENCE_SCHEMA: dict = {
     "type": "object",
-    "properties": {"spans": {"type": "array", "items": {"type": "string"}}},
-    "required": ["spans"],
+    "properties": {
+        # ABSENCE AS AN ANSWER, not as an empty list.
+        #
+        # The prompt already said zero spans was correct when the writing offers nothing, and the
+        # model returned spans anyway — a nearby passage that IS in the paper, so verification
+        # passed and the criterion scored. Measured on the anchor set: 224 papers have no annotated
+        # counterclaim and 325 of 334 were given a counterclaim score.
+        #
+        # Verification proves a span is IN the writing. It cannot prove the span IS the thing, and
+        # nothing else was asking. A boolean the model must set is harder to slide past than an
+        # instruction to return nothing.
+        "present": {"type": "boolean"},
+        "spans": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["present", "spans"],
     "additionalProperties": False,
 }
 

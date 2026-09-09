@@ -26,7 +26,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from dataclasses import dataclass, field
 
-from .prompts import BAND_PROMPT, EVIDENCE_PROMPT, SCORE_PROMPT, render_scale
+from .prompts import (BAND_PROMPT, EVIDENCE_PROMPT, SCORE_PROMPT, render_scale,
+                      source_block)
 from .rater import Rater, Usage
 from .verify import NORM_VERSION, normalize, verify_all
 
@@ -75,18 +76,22 @@ def is_non_attempt(text: str) -> bool:
     return not normalize(text)
 
 
-def build_evidence_prompt(criterion: Criterion, text: str) -> str:
+def build_evidence_prompt(criterion: Criterion, text: str,
+                          source_text: str | None = None) -> str:
     return EVIDENCE_PROMPT.format(
+        source=source_block(source_text),
         name=criterion.criterion_label,
         levels=render_scale(criterion.criterion_label, criterion.descriptors,
                             criterion.categories),
         text=text)
 
 
-def build_score_prompt(criterion: Criterion, kept: list[dict]) -> str:
+def build_score_prompt(criterion: Criterion, kept: list[dict],
+                       source_text: str | None = None) -> str:
     """Verified spans only. The student's text is not a parameter of this function, which is the
     cheapest possible way to make sure it cannot leak into stage D by a later edit."""
     return SCORE_PROMPT.format(
+        source=source_block(source_text),
         name=criterion.criterion_label,
         levels=render_scale(criterion.criterion_label, criterion.descriptors,
                             criterion.categories),
@@ -118,13 +123,15 @@ _CLEAR_MARGIN = 0.25
 _SOME_MARGIN = 0.10
 
 
-def build_band_prompt(criterion: Criterion, kept: list[dict], band) -> str:
+def build_band_prompt(criterion: Criterion, kept: list[dict], band,
+                      source_text: str | None = None) -> str:
     """One band's question. The descriptor for THIS band only — the others are not shown.
 
     Showing the whole scale is what makes the category form a gestalt judgment. A model that can
     see band 6 while judging band 3 is comparing, and comparison is where the middle comes from.
     """
     return BAND_PROMPT.format(
+        source=source_block(source_text),
         name=criterion.criterion_label,
         band=band,
         descriptor=criterion.descriptors.get(str(band), f"(no descriptor for level {band})"),
@@ -178,19 +185,62 @@ def level_from(probabilities: dict, categories: list, threshold: float) -> dict:
             "probabilities": {str(_fmt(c)): probs[c] for c in cats if c in probs}}
 
 
+NOT_PRESENT = "element_not_present"
+
+
+def _propose(rater: Rater, criterion: Criterion, text: str,
+             source_text: str | None) -> tuple[list[str], bool, Usage]:
+    """Stage C: the spans, and whether the criterion is present at all.
+
+    `present` is returned rather than stashed on the rater. Hidden state read back off the object
+    would work and would be unreadable — and with the pools running several criteria of one paper
+    at once, it would also be wrong.
+    """
+    return rater.propose_spans(build_evidence_prompt(criterion, text, source_text))
+
+
+def _absent(criterion: Criterion, evidence: dict) -> Outcome:
+    """The writing contains no instance of what this criterion describes.
+
+    ABSTAINED, not a low level. A missing counterclaim is not a bad counterclaim, and imputing a 1
+    would put a quality judgment on something that was never attempted — the same error the whole
+    abstention design exists to prevent, one level down.
+
+    Not `not_scorable` either, tempting as its "never imputed as low performance" guarantee is:
+    that status means the ARTIFACT is not an attempt at the task, and `next_state` refuses to mix
+    it with scored criteria for exactly that reason. A missing counterclaim in an otherwise real
+    essay is not that.
+
+    The status may deserve to be its own one day — "the student did not write a counterclaim" is a
+    finding a teacher can act on, and routing it beside "we could not tell" loses that. Adding one
+    touches the vocabulary, the value-status map and the review console, so it waits until there
+    is somewhere in the console to put it.
+    """
+    return Outcome(
+        node_id=criterion.node_id, node_version_id=criterion.node_version_id,
+        status="abstained", level=None, reason_code=NOT_PRESENT,
+        reason=(f"The writing contains no {criterion.criterion_label.lower()}. That is a fact "
+                f"about the writing, not a low score — nothing was attempted here to judge."),
+        evidence=evidence | {"present": False})
+
+
 def score_criterion_cumulative(text: str, criterion: Criterion, rater: Rater, *,
                                threshold: float = DEFAULT_THRESHOLD,
-                               concurrency: int = 8) -> tuple[Outcome, Usage]:
+                               concurrency: int = 8,
+                               source_text: str | None = None) -> tuple[Outcome, Usage]:
     """Stage C, then one call per band above the floor, then arithmetic.
 
     The model never chooses a level here. It answers a yes/no question with a probability, once
     per band, and the level is computed — so the step where a category was being hedged toward the
     middle no longer exists.
     """
-    proposed, usage = rater.propose_spans(build_evidence_prompt(criterion, text))
+    proposed, present, usage = _propose(rater, criterion, text, source_text)
     kept, dropped = verify_all(proposed, text)
     evidence = {"proposed": len(proposed), "kept": kept, "dropped": dropped,
                 "norm_version": NORM_VERSION}
+
+    if not present:
+        return _absent(criterion, evidence), usage
 
     if not kept:
         return (Outcome(
@@ -202,7 +252,7 @@ def score_criterion_cumulative(text: str, criterion: Criterion, rater: Rater, *,
             evidence=evidence), usage)
 
     bands = sorted(float(c) for c in criterion.categories)[1:]
-    jobs = [(lambda b=b: _one_band(rater, criterion, kept, b)) for b in bands]
+    jobs = [(lambda b=b: _one_band(rater, criterion, kept, b, source_text)) for b in bands]
     answers, band_usage = _gather_bands(jobs, concurrency)
     usage = usage + band_usage
 
@@ -260,8 +310,9 @@ _BAND_RETRIES = 2
 _RETRY_PAUSE = 1.0
 
 
-def _one_band(rater: Rater, criterion: Criterion, kept: list[dict], band: float) -> dict:
-    prompt = build_band_prompt(criterion, kept, _fmt(band))
+def _one_band(rater: Rater, criterion: Criterion, kept: list[dict], band: float,
+              source_text: str | None = None) -> dict:
+    prompt = build_band_prompt(criterion, kept, _fmt(band), source_text)
     raw = usage = None
     for attempt in range(_BAND_RETRIES + 1):
         try:
@@ -321,7 +372,8 @@ def _gather_bands(jobs: list, concurrency: int) -> tuple[list[dict], Usage]:
 
 
 def score_criterion(text: str, criterion: Criterion, rater: Rater, *,
-                    concurrency: int = DEFAULT_CONCURRENCY) -> tuple[Outcome, Usage]:
+                    concurrency: int = DEFAULT_CONCURRENCY,
+                    source_text: str | None = None) -> tuple[Outcome, Usage]:
     """One criterion, by whichever stage-D form this rater is.
 
     The method comes off the rater's own identity rather than being passed down. A rater IS its
@@ -337,19 +389,22 @@ def score_criterion(text: str, criterion: Criterion, rater: Rater, *,
         # nineteen requests in flight for one paper, not eight.
         return score_criterion_cumulative(
             text, criterion, rater, threshold=identity.level_threshold,
-            concurrency=concurrency)
-    return _score_criterion_category(text, criterion, rater)
+            concurrency=concurrency, source_text=source_text)
+    return _score_criterion_category(text, criterion, rater, source_text)
 
 
-def _score_criterion_category(text: str, criterion: Criterion,
-                              rater: Rater) -> tuple[Outcome, Usage]:
+def _score_criterion_category(text: str, criterion: Criterion, rater: Rater,
+                              source_text: str | None = None) -> tuple[Outcome, Usage]:
     """The original form: one call that names a band. The second is not made when the first yields nothing
     verifiable — there is no point paying a model to judge an empty evidence list, and a model
     handed one will produce a level anyway."""
-    proposed, usage = rater.propose_spans(build_evidence_prompt(criterion, text))
+    proposed, present, usage = _propose(rater, criterion, text, source_text)
     kept, dropped = verify_all(proposed, text)
     evidence = {"proposed": len(proposed), "kept": kept, "dropped": dropped,
                 "norm_version": NORM_VERSION}
+
+    if not present:
+        return _absent(criterion, evidence), usage
 
     if not kept:
         return (Outcome(
@@ -360,7 +415,7 @@ def _score_criterion_category(text: str, criterion: Criterion,
             reason_code=NO_SPANS_PROPOSED if not proposed else NO_VERIFIED_EVIDENCE,
             evidence=evidence), usage)
 
-    raw, u2 = rater.assign_level(build_score_prompt(criterion, kept))
+    raw, u2 = rater.assign_level(build_score_prompt(criterion, kept, source_text))
     usage = usage + u2
     return _interpret(raw, criterion, evidence), usage
 
@@ -390,7 +445,8 @@ def _interpret(raw: dict, criterion: Criterion, evidence: dict) -> Outcome:
 
 
 def score_artifact(text: str, criteria: list[Criterion], rater: Rater, *,
-                   concurrency: int = DEFAULT_CONCURRENCY) -> tuple[list[Outcome], Usage]:
+                   concurrency: int = DEFAULT_CONCURRENCY,
+                   source_text: str | None = None) -> tuple[list[Outcome], Usage]:
     """Every criterion of one artifact, independently.
 
     Independently is the load-bearing word: no criterion's result is passed into the next call,
@@ -414,7 +470,8 @@ def score_artifact(text: str, criteria: list[Criterion], rater: Rater, *,
                  for c in criteria], Usage())
 
     return gather_criteria(
-        [(lambda c=c: score_criterion(text, c, rater, concurrency=concurrency))
+        [(lambda c=c: score_criterion(text, c, rater, concurrency=concurrency,
+                                      source_text=source_text))
          for c in criteria], concurrency)
 
 

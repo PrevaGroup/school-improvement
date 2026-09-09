@@ -44,8 +44,9 @@ def criterion(node_id="n1", label="use of evidence", cats=(1, 2, 3, 4)):
 class FakeRater:
     """Scripted, and it records every prompt it was handed — which is what the absence tests read."""
 
-    def __init__(self, spans_by_node=None, scores_by_node=None):
+    def __init__(self, spans_by_node=None, scores_by_node=None, present=True):
         self.identity = IDENTITY
+        self.present = present
         self.spans_by_node = spans_by_node or {}
         self.scores_by_node = scores_by_node or {}
         self.evidence_prompts: list[str] = []
@@ -55,7 +56,10 @@ class FakeRater:
     def propose_spans(self, prompt):
         self.evidence_prompts.append(prompt)
         self._n += 1
-        return list(self.spans_by_node.get(self._key(prompt), [])), Usage(1, 10, 5)
+        # `present` is the third value now: a criterion the writing does not contain is
+        # said outright rather than inferred from an empty list.
+        return (list(self.spans_by_node.get(self._key(prompt), [])),
+                self.present, Usage(1, 10, 5))
 
     def assign_level(self, prompt):
         self.score_prompts.append(prompt)
@@ -160,12 +164,24 @@ def test_stage_d_sees_the_kept_spans_and_not_the_dropped_ones():
     assert "explicitly overruled" not in r.score_prompts[0]
 
 
-def test_build_score_prompt_cannot_be_handed_the_text_at_all():
-    """Not a wording rule — the function has no parameter for it, so a later edit cannot leak the
-    text into stage D without changing the signature, which is a review-visible act."""
+def test_build_score_prompt_cannot_be_handed_the_students_text_at_all():
+    """Not a wording rule — the function has no parameter for the student's text, so a later edit
+    cannot leak it into stage D without changing the signature, which is a review-visible act.
+
+    `source_text` IS a parameter, and the distinction is the point. The rule exists to stop stage D
+    forming an impression of the STUDENT'S essay and then justifying it from spans. A source text
+    is not the student's writing — it is the assignment's reading, the same for every student on
+    that prompt, and the text-dependent evidence trait is defined as evidence "taken from the
+    source text(s)", which nothing can judge without it.
+
+    Whether stage D should also see the student's full essay for HOLISTIC traits is a live
+    question and a fair one: judging whole-essay coherence from four fragments is not obviously
+    possible. It is not settled by this test, and it is not what this test forbids.
+    """
     import inspect
     params = set(inspect.signature(build_score_prompt).parameters)
-    assert params == {"criterion", "kept"}
+    assert "text" not in params
+    assert params == {"criterion", "kept", "source_text"}
 
 
 def test_no_call_holds_more_than_one_criterion():
@@ -262,7 +278,7 @@ class _SlowRater:
 
     def propose_spans(self, prompt):
         self._enter()
-        return [self.span], Usage(1, 10, 5)
+        return [self.span], True, Usage(1, 10, 5)
 
     def assign_level(self, prompt):
         return {"level": 3, "confidence": "high", "reason": "r"}, Usage(1, 10, 5)
@@ -314,7 +330,7 @@ class _FailingRater(_SlowRater):
         self._enter()
         if "criterion 2" in prompt:
             raise RuntimeError("the model refused")
-        return [self.span], Usage(1, 10, 5)
+        return [self.span], True, Usage(1, 10, 5)
 
 
 def test_a_failure_in_one_criterion_still_fails_the_artifact():
@@ -433,7 +449,7 @@ class _BandRater:
         self.band_prompts = []
 
     def propose_spans(self, prompt):
-        return list(self.spans), Usage(1, 10, 5)
+        return list(self.spans), True, Usage(1, 10, 5)
 
     def judge_band(self, prompt):
         self.band_prompts.append(prompt)
@@ -537,7 +553,7 @@ def test_a_failed_band_call_names_which_band_of_which_criterion():
         identity = CUMULATIVE_IDENTITY
 
         def propose_spans(self, prompt):
-            return ["Tinker set the standard"], Usage(1, 10, 5)
+            return ["Tinker set the standard"], True, Usage(1, 10, 5)
 
         def judge_band(self, prompt):
             raise RuntimeError("Error code: 400 - Invalid request data")
@@ -565,7 +581,7 @@ def test_a_band_call_is_retried_and_the_success_is_visible(caplog):
             self.calls = 0
 
         def propose_spans(self, prompt):
-            return ["Tinker set the standard"], Usage(1, 10, 5)
+            return ["Tinker set the standard"], True, Usage(1, 10, 5)
 
         def judge_band(self, prompt):
             self.calls += 1
@@ -590,7 +606,7 @@ def test_a_band_that_fails_every_attempt_still_fails_the_paper():
         identity = CUMULATIVE_IDENTITY
 
         def propose_spans(self, prompt):
-            return ["Tinker set the standard"], Usage(1, 10, 5)
+            return ["Tinker set the standard"], True, Usage(1, 10, 5)
 
         def judge_band(self, prompt):
             raise RuntimeError("400 Invalid request data")

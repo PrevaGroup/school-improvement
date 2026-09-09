@@ -23,9 +23,25 @@ from scoring.prompts import (EVIDENCE_SCHEMA, EVIDENCE_VERSION, FEEDBACK_VERSION
 
 PINNED = {
     "fit": {"version": "fit.1", "sha256": "2338d95dcc9f0219"},
-    "evidence": {"version": "ev.1", "sha256": "05264504a54983f7"},
-    "score": {"version": "sc.1", "sha256": "97f36f59d676de80"},
+    # ev.2: the evidence stage now answers whether the criterion is PRESENT, and receives the
+    # source text when the assignment supplied one.
+    "evidence": {"version": "ev.2", "sha256": "756c49cdef3e3a1b"},
+    # sc.2 / bd.2: both stage-D forms receive the source text.
+    "score": {"version": "sc.2", "sha256": "22d49f6ba3d255c4"},
 }
+
+PINNED_CUMULATIVE = {
+    "fit": {"version": "fit.1", "sha256": "2338d95dcc9f0219"},
+    "evidence": {"version": "ev.2", "sha256": "756c49cdef3e3a1b"},
+    "band": {"version": "bd.2", "sha256": "ee607a6c4386648b"},
+}
+
+
+def test_the_cumulative_fingerprint_is_pinned_too():
+    """It was not, and a prompt only one rater uses is exactly the one a pin would miss."""
+    assert fingerprint("cumulative") == PINNED_CUMULATIVE, (
+        "the band prompt changed. Same rule as below: bump the version, update the pin, promote a "
+        "new configuration.")
 
 
 def test_the_prompt_fingerprint_is_pinned():
