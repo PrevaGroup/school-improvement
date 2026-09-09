@@ -69,7 +69,10 @@ class CorpusSpec:
     papers_file: str
     url: str | None = None
     snapshot: str | None = None
-    spans_file: str | None = None
+    # One path, or several. PERSUADE 2.0 ships its segmentation split in two — train and test,
+    # disjoint, together covering the corpus — and taking only one silently halves the coverage of
+    # every element comparison downstream.
+    spans_file: str | tuple[str, ...] | None = None
     overlaps_source_id: str | None = None
     overlap_note: str | None = None
     # row -> a paper dict, or None to skip (with a reason recorded by the mapper)
@@ -196,28 +199,34 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
 
     spans, span_rows = Counts(), []
     if spec.spans_file and not a.papers_only:
-        spans_path = os.path.join(a.data_dir, spec.spans_file)
-        for i, row in enumerate(rows(spans_path)):
-            if a.limit and i >= a.limit * 12:
-                break
-            spans.read += 1
-            span = spec.map_span(row) if spec.map_span else None
-            if span is None:
-                spans.skip("mapper rejected the row")
-            elif span["external_id"] not in papers:
-                spans.skip("span for a paper not in this load")
-            else:
-                ext = span.pop("external_id")
-                span["paper_id"] = papers[ext]["paper_id"]
-                # A span has no natural key that survives a re-issue — its identity is its
-                # offsets, and those move when an essay is re-tokenised. So the id is derived from
-                # the whole triple, which makes a re-load of the SAME segmentation idempotent and
-                # a genuinely changed segmentation a different row.
-                span["span_id"] = paper_id_for(
-                    spec.source_id,
-                    f"{ext}:{span['discourse_type']}:{span['start_char']}:{span['end_char']}")
-                span_rows.append(span)
-                spans.loaded += 1
+        files = ((spec.spans_file,) if isinstance(spec.spans_file, str) else spec.spans_file)
+        # Counted per file as well as in total: two splits that should be disjoint and complete
+        # are two facts a person can check, and one combined number hides a file that read zero
+        # rows because its name was wrong.
+        for name in files:
+            before = spans.loaded
+            for i, row in enumerate(rows(os.path.join(a.data_dir, name))):
+                if a.limit and i >= a.limit * 12:
+                    break
+                spans.read += 1
+                span = spec.map_span(row) if spec.map_span else None
+                if span is None:
+                    spans.skip("mapper rejected the row")
+                elif span["external_id"] not in papers:
+                    spans.skip("span for a paper not in this load")
+                else:
+                    ext = span.pop("external_id")
+                    span["paper_id"] = papers[ext]["paper_id"]
+                    # A span has no natural key that survives a re-issue — its identity is its
+                    # offsets, and those move when an essay is re-tokenised. So the id is derived from
+                    # the whole triple, which makes a re-load of the SAME segmentation idempotent and
+                    # a genuinely changed segmentation a different row.
+                    span["span_id"] = paper_id_for(
+                        spec.source_id,
+                        f"{ext}:{span['discourse_type']}:{span['start_char']}:{span['end_char']}")
+                    span_rows.append(span)
+                    spans.loaded += 1
+            print(f"      {os.path.basename(name)}: {spans.loaded - before:,} span(s)")
         spans.report("spans")
 
     if a.dry_run:

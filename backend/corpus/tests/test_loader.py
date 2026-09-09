@@ -189,14 +189,15 @@ def test_real_spans_include_the_taught_but_unscored_constructs():
     """
     from collections import Counter
 
-    from corpus._shared import rows
     seen = Counter()
-    for row in rows(str(CORPUS_DIR / SPEC.spans_file)):
+    for row in _span_rows():
         s = _span(row)
         if s:
             seen[s["discourse_type"]] += 1
-    assert seen["Counterclaim"] > 5_000
-    assert seen["Rebuttal"] > 4_000
+    # Both splits together: the 2021 file's 9,534 counterclaims come back as the two splits are
+    # read, where the train split alone gave 5,817.
+    assert seen["Counterclaim"] > 9_000
+    assert seen["Rebuttal"] > 7_000
     assert "Unannotated" not in seen
     assert set(seen) <= set(DISCOURSE_TYPES)
 
@@ -208,9 +209,8 @@ def test_the_real_span_file_actually_carries_effectiveness():
     the one before it: every trait reporting `no pairs`."""
     from collections import Counter
 
-    from corpus._shared import rows
     rated = Counter()
-    for i, row in enumerate(rows(str(CORPUS_DIR / SPEC.spans_file))):
+    for i, row in enumerate(_span_rows()):
         if i >= 20_000:
             break
         s = _span(row)
@@ -221,15 +221,27 @@ def test_the_real_span_file_actually_carries_effectiveness():
 
 
 @pytest.mark.skipif(not HAVE_CORPUS, reason="corpus files not present")
-def test_the_span_split_covers_less_than_the_paper_file():
-    """Measured, and the reason the 2.0 file is NOT the papers file: it holds 15,594 essays where
-    the corpus has 25,990. Using it for both passes would shrink the corpus by 40% and the loader
-    would report loading exactly what it was given."""
+def test_the_two_splits_are_disjoint_and_together_cover_the_corpus():
+    """Measured: 15,594 essays in train, 10,402 in test, zero overlap, union 25,996 against the
+    corpus's 25,990. Either split alone gives an element comparator to part of the corpus and
+    reports nothing amiss — the train split alone covers 60%."""
     from corpus._shared import rows
 
-    essays = {r["essay_id_comp"] for r in rows(str(CORPUS_DIR / SPEC.spans_file))}
-    assert 15_000 < len(essays) < 17_000
-    assert SPEC.papers_file != SPEC.spans_file
+    per_file = [{r["essay_id_comp"] for r in rows(str(CORPUS_DIR / f))}
+                for f in SPEC.spans_file]
+    assert len(per_file) == 2
+    assert not (per_file[0] & per_file[1]), "the splits are supposed to be disjoint"
+    assert len(per_file[0] | per_file[1]) > 25_000
+
+
+def _span_rows():
+    """Every row of every span file. The spec now names two, and a test reading only the first
+    would pass while covering 60% of the corpus."""
+    from corpus._shared import rows
+
+    files = (SPEC.spans_file,) if isinstance(SPEC.spans_file, str) else SPEC.spans_file
+    for f in files:
+        yield from rows(str(CORPUS_DIR / f))
 
 
 # ------------------------------------------------------------------ what was in the file all along
@@ -312,8 +324,11 @@ def test_the_word_count_is_read_under_either_name():
     assert _paper(_row())["word_count"] is None
 
 
-def test_the_spans_come_from_the_file_that_has_the_ratings():
-    """And the papers do not. The 2.0 file is a train split covering 60% of the corpus; using it
-    for papers as well would drop the other 40% silently."""
-    assert "2.0_train" in SPEC.spans_file
+def test_the_spans_come_from_both_2_0_splits_and_the_papers_from_neither():
+    """Either split carries `full_text` and `holistic_essay_score`, so either would load as papers
+    and quietly shrink the corpus to its own half."""
+    assert len(SPEC.spans_file) == 2
+    assert any("2.0_train" in f for f in SPEC.spans_file)
+    assert any("2.0_test" in f for f in SPEC.spans_file)
     assert "human_scores" in SPEC.papers_file
+    assert SPEC.papers_file not in SPEC.spans_file

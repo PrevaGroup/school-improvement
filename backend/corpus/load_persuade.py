@@ -12,17 +12,19 @@ SPANS from `persuade_corpus_2.0_train.csv`: the discourse segmentation AND
 This is what the 2021 file (`persuade_corpus_1.0.csv`) never had, and its absence is why eight of
 the ten traits this system scores reported `no pairs` on 334 papers scored twice.
 
-## The 2.0 file is a TRAIN SPLIT and does not cover the corpus
+## The segmentation ships in two splits, and BOTH are needed
 
-Measured: 173,266 rows, 15,594 distinct essays, every one `competition_set = train`. The corpus has
-25,990 papers, so roughly 60% of them can have an element comparator and the rest cannot.
+Measured: train has 173,266 rows over 15,594 essays; test has 112,117 rows over 10,402. They
+overlap on zero essays and their union is 25,996 — the corpus holds 25,990. Together they cover it;
+either alone leaves a hole, and the train split alone would have given an element comparator to
+60% of the papers while reporting nothing amiss.
 
-That is why it is not used as the papers file. Doing so would quietly shrink the corpus by 40%,
-and every count downstream would move without anything reporting a problem — the loader would say
-it loaded what it was given.
+Neither is used as the PAPERS file. Both carry `full_text` and `holistic_essay_score`, so either
+would load as papers and quietly shrink the corpus to its own split — the loader would say it
+loaded exactly what it was given.
 
-Papers outside the split keep their 1.0 spans, which carry no effectiveness. A trait comparison on
-them reports `no human rating`, which is the truth.
+The train/test names are the competition's, not ours. Nothing here trains on anything; this
+system's own calibration/validation split is derived by hash in `partition_for` and is unrelated.
 
 ## Column names moved between the files
 
@@ -117,7 +119,8 @@ SPEC = CorpusSpec(
     # the effectiveness ratings and only 15,594 essays. Using the 2.0 file for both would drop 40%
     # of the corpus without saying so.
     papers_file="persuade20/persuade_2.0_human_scores_demo_id_github.csv",
-    spans_file="persuade20/persuade_corpus_2.0_train.csv",
+    spans_file=("persuade20/persuade_corpus_2.0_train.csv",
+                "persuade20/persuade_corpus_2.0_test.csv"),
     url="https://github.com/scrosseye/persuade_corpus_2.0",
     snapshot="2026-09-09",
     overlaps_source_id="asap2",
