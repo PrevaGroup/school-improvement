@@ -473,10 +473,11 @@ def test_each_stage_actually_calls_its_own_model():
 
     rater = AnthropicRater(_ident(stage_models={"evidence": "claude-haiku-4-5-20251001"}),
                            api_key="not-used")
-    rater._client = _RecordingClient()
+    # The client is thread-local now, so the stand-in goes where this thread looks for it.
+    rater._local.client = _RecordingClient()
     rater.propose_spans("p")
     rater.assign_level("p")
-    assert rater._client.seen == ["claude-haiku-4-5-20251001", "claude-opus-5"]
+    assert rater._local.client.seen == ["claude-haiku-4-5-20251001", "claude-opus-5"]
 
 
 # ------------------------------------------------------------------ the stage-D method
@@ -529,3 +530,34 @@ def test_a_configuration_stamped_for_the_other_method_is_refused():
     with pytest.raises(ConfigurationError, match="not the one that was promoted"):
         check_configuration(_ident(prompt_versions=fingerprint("category"),
                                    level_method="cumulative"))
+
+
+def test_each_thread_gets_its_own_api_client():
+    """Sharing one client across the scoring pools produced `400 Invalid request data` on roughly
+    one call in six under concurrency. Reproduced with an IDENTICAL prompt: six sequential calls
+    all succeeded, six concurrent ones did not — so the request was never the problem, and an
+    evening of the failure looking data-shaped came from that.
+
+    It surfaced only with the cumulative method, which nests two pools (criteria, and the bands
+    within each) for up to nineteen calls in flight per paper instead of eight. The category wave
+    ran clean at the lower number, which is the worst way for a race to behave: absent right up
+    until the load that matters.
+    """
+    import threading
+
+    from scoring.rater import AnthropicRater
+
+    rater = AnthropicRater(_ident(), api_key="not-used")
+    seen: dict[int, int] = {}
+
+    def grab(n):
+        seen[n] = id(rater._client)
+
+    threads = [threading.Thread(target=grab, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(set(seen.values())) == 4, "threads shared a client"
+    assert id(rater._client) == id(rater._client), "a thread must reuse its own client"
