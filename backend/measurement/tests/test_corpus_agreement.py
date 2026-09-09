@@ -16,8 +16,10 @@ from measurement.corpus_agreement import _SPAN_TYPE, aggregate, measure, report
 SIX = [1, 2, 3, 4, 5, 6]
 
 
-def _trait(pairs, *, label="Holistic", derived=False, categories=SIX, ell=None, **counts):
-    return {"label": label, "external_ref": "x", "categories": categories, "derived": derived,
+def _trait(pairs, *, label="Holistic", derived=False, categories=SIX, ell=None,
+           rater="writing-default (category)", **counts):
+    return {"rater": rater,
+            "label": label, "external_ref": "x", "categories": categories, "derived": derived,
             "pairs": [(a, b, f"p{i}") for i, (a, b) in enumerate(pairs)],
             "ell": ell or {}, "papers": {f"p{i}" for i in range(len(pairs))},
             "scored": counts.get("scored", len(pairs)), "abstained": counts.get("abstained", 0),
@@ -171,3 +173,48 @@ def test_every_nullable_parameter_is_cast():
     for line in src.splitlines():
         if "IS NULL" in line and ":" in line and "--" not in line:
             assert "CAST(" in line, f"untyped nullable parameter: {line.strip()}"
+
+
+# ------------------------------------------------------------------ never pool two raters
+
+def test_two_raters_are_reported_separately():
+    """The failure this exists to stop, and it shipped. `corpus_agreement` filtered by tenant and
+    not by rater, so the category scores and the cumulative scores were averaged into one
+    statistic describing neither — the exact error the whole measurement design guards against.
+
+    The only visible symptom was `of 171 papers: 227 scored`, which is impossible for one rater
+    and very easy to read past."""
+    out = report({("A", "n1"): _trait([(3, 3), (5, 5)], rater="writing-default (category)"),
+                  ("B", "n1"): _trait([(3, 4), (5, 4)], rater="writing-cumulative (cumulative)")},
+                 how="best")
+    assert "2 RATERS SCORED THESE PAPERS" in out
+    assert "RATER: writing-default (category)" in out
+    assert "RATER: writing-cumulative (cumulative)" in out
+    # Two separate blocks for the same trait, not one merged block.
+    assert out.count("Holistic") >= 2
+
+
+def test_one_rater_is_not_dressed_up_as_a_comparison():
+    """A single rater needs no banner. The heading is a warning about pooling, and a warning that
+    always fires is one nobody reads."""
+    out = report({("A", "n1"): _trait([(3, 3), (5, 5)])}, how="best")
+    assert "RATERS SCORED THESE PAPERS" not in out
+    assert "RATER:" not in out
+
+
+def test_the_rater_comes_from_the_configuration_that_scored_it():
+    """The configuration id IS the rater — it is what `score_event` stamps and what severity is
+    estimated per. The key and method are for legibility; a bare uuid tells a reader nothing about
+    which of two scorers they are looking at."""
+    from measurement.corpus_agreement import rater_of
+
+    assert rater_of({"config_key": "writing-cumulative", "level_method": "cumulative"}) ==         "writing-cumulative (cumulative)"
+    # A configuration row that has gone missing must still name something, not crash a report.
+    assert "unknown-config" in rater_of({"config_key": None, "level_method": None})
+
+
+def test_the_query_selects_the_rater():
+    """A grouping key that is not in the SELECT cannot group anything."""
+    src = (pathlib.Path(__file__).parent.parent / "corpus_agreement.py").read_text(encoding="utf8")
+    assert "e.scoring_configuration_id" in src
+    assert "registry_scoring_configuration" in src

@@ -74,15 +74,24 @@ _OURS = text("""
            n.external_ref,
            n.scale_categories,
            a.student_id AS paper_id,
+           a.iteration,
            e.status,
            e.level,
            e.escalation_trigger,
+           -- WHICH RATER. Without this the report pools every configuration that ever scored a
+           -- corpus paper into one number, which is the exact error the measurement design
+           -- exists to prevent: two raters inside one comparison.
+           e.scoring_configuration_id AS config_id,
+           c.config_key,
+           c.level_method,
            p.ell_status,
            p.task_type
       FROM score_event e
       JOIN artifact      a ON a.artifact_id = e.artifact_id
       JOIN registry_node n ON n.node_id     = e.node_id
       JOIN corpus_paper  p ON p.paper_id    = a.student_id
+      LEFT JOIN registry_scoring_configuration c
+             ON c.config_id = e.scoring_configuration_id
      WHERE e.tenant_id = :tenant
        AND e.scorer_type = 'ai'
        -- CAST because Postgres cannot infer a bare parameter's type, and a NULL one makes
@@ -131,6 +140,18 @@ def aggregate(values: list[int], how: str) -> int | None:
     raise ValueError(f"unknown aggregation {how!r}")
 
 
+def rater_of(row) -> str:
+    """A readable name for the rater that produced a row.
+
+    The configuration id IS the rater — it is what `score_event` stamps and what severity is
+    estimated per. The key and method are carried for legibility, because `61d511b0-...` tells a
+    reader nothing about which of two scorers they are looking at.
+    """
+    key = row["config_key"] or "unknown-config"
+    method = row["level_method"] or "category"
+    return f"{key} ({method})"
+
+
 # ------------------------------------------------------------------ assembly
 
 def _human_by_trait(conn, how: str) -> tuple[dict, dict]:
@@ -157,9 +178,13 @@ def collect(conn, *, run_id: str | None, how: str) -> dict:
     ours = [r._mapping for r in conn.execute(_OURS, {"tenant": TENANT, "run_id": run_id})]
     holistic, elements = _human_by_trait(conn, how)
 
-    traits: dict[str, dict] = {}
+    traits: dict[tuple, dict] = {}
     for r in ours:
-        t = traits.setdefault(r["node_id"], {
+        # Keyed by (rater, node). Keying by node alone is what pooled two raters together, and it
+        # did so silently — the only visible symptom was "of 171 papers: 227 scored", which is
+        # impossible for one rater and easy to read past.
+        t = traits.setdefault((rater_of(r), r["node_id"]), {
+            "rater": rater_of(r),
             "label": r["criterion_label"],
             "external_ref": r["external_ref"],
             "categories": [int(c) for c in (r["scale_categories"] or [])],
@@ -239,6 +264,25 @@ _HEADINGS = (
 
 def report(traits: dict, *, how: str) -> str:
     lines: list[str] = []
+    raters = sorted({t["rater"] for t in traits.values()})
+    if len(raters) > 1:
+        lines += ["", f"{len(raters)} RATERS SCORED THESE PAPERS: " + ", ".join(raters),
+                  "Reported separately. Pooling them would average two different scorers into a",
+                  "number describing neither, which is what this report used to do."]
+
+    for rater in raters:
+        if len(raters) > 1:
+            lines += ["", "#" * 78, f"# RATER: {rater}", "#" * 78]
+        lines += _one_rater({k: v for k, v in traits.items() if v["rater"] == rater}, how=how)
+
+    if not lines:
+        return ("No scored corpus papers found. Either the run has not written events yet, or "
+                "--run-id names a run that does not exist.")
+    return "\n".join(lines)
+
+
+def _one_rater(traits: dict, *, how: str) -> list[str]:
+    lines: list[str] = []
     for heading, derived, note in _HEADINGS:
         group = [(k, v) for k, v in traits.items() if v["derived"] is derived]
         if not group:
@@ -265,19 +309,17 @@ def report(traits: dict, *, how: str) -> str:
                     f"  ELL bias: on `{b.group}` we are {abs(b.logits):.2f} logits "
                     f"{b.direction} than our own average (t {b.t:+.1f}, n {b.n}) — among papers "
                     f"the model measures as equal quality")
-    if not lines:
-        return ("No scored corpus papers found. Either the run has not written events yet, or "
-                "--run-id names a run that does not exist.")
-    return "\n".join(lines)
+    return lines
 
 
 def as_json(traits: dict, how: str) -> dict:
     out = {}
-    for node_id, t in traits.items():
+    for (rater, node_id), t in traits.items():
         m = measure(t)
         a = m["agreement"]
         s = m.get("severity")
-        out[node_id] = {
+        out[f"{rater}|{node_id}"] = {
+            "rater": rater,
             "label": t["label"], "derived_comparator": t["derived"],
             "n": a.n, "exact": a.exact, "adjacent": a.adjacent, "qwk": a.qwk,
             "linear_kappa": a.linear_kappa, "mean_signed": a.mean_signed,
