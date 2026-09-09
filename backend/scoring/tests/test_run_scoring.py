@@ -473,10 +473,11 @@ def test_each_stage_actually_calls_its_own_model():
 
     rater = AnthropicRater(_ident(stage_models={"evidence": "claude-haiku-4-5-20251001"}),
                            api_key="not-used")
-    rater._client = _RecordingClient()
+    # The client is thread-local now, so the stand-in goes where this thread looks for it.
+    rater._local.client = _RecordingClient()
     rater.propose_spans("p")
     rater.assign_level("p")
-    assert rater._client.seen == ["claude-haiku-4-5-20251001", "claude-opus-5"]
+    assert rater._local.client.seen == ["claude-haiku-4-5-20251001", "claude-opus-5"]
 
 
 # ------------------------------------------------------------------ the stage-D method
