@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 import { AssignmentHome, Scope } from "./AssignmentHome";
+import { TraitProfile } from "./TraitProfile";
 
 // The teacher's review screen: the queue on the left, one paper on the right.
 //
@@ -400,6 +401,12 @@ export function ReviewConsole() {
             <span key={state} className={`rv-chip rv-${state}`}>{n} {STATE_LABEL[state] ?? state}</span>
           ))}
         </div>
+        {/* Only inside a set. A profile across every assignment in the school would average
+            classes that share nothing — different tasks, different rubrics, different weeks. */}
+        {scope?.section_id && scope?.task_id && scope?.iteration && (
+          <TraitProfile sectionId={scope.section_id} taskId={scope.task_id}
+                        iteration={scope.iteration} />
+        )}
         <ul>
           {shown.map((r) => (
             <li key={r.artifact_id}

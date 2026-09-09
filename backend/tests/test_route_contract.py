@@ -68,6 +68,10 @@ EXPECTED: dict[str, set[str]] = {
     # Where every SET stands. /queue answers "what is waiting for me"; this answers "is 5B's
     # op-ed done", which is a property of a set and the per-paper queue has no notion of one.
     "/api/review/home": {"GET"},
+    # The class trait profile. Read-only, and scoped to ONE assignment by required query
+    # parameters — a profile across every assignment in a school would average classes that
+    # share no task, no rubric and no week.
+    "/api/review/traits": {"GET"},
     "/api/review/queue": {"GET"},
     "/api/review/artifact/{artifact_id}": {"GET"},
     "/api/review/{artifact_id}/state": {"POST"},
