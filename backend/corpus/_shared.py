@@ -122,6 +122,9 @@ def args():
     p = argparse.ArgumentParser()
     p.add_argument("--data-dir", default=os.environ.get("CORPUS_DIR", "."))
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--papers-only", action="store_true",
+                   help="skip the span file. Adding a column to `corpus_paper` otherwise means "
+                        "re-reading 800MB of segmentation to change nothing in it.")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--batch", type=int, default=1000,
                    help="rows per INSERT. 26,000 papers in one statement is a memory problem "
@@ -192,7 +195,7 @@ def run_corpus_loader(spec: CorpusSpec) -> dict[str, Any]:
           f"{split['validation']:,} validation")
 
     spans, span_rows = Counts(), []
-    if spec.spans_file:
+    if spec.spans_file and not a.papers_only:
         spans_path = os.path.join(a.data_dir, spec.spans_file)
         for i, row in enumerate(rows(spans_path)):
             if a.limit and i >= a.limit * 12:
@@ -249,10 +252,10 @@ _PAPER = text("""
     INSERT INTO corpus_paper
         (paper_id, source_id, external_id, text, text_hash, prompt_name, task_type,
          grade_level, word_count, partition, gender, ell_status, race_ethnicity,
-         economically_disadvantaged, disability_status)
+         economically_disadvantaged, disability_status, assignment, source_text)
     VALUES (:paper_id, :source_id, :external_id, :text, :text_hash, :prompt_name, :task_type,
             :grade_level, :word_count, :partition, :gender, :ell_status, :race_ethnicity,
-            :economically_disadvantaged, :disability_status)
+            :economically_disadvantaged, :disability_status, :assignment, :source_text)
     ON CONFLICT (source_id, external_id) DO UPDATE SET
         text = EXCLUDED.text, text_hash = EXCLUDED.text_hash,
         prompt_name = EXCLUDED.prompt_name, task_type = EXCLUDED.task_type,
@@ -260,7 +263,8 @@ _PAPER = text("""
         partition = EXCLUDED.partition, gender = EXCLUDED.gender,
         ell_status = EXCLUDED.ell_status, race_ethnicity = EXCLUDED.race_ethnicity,
         economically_disadvantaged = EXCLUDED.economically_disadvantaged,
-        disability_status = EXCLUDED.disability_status
+        disability_status = EXCLUDED.disability_status,
+        assignment = EXCLUDED.assignment, source_text = EXCLUDED.source_text
 """)
 
 # Scores and spans are DELETED for the papers in this load and re-inserted, rather than upserted.

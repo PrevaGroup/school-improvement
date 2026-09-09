@@ -3,8 +3,23 @@
     python -m corpus.load_persuade --data-dir N:/studentworkfeedback/corpus --dry-run
 
 Two files, one corpus: `persuade_2.0_human_scores_demo_id_github.csv` carries the essays, one
-holistic score each, and the demographics; `persuade_corpus_1.0.csv` carries discourse-element
-segmentation over the same essays. Neither carries a rater, and neither carries trait scores.
+holistic score each, the demographics, the ASSIGNMENT and the SOURCE TEXT;
+`persuade_corpus_1.0.csv` carries discourse-element segmentation over the same essays. Neither
+carries a rater, and neither carries trait scores.
+
+## What was in the file and not read
+
+`assignment` and `source_text` sat in the essays file through every load and were never mapped.
+That was not visible from anything downstream: a paper with no task statement scores fine, and a
+source-based evidence trait judged without the source produces a number like any other.
+
+Their absence changed what the anchor estimates mean. Without `assignment` the fit gate
+short-circuits, so corpus papers skipped a stage student work does not. Without `source_text` the
+text-dependent evidence trait asked whether a quotation came from a document nobody had shown the
+rater.
+
+The effectiveness ratings really are absent, and the header confirms it — `discourse_type` and no
+`discourse_effectiveness`, in either file. That comment was right; these two were the mistake.
 """
 from __future__ import annotations
 
@@ -29,6 +44,18 @@ def _paper(row):
         "race_ethnicity": blank_to_none(row.get("race_ethnicity")),
         "economically_disadvantaged": blank_to_none(row.get("economically_disadvantaged")),
         "disability_status": blank_to_none(row.get("student_disability_status")),
+        # THE TASK STATEMENT. Present in the file from the first load and not read, so corpus
+        # papers reached the scorer with none — and `fit.check` short-circuits without one. The
+        # anchor papers were therefore skipping a stage that every piece of student work goes
+        # through, which makes the rater they characterise not quite the rater in production.
+        "assignment": blank_to_none(row.get("assignment")),
+        # THE SOURCE TEXT, for the text-dependent prompts. Also present and not read.
+        #
+        # This one is a validity problem rather than a fidelity one. The text-dependent evidence
+        # trait is defined as evidence "taken from the source text(s)" — and nothing in this
+        # pipeline has ever seen the source text, so the rater was being asked whether a
+        # quotation came from a document it could not read.
+        "source_text": blank_to_none(row.get("source_text")),
     }
 
 
