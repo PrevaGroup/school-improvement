@@ -239,6 +239,39 @@ def _empty_or_raise(exc: SQLAlchemyError, empty: dict) -> dict:
                         f"the review tables could not be read: {exc}") from exc
 
 
+# ------------------------------------------------------------------ the class trait profile
+
+# One row per (trait, level) for one assignment, plus the outcomes that carry no level.
+#
+# WHAT THIS DELIBERATELY IS NOT. It is not a class average of student performance, and there is
+# still no such number anywhere in this file. The unit here is the TRAIT: how did this class do on
+# counterclaims, compared with how they did on evidence. Nothing ranks a student against another
+# student, and nothing aggregates a student across traits — which is the number that would invite
+# exactly that.
+#
+# The superseded chain is respected, so an escalated score replaces its first pass rather than
+# being counted beside it.
+_TRAIT_PROFILE = text("""
+    SELECT n.node_id,
+           n.criterion_label,
+           n.scale_categories,
+           e.status,
+           e.level,
+           e.reason_code,
+           count(*) AS n
+      FROM score_event e
+      JOIN registry_node n ON n.node_id = e.node_id
+     WHERE e.tenant_id   = :tenant
+       AND e.section_id  = :section_id
+       AND e.task_id     = :task_id
+       AND e.iteration   = :iteration
+       AND NOT EXISTS (SELECT 1 FROM score_event s
+                        WHERE s.supersedes_event_id = e.event_id)
+     GROUP BY n.node_id, n.criterion_label, n.scale_categories,
+              e.status, e.level, e.reason_code
+""")
+
+
 @router.get("/queue")
 def queue(limit: int = 200, db: Session = Depends(get_db_public),
           principal: dict = Depends(get_current_principal)) -> dict:
@@ -343,3 +376,100 @@ def home(limit: int = 500, db: Session = Depends(get_db_public),
         "assignments": rows,
         "stuck": stuck,
     }
+
+
+@router.get("/traits")
+def traits(section_id: str, task_id: str, iteration: str,
+           db: Session = Depends(get_db_public),
+           principal: dict = Depends(get_current_principal)) -> dict:
+    """How one class did on each trait — the profile a teacher reads before planning a lesson.
+
+    ## What it answers, and what it refuses to
+
+    "Which trait is this class weakest on" is a question about TRAITS, and it is answerable
+    without ever computing a number about a student. Every figure here is per trait: how the class
+    was distributed across that trait's own scale, and how often the trait could not be judged.
+
+    There is no per-student number and no number that spans traits, which is the same restraint
+    `/home` keeps and for the same reason. A student's average across traits would rank students,
+    and this page would become a leaderboard with a lesson-planning label on it.
+
+    ## Why traits are never compared on their raw means
+
+    The holistic trait runs 1-6 and the elements run 1-3, so a mean of 2.4 is near the bottom on
+    one and near the top on the other. `position` puts each trait on 0-1 within ITS OWN scale so
+    the profile can be read across traits at all — and it assumes the levels are equally spaced,
+    which the PERSUADE holistic form states outright and the element rubric does not. It is
+    reported beside the distribution rather than instead of it, because the distribution is the
+    honest object and the position is the convenience.
+
+    ## What cannot be judged is part of the profile
+
+    A trait where a third of the class abstained is not a trait the class is average at. Those
+    counts sit beside the levels rather than being dropped, so "we could not tell" never reads as
+    a middling score.
+
+    ## One thing worth deciding
+
+    This includes scores the teacher has not reviewed yet. That is what makes the page useful
+    before a review session and is also the anchoring risk the console's priors question is still
+    open on — a teacher who reads "the class is weak on counterclaims" first may find it in every
+    paper afterwards.
+    """
+    try:
+        rows = [dict(r) for r in db.execute(
+            _TRAIT_PROFILE, {"tenant": "public", "section_id": section_id,
+                             "task_id": task_id, "iteration": iteration}).mappings()]
+    except SQLAlchemyError as exc:
+        db.rollback()
+        return _empty_or_raise(exc, {"traits": []})
+
+    return {"available": True,
+            "section_id": section_id, "task_id": task_id, "iteration": iteration,
+            "traits": build_profile(rows)}
+
+
+def build_profile(rows: list[dict]) -> list[dict]:
+    """Group the (trait, level, status) counts into one entry per trait. Pure, so the shape of the
+    profile can be argued with without a database."""
+    by_node: dict[str, dict] = {}
+    for r in rows:
+        cats = [int(c) for c in (r["scale_categories"] or [])]
+        t = by_node.setdefault(r["node_id"], {
+            "node_id": r["node_id"], "label": r["criterion_label"], "categories": cats,
+            "levels": {str(c): 0 for c in cats},
+            "scored": 0, "unjudged": 0, "unjudged_reasons": {},
+        })
+        n = int(r["n"])
+        if r["status"] == "scored" and r["level"] is not None:
+            t["scored"] += n
+            key = str(int(float(r["level"])))
+            # A level off this node's scale is a rater that was not scoring this node. Counted
+            # separately rather than silently folded in, where it would move a mean nobody could
+            # trace.
+            t["levels"][key] = t["levels"].get(key, 0) + n
+        else:
+            t["unjudged"] += n
+            why = r["reason_code"] or r["status"] or "unknown"
+            t["unjudged_reasons"][why] = t["unjudged_reasons"].get(why, 0) + n
+
+    out = []
+    for t in by_node.values():
+        cats = t["categories"]
+        total = sum(t["levels"].get(str(c), 0) for c in cats)
+        if total and len(cats) > 1:
+            mean = sum(c * t["levels"].get(str(c), 0) for c in cats) / total
+            t["mean"] = round(mean, 2)
+            t["position"] = round((mean - cats[0]) / (cats[-1] - cats[0]), 3)
+            t["at_lowest"] = t["levels"].get(str(cats[0]), 0)
+            t["at_highest"] = t["levels"].get(str(cats[-1]), 0)
+        else:
+            # No scored papers, or a degenerate scale. Not a zero — a trait nobody could judge is
+            # not a trait the class scored badly on.
+            t["mean"] = t["position"] = None
+            t["at_lowest"] = t["at_highest"] = 0
+        out.append(t)
+
+    # Weakest first, which is the order a teacher reads it in. Traits with nothing to judge sort
+    # last rather than to the top, where a null would look like a floor.
+    return sorted(out, key=lambda t: (t["position"] is None, t["position"], t["label"]))

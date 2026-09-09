@@ -540,3 +540,27 @@
   .sc-history table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
   .sc-history td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line);
                    font-variant-numeric: tabular-nums; }
+
+/* Class trait profile ------------------------------------------------------
+   Weakest trait first, each on its own scale. The bar is a convenience; the
+   level counts beside it are the honest object, which is why both are shown
+   and why no level is dropped when it is empty. */
+.trait-profile { border-top: 1px solid var(--rule, #e2e2df); margin-top: 14px; padding-top: 12px; }
+.trait-profile h3 { font-size: 13px; margin: 0 0 4px; }
+.trait-profile .small { font-size: 11.5px; }
+.traits { list-style: none; margin: 10px 0 0; padding: 0; display: flex;
+          flex-direction: column; gap: 12px; }
+.trait-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.trait-name { font-size: 12.5px; font-weight: 500; }
+.trait-scale { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bar { height: 5px; border-radius: 3px; background: var(--rule, #e2e2df); margin: 5px 0 6px;
+       overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent, #2e4a7d); }
+.levels { display: flex; gap: 3px; }
+.level { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px;
+         font-size: 10.5px; padding: 3px 0; border-radius: 2px;
+         background: var(--panel-alt, #f3f3f0); font-variant-numeric: tabular-nums; }
+.level b { font-weight: 600; opacity: .55; }
+.level.empty { opacity: .45; }
+.level.end { outline: 1px solid var(--rule, #e2e2df); }
+.unjudged { margin: 6px 0 0; color: var(--muted, #6b6b66); }
