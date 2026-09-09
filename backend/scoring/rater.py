@@ -27,6 +27,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -218,8 +219,33 @@ class AnthropicRater:
 
         self.identity = identity
         self._max_tokens = max_tokens
-        self._client = anthropic.Anthropic(api_key=api_key or resolve_api_key(),
-                                           max_retries=max_retries)
+        self._api_key = api_key or resolve_api_key()
+        self._max_retries = max_retries
+        # ONE CLIENT PER THREAD, not one per rater.
+        #
+        # Sharing a client across the scoring pools produced `400 Invalid request data` on about
+        # one call in six under concurrency — reproduced with an IDENTICAL prompt: six sequential
+        # calls all succeeded, six concurrent ones did not. The prompt was never the problem, and
+        # a whole evening of the failure looking data-shaped came from that.
+        #
+        # It surfaced with the cumulative method because that nests two pools — criteria, and the
+        # bands within each — so a paper has up to nineteen calls in flight instead of eight. The
+        # category wave ran clean at the lower number, which is the worst way for a race to
+        # behave: absent right up until the load that matters.
+        #
+        # Thread-local rather than per-call, so a thread reuses its connection pool. The lazy
+        # property is what makes it work with a pool that creates threads after the rater exists.
+        self._local = threading.local()
+
+    @property
+    def _client(self):
+        client = getattr(self._local, "client", None)
+        if client is None:
+            import anthropic
+
+            client = anthropic.Anthropic(api_key=self._api_key, max_retries=self._max_retries)
+            self._local.client = client
+        return client
 
     def judge_fit(self, prompt: str) -> tuple[dict, Usage]:
         return self._call(prompt, FIT_SCHEMA, "fit")
