@@ -193,3 +193,46 @@ def test_real_spans_include_the_taught_but_unscored_constructs():
     assert seen["Rebuttal"] > 7_000
     assert "Unannotated" not in seen
     assert set(seen) <= set(DISCOURSE_TYPES)
+
+
+# ------------------------------------------------------------------ what was in the file all along
+
+def _row(**over):
+    """A minimal essay row, as the PERSUADE 2.0 header names its columns."""
+    return {"essay_id_comp": "X", "full_text": "an essay", "task": "Independent", **over}
+
+
+def test_the_assignment_is_mapped():
+    """The task statement. `scoring.fit` short-circuits without one — deliberately, since no task
+    statement means no gate — so every corpus paper skipped stage B while student work did not.
+    The severity estimated on the anchor set described a rater running one stage fewer than
+    production, and nothing downstream could have said so."""
+    row = _row(assignment="Write an essay about driverless cars.")
+    assert _paper(row)["assignment"] == "Write an essay about driverless cars."
+
+
+def test_the_source_text_is_mapped():
+    """The text-dependent evidence trait is defined as evidence "taken from the source text(s)".
+    Nothing in the pipeline had seen a source text, so that trait asked whether a quotation came
+    from a document the rater could not read — a validity problem, on 163 of 334 anchor papers."""
+    row = _row(source_text="The article argues that autonomous vehicles are safer.")
+    assert _paper(row)["source_text"] == "The article argues that autonomous vehicles are safer."
+
+
+def test_an_independent_prompt_has_no_source_and_that_is_a_fact_not_a_gap():
+    """NULL here means the prompt supplied no reading, which is what an independent prompt is.
+    Defaulting it to an empty string would make "no source" and "a source we failed to load"
+    indistinguishable."""
+    assert _paper(_row(source_text=""))["source_text"] is None
+    assert _paper(_row(assignment=""))["assignment"] is None
+
+
+def test_both_columns_reach_the_upsert():
+    """A mapped field that the INSERT does not name is silently dropped, and the loader would
+    report the same counts either way."""
+    from corpus._shared import _PAPER
+
+    sql = str(_PAPER)
+    for col in ("assignment", "source_text"):
+        assert f":{col}" in sql, f"{col} is mapped but never bound"
+        assert f"{col} = EXCLUDED.{col}" in sql, f"{col} would not backfill on a re-run"

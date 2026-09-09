@@ -128,6 +128,14 @@ class CorpusPaper(Base):
     race_ethnicity: Mapped[str | None] = mapped_column(Text)
     economically_disadvantaged: Mapped[str | None] = mapped_column(Text)
     disability_status: Mapped[str | None] = mapped_column(Text)
+    # The task the student was answering. Feeds the fit gate, which without it does not run —
+    # so a corpus paper skipped a stage that student work goes through, and the rater the anchor
+    # set characterises was not quite the rater in production.
+    assignment: Mapped[str | None] = mapped_column(Text)
+    # The reading supplied with a text-dependent prompt. The evidence trait for that form is
+    # defined as evidence "taken from the source text(s)", which cannot be judged by anything that
+    # has not read the source.
+    source_text: Mapped[str | None] = mapped_column(Text)
 
     partition: Mapped[str] = mapped_column(Text, nullable=False, server_default="unassigned")
 
