@@ -191,7 +191,12 @@ class Rater(Protocol):
     # one stage where a wrong answer removes a student instead of misplacing them.
     def judge_fit(self, prompt: str) -> tuple[dict, Usage]: ...
 
-    def propose_spans(self, prompt: str) -> tuple[list[str], Usage]: ...
+    # Returns (spans, present, usage). `present` is whether the criterion describes
+    # anything the writing actually contains — a counterclaim in an essay that argues one
+    # side has none. Returned rather than inferred from an empty span list, because the
+    # model returned spans anyway: a nearby passage that IS in the paper, so verification
+    # passed and a missing element got a quality score.
+    def propose_spans(self, prompt: str) -> tuple[list[str], bool, Usage]: ...
 
     def assign_level(self, prompt: str) -> tuple[dict, Usage]: ...
 
@@ -250,9 +255,11 @@ class AnthropicRater:
     def judge_fit(self, prompt: str) -> tuple[dict, Usage]:
         return self._call(prompt, FIT_SCHEMA, "fit")
 
-    def propose_spans(self, prompt: str) -> tuple[list[str], Usage]:
+    def propose_spans(self, prompt: str) -> tuple[list[str], bool, Usage]:
         out, usage = self._call(prompt, EVIDENCE_SCHEMA, "evidence")
-        return list(out["spans"]), usage
+        # Defaulting to present: a rater that does not answer the question has not said the
+        # writing lacks the element, and treating silence as absence would abstain on everything.
+        return list(out["spans"]), bool(out.get("present", True)), usage
 
     def assign_level(self, prompt: str) -> tuple[dict, Usage]:
         return self._call(prompt, SCORE_SCHEMA, "score")

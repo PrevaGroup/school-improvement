@@ -526,8 +526,12 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str, dry_run: bo
                             evidence=verdict.as_evidence())
                     for c in remaining]
     else:
+        # The reading a text-dependent prompt supplied, when there is one. Its
+        # evidence trait asks whether evidence was taken from the source text, and
+        # nothing could answer that without the source in front of it.
         scored_outcomes, score_usage = score_artifact(
-            body, remaining, rater, concurrency=concurrency)
+            body, remaining, rater, concurrency=concurrency,
+            source_text=artifact.get("corpus_source_text"))
         outcomes = scored_outcomes
         usage = usage + score_usage
 
