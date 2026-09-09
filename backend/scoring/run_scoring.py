@@ -113,6 +113,11 @@ _PENDING = text("""
     SELECT a.artifact_id, a.run_id, a.student_id, a.section_id, a.task_id, a.iteration,
            a.window_label, a.content_hash, a.source_uri, a.intake_file_id, f.text AS intake_text,
            cp.text AS corpus_text,
+           -- The task the student was answering, and the reading they were given. Both
+           -- sat unread in the corpus file until 0039; without the first, `fit.check`
+           -- short-circuits and a corpus paper skips a stage student work does not.
+           cp.assignment AS corpus_assignment,
+           cp.source_text AS corpus_source_text,
            a.tenant_id, a.visibility
       FROM artifact a
       LEFT JOIN intake_file f ON f.file_id = a.intake_file_id
@@ -488,8 +493,15 @@ def _score_one(eng, artifact: dict, *, tenant: str, config_key: str, dry_run: bo
         done = {r[0] for r in conn.execute(
             _ALREADY_SCORED, {"artifact_id": aid, "config_id": identity.config_id,
                               "pass_n": SCRUTINY_PASS}).all()}
-        task_statement = (conn.execute(
-            _TASK_STATEMENT, {"file_id": artifact["intake_file_id"]}).scalar()
+        # A student's task statement is a file the intake classified as `not_student_work` in the
+        # same folder. A corpus paper's is a column, because the corpus states it.
+        #
+        # Until now a corpus paper had neither, so `fit.check` short-circuited and the anchor set
+        # skipped stage B entirely — the severity it produced described a rater running one stage
+        # fewer than the one scoring student work.
+        task_statement = artifact.get("corpus_assignment") or (
+            conn.execute(_TASK_STATEMENT,
+                         {"file_id": artifact["intake_file_id"]}).scalar()
             if artifact.get("intake_file_id") else None)
 
     remaining = [c for c in criteria if c.node_id not in done]

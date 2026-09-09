@@ -561,3 +561,31 @@ def test_each_thread_gets_its_own_api_client():
 
     assert len(set(seen.values())) == 4, "threads shared a client"
     assert id(rater._client) == id(rater._client), "a thread must reuse its own client"
+
+
+# ------------------------------------------------------------------ the gate reaches corpus papers
+
+def test_the_pending_query_carries_the_corpus_assignment_and_source():
+    """`fit.check` short-circuits without a task statement, so a corpus paper skipped stage B
+    while student work did not — the anchor severity described a rater running one stage fewer
+    than the one in production. Both columns existed in the file from the first load and were
+    read by nothing."""
+    from scoring.run_scoring import _PENDING
+
+    sql = str(_PENDING)
+    assert "cp.assignment AS corpus_assignment" in sql
+    assert "cp.source_text AS corpus_source_text" in sql
+
+
+def test_a_corpus_assignment_is_preferred_over_an_intake_lookup():
+    """A corpus paper's task is a column because the corpus states it; a student's is a file the
+    intake classified. Reaching for the file first would spend a query per artifact to find
+    nothing, and then fall back anyway."""
+    import inspect
+
+    from scoring.run_scoring import _score_one
+
+    src = inspect.getsource(_score_one)
+    i = src.index("task_statement =")
+    stanza = src[i:i + 400]
+    assert stanza.index("corpus_assignment") < stanza.index("_TASK_STATEMENT")
