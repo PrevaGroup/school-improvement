@@ -65,6 +65,33 @@ Two separate things fail, with different fixes:
 
 ## Deploy
 
+### Where you run it: Cloud Shell, in `~/school-improvement`
+
+**Not from a workstation checkout.** The Cloud Shell clone is the one that reaches GCP — it
+pulls from GitHub, and `--source .` uploads *the tree you are standing in*. A developer working
+copy (this repo is edited on a Windows NAS drive) is for writing and testing code; nothing there
+has ever been the source of a revision, and aiming `--source .` at it would deploy code that was
+never pushed, reviewed or merged.
+
+```bash
+cd ~/school-improvement && git pull
+```
+
+`--source .` does **not** fetch from GitHub itself. `git pull` is what brings GitHub's code to
+the machine; `--source .` then uploads whatever is checked out. Two failures follow from
+forgetting that, and both look like "the deploy didn't work":
+
+- **A stale clone rebuilds the OLD bundle** and reports success. The clone is long-lived and
+  drifts behind `main` between deploys.
+- **`git pull` on `main` does not bring in an unmerged PR.** It *fetches* the branch — you will
+  see `* [new branch] … -> origin/<branch>` scroll past, which reads like it arrived — and
+  leaves you on `main`. Deploy then and you ship `main`; the fix appears not to work and the
+  branch gets blamed for it. **Merge the PR first**, or `git checkout <branch>` deliberately
+  and know that is what you are shipping. `git rev-parse --abbrev-ref HEAD` before you deploy
+  answers this in one line.
+
+### Two shapes
+
 There are two deploy shapes and they are **not interchangeable** — pick by whether you are
 changing config or just code.
 
@@ -82,9 +109,11 @@ Ships new code and re-stamps `GIT_SHA` (so a trace attributes the delta to the n
 leaves every env var, the Cloud SQL wiring, scaling, and the IAM binding exactly as they are.
 
 ```bash
-# Run from the REPO ROOT (school-improvement/, where .git is). `--source .` uploads THIS
-# local tree, not GitHub — a stale checkout rebuilds the OLD bundle and "nothing changed".
-cd <repo-root> && git checkout main && git pull
+# In Cloud Shell, from the repo root (~/school-improvement, where .git is). `--source .`
+# uploads THE TREE YOU ARE STANDING IN — see "Where you run it" above. Confirm the branch
+# before spending a build on it: a deploy of the wrong ref looks identical to a broken fix.
+cd ~/school-improvement && git checkout main && git pull
+git rev-parse --abbrev-ref HEAD   # what you are about to ship
 gcloud run deploy sip-api --source . --region us-central1 \
   --update-env-vars GIT_SHA=$(git rev-parse HEAD)
 ```
@@ -105,6 +134,23 @@ gcloud run deploy sip-api --source . --region us-central1 \
 >
 > `status.traffic` should read `LATEST`. A `revisionName` there means traffic is pinned and
 > nothing you deploy will serve until you unpin it.
+
+> **⚠️ `UNAUTHENTICATED: … ACCESS_TOKEN_TYPE_UNSUPPORTED` is the credential, not a missing role.**
+> `--source .` calls ServiceUsage first, to check Cloud Build and Artifact Registry are enabled,
+> so a credential that API will not accept fails at step one — before anything uploads and before
+> any IAM on Cloud Run is consulted. The message names your account correctly, which is what
+> makes it read like a permissions problem; it is not. A Cloud Shell session whose ambient
+> credential has lapsed produces it, and so does a stray `CLOUDSDK_AUTH_ACCESS_TOKEN` holding a
+> raw or expired token.
+>
+> ```bash
+> gcloud auth login
+> gcloud services list --enabled --limit 1   # the check that says whether it is ACTUALLY fixed
+> env | grep CLOUDSDK                        # if it persists: a token override in the environment
+> ```
+>
+> Re-run the deploy only after `services list` succeeds. Retrying the deploy itself just spends
+> another upload to reach the same first call.
 
 ### Verify what is actually being served (both deploy shapes)
 
