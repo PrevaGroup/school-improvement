@@ -52,6 +52,11 @@ _GRANT = text("""
     INSERT INTO roster_section_staff (section_staff_id, section_id, principal_hash, role,
                                       active_from, active_to, tenant_id, visibility)
     VALUES (:id, :s, :h, :r, current_date, :ends, :tenant, 'private')
+    -- Revoked and granted again the same day: the span key (section, person, role, start) is the
+    -- same, so reopen that row rather than fail. Its history is one day long either way.
+    ON CONFLICT ON CONSTRAINT uq_roster_section_staff_span
+    DO UPDATE SET active_to = EXCLUDED.active_to
+    RETURNING section_staff_id
 """)
 
 # Ends every active assignment this person has on this class, in any role.
@@ -99,9 +104,9 @@ def grant(section_id: str, hashed: str, role: str, ends: str | None) -> dict:
         if existing:
             return {"section_id": section_id, "role": role, "granted": False,
                     "note": f"already active as {existing[0]}"}
-        staff_id = str(uuid.uuid4())
-        conn.execute(_GRANT, {"id": staff_id, "s": section_id, "h": hashed, "r": role,
-                              "ends": ends, "tenant": section["tenant_id"]})
+        staff_id = conn.execute(_GRANT, {"id": str(uuid.uuid4()), "s": section_id, "h": hashed,
+                                         "r": role, "ends": ends,
+                                         "tenant": section["tenant_id"]}).scalar_one()
     return {"section_id": section_id, "section": section["name"], "district": section["tenant_id"],
             "role": role, "granted": True, "section_staff_id": staff_id, "ends": ends}
 
