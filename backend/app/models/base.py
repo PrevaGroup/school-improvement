@@ -15,6 +15,11 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
+# The writing product's tables live in their own Postgres schema (migration 0042), so the grant
+# boundary between the two products is a schema rather than a list: SIP's role has no USAGE on it,
+# and the writing role has no grant on anything outside it. Every writing model declares it.
+WRITING_SCHEMA = "writing"
+
 # Private tenant tables: get ENABLE + FORCE ROW LEVEL SECURITY + tenant policies.
 # Student work is private too but does NOT go through this list: its policies check the class as
 # well as the district, so they live in migration 0041 (POLICIES / DENY_ALL there). Everything

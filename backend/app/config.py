@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     db_name: str = "sip"
     app_db_user: str = "sip_app"            # runtime role (non-owner, NOBYPASSRLS)
     migration_db_user: str = "sip_migrator"  # migrations role (owns objects)
+    # The writing product's runtime role (migration 0042): USAGE on schema `writing` only. Student
+    # work routes connect as this; SIP routes never do.
+    writing_db_user: str = "writing_app"
 
     # --- Cloud SQL Python Connector (Cloud Run): set to activate, else Auth-Proxy URL ---
     # e.g. "school-improvement-501916:us-central1:school-improvement-sql"
@@ -36,10 +39,12 @@ class Settings(BaseSettings):
     gcp_project: str | None = None
     app_db_password_secret: str = "sip-app-password"
     migration_db_password_secret: str = "sip-migrator-password"
+    writing_db_password_secret: str = "writing-app-password"
 
     # --- dev fallback ONLY: a literal password overrides Secret Manager if set ---
     app_db_password: str | None = None
     migration_db_password: str | None = None
+    writing_db_password: str | None = None
 
     # --- Anthropic API key for the SIP extractor (etl/ca/sip) ---
     # Prod: Secret Manager `anthropic-api-key`. Dev fallback: the standard
@@ -277,6 +282,14 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> URL:
         return self._url(self.app_db_user, self.app_db_password_value)
+
+    @property
+    def writing_db_password_value(self) -> str:
+        return self.writing_db_password or self._secret(self.writing_db_password_secret)
+
+    @property
+    def writing_database_url(self) -> URL:
+        return self._url(self.writing_db_user, self.writing_db_password_value)
 
     @property
     def migration_database_url(self) -> URL:

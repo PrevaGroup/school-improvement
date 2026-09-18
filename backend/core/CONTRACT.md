@@ -26,6 +26,10 @@ joins on. Models: `app/models/{reference,tenant}.py`.
   via `roster_visible_sections()`. Listed in migration `0041_writing_rls` (`POLICIES`,
   `DENY_ALL`); `tests/test_student_work_access.py` fails on a tenanted writing table missing
   from it. Proved against Postgres by `sql/30_writing_rls_smoketest.sql`.
+- Two runtime roles, two schemas (migration 0042): `sip_app` → `public`, `writing_app` →
+  `writing`, neither with a grant in the other's. `writing_bridge` (NOLOGIN until its job ships)
+  reads a district's score events only under active module-evidence consent, and may INSERT into
+  `fact_metric`. Roles come from `sql/01_writing_roles.sql`; grants are in the migration.
 - `security.py` (identity → tenant; `principal_hash`), `db.py` (`SET LOCAL app.tenant`;
   `get_db` / `get_db_public` / `get_db_classes` — the last is the only way a route reaches
   student work, and re-binds on every transaction).

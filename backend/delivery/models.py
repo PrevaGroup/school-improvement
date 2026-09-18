@@ -30,7 +30,7 @@ from datetime import datetime
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Text, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import WRITING_SCHEMA, Base
 from app.models.tenant import TenantMixin
 
 # `queued` is the console prototype's "approved, waiting to go out": a teacher who hands back at
@@ -56,7 +56,7 @@ class Delivery(Base, TenantMixin):
 
     delivery_id: Mapped[str] = mapped_column(Text, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(
-        ForeignKey("artifact.artifact_id"), nullable=False)
+        ForeignKey("writing.artifact.artifact_id"), nullable=False)
     # WHICH message went. A composition is superseded when a teacher edits it, so a delivery that
     # named only the artifact could not answer "what did the student actually read".
     composition_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -73,7 +73,7 @@ class Delivery(Base, TenantMixin):
     delivered_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     attempted_by: Mapped[str | None] = mapped_column(Text)
     supersedes_delivery_id: Mapped[str | None] = mapped_column(
-        ForeignKey("artifact_delivery.delivery_id"))
+        ForeignKey("writing.artifact_delivery.delivery_id"))
 
     __table_args__ = (
         CheckConstraint(
@@ -90,4 +90,5 @@ class Delivery(Base, TenantMixin):
                         name="a_failure_says_what_failed"),
         Index("ix_artifact_delivery_artifact", "artifact_id", "attempted_at"),
         Index("ix_artifact_delivery_queue", "tenant_id", "status", "attempted_at"),
+        {"schema": WRITING_SCHEMA},
     )

@@ -38,7 +38,7 @@ from sqlalchemy import (CheckConstraint, ForeignKey, Index, Integer, Numeric, Te
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import WRITING_SCHEMA, Base
 
 # A node version is drafted, published, then superseded. `withdrawn` is the escape for a version
 # published in error — distinct from superseded, because "replaced" and "should never have existed"
@@ -95,6 +95,7 @@ class Node(Base):
             name="node_id_is_a_uuid"),
         Index("ix_registry_node_standard", "standard_code", "grade_band"),
         Index("ix_registry_node_kind", "kind"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -122,7 +123,7 @@ class Skill(Base):
     derivation: Mapped[str] = mapped_column(Text, nullable=False)      # lettered | clause | whole
     derived_by: Mapped[str | None] = mapped_column(Text)
     grade_band: Mapped[str | None] = mapped_column(Text)
-    rubric_id: Mapped[str | None] = mapped_column(ForeignKey("registry_rubric.rubric_id"))
+    rubric_id: Mapped[str | None] = mapped_column(ForeignKey("writing.registry_rubric.rubric_id"))
     source: Mapped[str | None] = mapped_column(Text)
     external_ref: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -138,6 +139,7 @@ class Skill(Base):
                         name="a_clause_split_is_attributed"),
         Index("ix_registry_skill_standard", "standard_code", "grade_band"),
         Index("ix_registry_skill_rubric", "rubric_id"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -171,6 +173,7 @@ class Rubric(Base):
             name="rubric_id_is_a_uuid"),
         CheckConstraint("status IN ('draft','published','superseded','withdrawn')", name="status"),
         Index("ix_registry_rubric_publisher", "publisher", "grade_band"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -190,13 +193,14 @@ class RubricTrait(Base):
     __tablename__ = "registry_rubric_trait"
 
     rubric_id: Mapped[str] = mapped_column(
-        ForeignKey("registry_rubric.rubric_id"), primary_key=True)
+        ForeignKey("writing.registry_rubric.rubric_id"), primary_key=True)
     node_id: Mapped[str] = mapped_column(
-        ForeignKey("registry_node.node_id"), primary_key=True)
+        ForeignKey("writing.registry_node.node_id"), primary_key=True)
     ordinal: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (
         Index("ix_registry_rubric_trait_node", "node_id"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -211,7 +215,7 @@ class NodeVersion(Base):
     __tablename__ = "registry_node_version"
 
     node_version_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    node_id: Mapped[str] = mapped_column(ForeignKey("registry_node.node_id"), nullable=False)
+    node_id: Mapped[str] = mapped_column(ForeignKey("writing.registry_node.node_id"), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     # category -> descriptor. A descriptor that is a LIST is a cell stacking several conditional
     # judgments; the linter flags it, because two raters can score the same paper on different
@@ -236,6 +240,7 @@ class NodeVersion(Base):
         # current ones is bounded. Migration 0014.
         Index("uq_registry_node_one_published", "node_id", unique=True,
               postgresql_where=text("status = 'published'")),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -254,6 +259,7 @@ class Task(Base):
 
     __table_args__ = (
         Index("ix_registry_task_module", "module_key", "ordinal"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -271,10 +277,10 @@ class ScoringSite(Base):
     __tablename__ = "registry_scoring_site"
 
     site_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    task_id: Mapped[str] = mapped_column(ForeignKey("registry_task.task_id"), nullable=False)
+    task_id: Mapped[str] = mapped_column(ForeignKey("writing.registry_task.task_id"), nullable=False)
     # Which rubric this occasion is scored on. `ScoringSiteNode` stays the FROZEN resolved trait
     # set — a rubric edited later must not retroactively change what was already scored.
-    rubric_id: Mapped[str | None] = mapped_column(ForeignKey("registry_rubric.rubric_id"))
+    rubric_id: Mapped[str | None] = mapped_column(ForeignKey("writing.registry_rubric.rubric_id"))
     iteration: Mapped[str] = mapped_column(Text, nullable=False)     # draft | final | only
     is_measurement_occasion: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     note: Mapped[str | None] = mapped_column(Text)
@@ -283,6 +289,7 @@ class ScoringSite(Base):
         UniqueConstraint("task_id", "iteration", name="uq_registry_scoring_site_iteration"),
         Index("ix_registry_scoring_site_task", "task_id"),
         Index("ix_registry_scoring_site_rubric", "rubric_id"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -291,13 +298,14 @@ class ScoringSiteNode(Base):
     __tablename__ = "registry_scoring_site_node"
 
     site_id: Mapped[str] = mapped_column(
-        ForeignKey("registry_scoring_site.site_id"), primary_key=True)
+        ForeignKey("writing.registry_scoring_site.site_id"), primary_key=True)
     node_id: Mapped[str] = mapped_column(
-        ForeignKey("registry_node.node_id"), primary_key=True)
+        ForeignKey("writing.registry_node.node_id"), primary_key=True)
     ordinal: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (
         Index("ix_registry_site_node_node", "node_id"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -351,7 +359,7 @@ class ScoringConfiguration(Base):
 
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
     supersedes_config_id: Mapped[str | None] = mapped_column(
-        ForeignKey("registry_scoring_configuration.config_id"))
+        ForeignKey("writing.registry_scoring_configuration.config_id"))
 
     # Change control. The anchor replay that justifies a promotion is Phase 6; the record of who
     # decided, and why, is cheap now and unrecoverable later.
@@ -377,6 +385,7 @@ class ScoringConfiguration(Base):
         # rater that cannot be named cannot have a severity estimated. Migration 0014.
         Index("uq_registry_configuration_one_active", "config_key", unique=True,
               postgresql_where=text("status = 'active'")),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -401,7 +410,7 @@ class LintAcknowledgment(Base):
     rule: Mapped[str] = mapped_column(Text, nullable=False)
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     node_version_id: Mapped[str | None] = mapped_column(
-        ForeignKey("registry_node_version.node_version_id"))
+        ForeignKey("writing.registry_node_version.node_version_id"))
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     acknowledged_by: Mapped[str] = mapped_column(Text, nullable=False)
     # ONE judgment answering several findings is one decision. The linter reports stacked
@@ -418,4 +427,5 @@ class LintAcknowledgment(Base):
         CheckConstraint("length(btrim(reason)) >= 12", name="reason_substantive"),
         Index("ix_registry_lint_ack_version", "node_version_id"),
         Index("ix_registry_lint_ack_decision", "decision_id"),
+        {"schema": WRITING_SCHEMA},
     )

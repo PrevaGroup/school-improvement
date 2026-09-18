@@ -24,7 +24,7 @@ from sqlalchemy import UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import WRITING_SCHEMA, Base
 from app.models.tenant import TenantMixin
 
 # Five outcomes, and none of them is "missing". A teacher acts differently on each, and collapsing
@@ -70,6 +70,7 @@ class Manifest(Base, TenantMixin):
     __table_args__ = (
         CheckConstraint("source_kind IN ('local','drive')", name="source_kind"),
         Index("ix_intake_manifest_source", "tenant_id", "source_ref", "read_at"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -89,7 +90,7 @@ class File(Base, TenantMixin):
 
     file_id: Mapped[str] = mapped_column(Text, primary_key=True)
     manifest_id: Mapped[str] = mapped_column(
-        ForeignKey("intake_manifest.manifest_id"), nullable=False)
+        ForeignKey("writing.intake_manifest.manifest_id"), nullable=False)
     source_ref: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     mime: Mapped[str | None] = mapped_column(Text)
@@ -127,6 +128,7 @@ class File(Base, TenantMixin):
         Index("ix_intake_file_manifest", "manifest_id", "status"),
         Index("ix_intake_file_hash", "text_hash"),
         Index("ix_intake_file_student", "tenant_id", "resolved_student_id"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -175,4 +177,5 @@ class DriveConnection(Base, TenantMixin):
         CheckConstraint("failed_at IS NULL OR failure_detail IS NOT NULL",
                         name="a_failure_says_what_failed"),
         Index("ix_intake_drive_connection_principal", "tenant_id", "principal_sub"),
+        {"schema": WRITING_SCHEMA},
     )

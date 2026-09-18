@@ -21,11 +21,16 @@ from .config import settings
 from .security import get_current_principal, get_current_tenant, principal_hash
 
 
-def _build_engine():
+def _build_engine(user: str | None = None, password=None, url=None):
     """Cloud Run uses the Cloud SQL Python Connector (no Auth Proxy sidecar) when
     INSTANCE_CONNECTION_NAME is set; local/dev falls back to the Auth-Proxy URL.
     Tenant binding below is identical either way — only how we open the socket differs.
+
+    Defaults to SIP's role. The writing product passes its own (see `_writing_engine`).
     """
+    user = user or settings.app_db_user
+    password = password or (lambda: settings.app_db_password_value)
+    url = url or (lambda: settings.database_url)
     if settings.instance_connection_name:
         from google.cloud.sql.connector import Connector, IPTypes
 
@@ -35,15 +40,15 @@ def _build_engine():
             return connector.connect(
                 settings.instance_connection_name,
                 "pg8000",
-                user=settings.app_db_user,
-                password=settings.app_db_password_value,
+                user=user,
+                password=password(),
                 db=settings.db_name,
                 ip_type=IPTypes.PRIVATE if settings.db_ip_type == "private" else IPTypes.PUBLIC,
             )
 
         return create_engine("postgresql+pg8000://", creator=_getconn, pool_pre_ping=True, future=True)
 
-    return create_engine(settings.database_url, pool_pre_ping=True, future=True)
+    return create_engine(url(), pool_pre_ping=True, future=True)
 
 
 engine = _build_engine()
@@ -108,6 +113,25 @@ _STAFF_TENANTS = text("""
 """)
 
 
+# Student work connects as `writing_app`, not `sip_app` (migration 0042): the two products share a
+# database server and nothing else. Built on first use rather than at import, so a process that
+# never serves a student-work route never resolves the writing credential — and so importing this
+# module does not reach for a second secret, which is the smell `conftest.py` already works around
+# for the first one.
+_writing_sessions: sessionmaker | None = None
+
+
+def _writing_session_factory() -> sessionmaker:
+    global _writing_sessions
+    if _writing_sessions is None:
+        engine_ = _build_engine(settings.writing_db_user,
+                                lambda: settings.writing_db_password_value,
+                                lambda: settings.writing_database_url)
+        _writing_sessions = sessionmaker(bind=engine_, autoflush=False, expire_on_commit=False,
+                                         class_=Session)
+    return _writing_sessions
+
+
 def _bind(connection, principal_hash_value: str, tenant_id: str | None) -> None:
     connection.execute(text("SELECT set_config('app.principal_hash', :h, true)"),
                        {"h": principal_hash_value})
@@ -131,7 +155,7 @@ def get_db_classes(principal: dict = Depends(get_current_principal)) -> Iterator
     The session's district is in `session.info["tenant"]` for queries that name it.
     """
     hashed = principal_hash(principal)
-    session = SessionLocal()
+    session = _writing_session_factory()()
     state: dict[str, str | None] = {"tenant": None}
 
     @event.listens_for(session, "after_begin")

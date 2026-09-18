@@ -44,7 +44,7 @@ from sqlalchemy import (Boolean, CheckConstraint, ForeignKey, Index, Integer, Nu
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import WRITING_SCHEMA, Base
 from app.models.tenant import TenantMixin
 
 # --------------------------------------------------------------------------- #
@@ -137,7 +137,7 @@ class Artifact(Base, TenantMixin):
     # Nothing is deleted: the superseded artifact keeps its scores, its reviewer and its delivery
     # record, which is what lets a growth claim over the pair be qualified honestly.
     superseded_by_artifact_id: Mapped[str | None] = mapped_column(
-        ForeignKey("artifact.artifact_id"))
+        ForeignKey("writing.artifact.artifact_id"))
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default="now()")
@@ -151,6 +151,7 @@ class Artifact(Base, TenantMixin):
         CheckConstraint(
             "state IN (" + ",".join(f"'{s}'" for s in ARTIFACT_STATES) + ")",
             name="state"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -165,7 +166,7 @@ class ScoreEvent(Base, TenantMixin):
 
     event_id: Mapped[str] = mapped_column(Text, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(
-        ForeignKey("artifact.artifact_id"), nullable=False)
+        ForeignKey("writing.artifact.artifact_id"), nullable=False)
 
     # --- binding, denormalised so the event is self-describing ---
     run_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -213,7 +214,7 @@ class ScoreEvent(Base, TenantMixin):
     # An OVERRIDE: a new judgment about the same artifact and criterion. Supersession lives on
     # artifact.superseded_by_artifact_id — a different text, not a different opinion.
     supersedes_event_id: Mapped[str | None] = mapped_column(
-        ForeignKey("score_event.event_id"))
+        ForeignKey("writing.score_event.event_id"))
     # A set-level override is ONE judgment covering many artifacts. Recorded as one decision so it
     # is not counted as N independent human ratings, which would inflate apparent disagreement and
     # hide that a single judgment was made once.
@@ -240,6 +241,7 @@ class ScoreEvent(Base, TenantMixin):
         Index("ix_score_event_binding", "tenant_id", "section_id", "task_id", "iteration"),
         Index("ix_score_event_calibration", "tenant_id", "enters_calibration"),
         Index("ix_score_event_config", "scoring_configuration_id"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -254,7 +256,7 @@ class ArtifactStateTransition(Base, TenantMixin):
 
     transition_id: Mapped[str] = mapped_column(Text, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(
-        ForeignKey("artifact.artifact_id"), nullable=False)
+        ForeignKey("writing.artifact.artifact_id"), nullable=False)
     from_state: Mapped[str | None] = mapped_column(Text)
     to_state: Mapped[str] = mapped_column(Text, nullable=False)
     actor_type: Mapped[str] = mapped_column(Text, nullable=False)   # machine | teacher
@@ -266,6 +268,7 @@ class ArtifactStateTransition(Base, TenantMixin):
     __table_args__ = (
         Index("ix_artifact_state_transition_artifact", "artifact_id", "created_at"),
         CheckConstraint("actor_type IN ('machine','teacher')", name="actor_type"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -281,6 +284,7 @@ class ArtifactTransitionRule(Base):
     Not tenant-scoped: the machine is the same for every district.
     """
     __tablename__ = "artifact_transition_rule"
+    __table_args__ = {"schema": WRITING_SCHEMA}
 
     from_state: Mapped[str] = mapped_column(Text, primary_key=True)
     to_state: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -308,7 +312,7 @@ class ArtifactComposition(Base, TenantMixin):
 
     composition_id: Mapped[str] = mapped_column(Text, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(
-        ForeignKey("artifact.artifact_id"), nullable=False)
+        ForeignKey("writing.artifact.artifact_id"), nullable=False)
     composer_version: Mapped[str] = mapped_column(Text, nullable=False)
     packet: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
@@ -320,11 +324,12 @@ class ArtifactComposition(Base, TenantMixin):
         Boolean, nullable=False, server_default="false")
 
     supersedes_composition_id: Mapped[str | None] = mapped_column(
-        ForeignKey("artifact_composition.composition_id"))
+        ForeignKey("writing.artifact_composition.composition_id"))
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default="now()")
 
     __table_args__ = (
         Index("ix_artifact_composition_artifact", "artifact_id", "created_at"),
         Index("ix_artifact_composition_queue", "tenant_id", "needs_human"),
+        {"schema": WRITING_SCHEMA},
     )
