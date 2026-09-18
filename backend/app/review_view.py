@@ -24,7 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from .db import get_db_public
+from .db import get_db_classes
 from .security import get_current_principal
 
 log = logging.getLogger(__name__)
@@ -273,7 +273,7 @@ _TRAIT_PROFILE = text("""
 
 
 @router.get("/queue")
-def queue(limit: int = 200, db: Session = Depends(get_db_public),
+def queue(limit: int = 200, db: Session = Depends(get_db_classes),
           principal: dict = Depends(get_current_principal)) -> dict:
     """Every paper waiting on a person, and what each is waiting for."""
     try:
@@ -291,7 +291,7 @@ def queue(limit: int = 200, db: Session = Depends(get_db_public),
 
 
 @router.get("/artifact/{artifact_id}")
-def artifact(artifact_id: str, db: Session = Depends(get_db_public),
+def artifact(artifact_id: str, db: Session = Depends(get_db_classes),
              principal: dict = Depends(get_current_principal)) -> dict:
     """One paper: the packet the teacher reviews, the live scores, and the audit trail."""
     try:
@@ -301,7 +301,7 @@ def artifact(artifact_id: str, db: Session = Depends(get_db_public),
         intake = db.execute(
             _INTAKE, {"file_id": row["intake_file_id"]}).mappings().first()             if row["intake_file_id"] else None
         roster = ([dict(r) for r in db.execute(
-            _SECTION_ROSTER, {"tenant": "public", "section_id": row["section_id"]}).mappings()]
+            _SECTION_ROSTER, {"tenant": db.info["tenant"], "section_id": row["section_id"]}).mappings()]
             if row["state"] == "unbound" and row["section_id"] else [])
         events = [dict(e) for e in db.execute(
             _EVENTS, {"artifact_id": artifact_id}).mappings()]
@@ -347,7 +347,7 @@ def artifact(artifact_id: str, db: Session = Depends(get_db_public),
 
 
 @router.get("/home")
-def home(limit: int = 500, db: Session = Depends(get_db_public),
+def home(limit: int = 500, db: Session = Depends(get_db_classes),
          principal: dict = Depends(get_current_principal)) -> dict:
     """Where every set stands — the page a teacher opens before they open a paper.
 
@@ -380,7 +380,7 @@ def home(limit: int = 500, db: Session = Depends(get_db_public),
 
 @router.get("/traits")
 def traits(section_id: str, task_id: str, iteration: str,
-           db: Session = Depends(get_db_public),
+           db: Session = Depends(get_db_classes),
            principal: dict = Depends(get_current_principal)) -> dict:
     """How one class did on each trait — the profile a teacher reads before planning a lesson.
 
@@ -418,7 +418,7 @@ def traits(section_id: str, task_id: str, iteration: str,
     """
     try:
         rows = [dict(r) for r in db.execute(
-            _TRAIT_PROFILE, {"tenant": "public", "section_id": section_id,
+            _TRAIT_PROFILE, {"tenant": db.info["tenant"], "section_id": section_id,
                              "task_id": task_id, "iteration": iteration}).mappings()]
     except SQLAlchemyError as exc:
         db.rollback()
@@ -507,7 +507,7 @@ _UNEXPECTED = text("""
 
 @router.get("/unexpected")
 def unexpected(section_id: str, task_id: str, iteration: str,
-               db: Session = Depends(get_db_public),
+               db: Session = Depends(get_db_classes),
                principal: dict = Depends(get_current_principal)) -> dict:
     """Papers whose own scores disagree with each other, worst first.
 
@@ -530,7 +530,7 @@ def unexpected(section_id: str, task_id: str, iteration: str,
     """
     try:
         rows = [dict(r) for r in db.execute(
-            _UNEXPECTED, {"tenant": "public", "section_id": section_id,
+            _UNEXPECTED, {"tenant": db.info["tenant"], "section_id": section_id,
                           "task_id": task_id, "iteration": iteration}).mappings()]
     except SQLAlchemyError as exc:
         db.rollback()

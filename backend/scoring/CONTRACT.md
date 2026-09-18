@@ -109,6 +109,9 @@ status is a `core` change.
 
 ## Tenancy
 
-`artifact`, `score_event` and `artifact_state_transition` carry `TenantMixin` and are **not yet in
-`PRIVATE_TABLES`**. Enabling RLS is a deliberate `core` move made when the subsystem first holds
-real student writing — not a side effect of this module existing. Same posture as `evals`.
+`artifact`, `score_event`, `artifact_state_transition`, `artifact_composition` and
+`artifact_delivery` carry `TenantMixin` and have row-level security since migration `0041`. An
+artifact is visible to the API role when its section is one of the caller's
+(`roster_visible_sections()`) in the caller's district; its events, transitions, compositions and
+deliveries are visible when it is. The API may update an artifact and insert events, transitions
+and compositions; it may delete nothing. Batch jobs run as the owner and are not bound.

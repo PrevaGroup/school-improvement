@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.db import get_db_public
+from app.db import get_db_classes
 from app.security import get_current_principal
 
 log = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ _COUNTS = text("""
 
 
 @router.get("/{artifact_id}")
-def attempts(artifact_id: str, db: Session = Depends(get_db_public),
+def attempts(artifact_id: str, db: Session = Depends(get_db_classes),
              principal: dict = Depends(get_current_principal)) -> dict:
     """Every attempt to hand this paper back, and what the student is currently holding."""
     try:
@@ -79,11 +79,11 @@ def attempts(artifact_id: str, db: Session = Depends(get_db_public),
 
 
 @router.get("")
-def summary(db: Session = Depends(get_db_public),
+def summary(db: Session = Depends(get_db_classes),
             principal: dict = Depends(get_current_principal)) -> dict:
     """Counts for the queue: handed back, and failing with nothing delivered."""
     try:
-        row = db.execute(_COUNTS, {"tenant": "public"}).mappings().first()
+        row = db.execute(_COUNTS, {"tenant": db.info["tenant"]}).mappings().first()
     except SQLAlchemyError as exc:
         db.rollback()
         log.info("delivery table not available yet: %s", exc)

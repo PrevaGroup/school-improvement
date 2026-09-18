@@ -32,6 +32,7 @@ onboarding action, not part of the request path.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -275,6 +276,27 @@ async def get_current_tenant(principal: dict = Depends(get_current_principal)) -
             f"no tenant mapped for {principal.get('email') or 'this identity'}",
         )
     return tenant
+
+
+def principal_hash(principal: dict) -> str:
+    """The salted hash of the verified `sub` — the identifier `roster_section_staff` is keyed on.
+
+    Same formula as the trace envelope (`app/traces.py`), so a staff row and a trace name the same
+    person the same way. Unlike the trace path it FAILS CLOSED: a trace without identity is still
+    a useful trace, but a student-work session without identity would have to guess whose classes
+    to show, and the only safe guess is none. So no salt is a 503 and no `sub` is a 401, never a
+    session that quietly sees nothing and reports it as an empty class.
+    """
+    sub = str(principal.get("sub") or "").strip()
+    if not sub:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "this identity has no subject")
+    try:
+        salt = settings.trace_salt_value
+    except Exception as exc:
+        log.error("principal salt unavailable — refusing a student-work session: %s", exc)
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "identity hashing is not configured") from exc
+    return hashlib.sha256((salt + sub).encode("utf-8")).hexdigest()
 
 
 def _verify_identity_token(token: str) -> dict:

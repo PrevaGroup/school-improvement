@@ -16,7 +16,9 @@ class Base(DeclarativeBase):
 
 
 # Private tenant tables: get ENABLE + FORCE ROW LEVEL SECURITY + tenant policies.
-# Everything else is public/conformed reference (shared, read by everyone, no RLS).
+# Student work is private too but does NOT go through this list: its policies check the class as
+# well as the district, so they live in migration 0041 (POLICIES / DENY_ALL there). Everything
+# else is public/conformed reference (shared, read by everyone, no RLS).
 PRIVATE_TABLES = ("fact_metric", "dim_period", "plan", "plan_goal", "plan_action")
 
 # Of the private tables, these additionally scope WRITES to the tenant's own
