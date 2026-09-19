@@ -18,7 +18,9 @@ sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
 
 1. **Secrets in Secret Manager** (project `school-improvement-501916`):
    - `sip-app-password`, `sip-migrator-password` — already exist (runbook Phase 3).
-   - `writing-app-password` — the student-work routes' own database user (migration 0042). See
+   - `postgres-password` — the Cloud SQL admin. Only the role-creation step uses it.
+   - `writing-app-password` — the student-work routes' own database user (migration 0042),
+     minted by the rollout script. See
      [Student work: its own schema and user](#student-work-its-own-schema-and-user).
    - `anthropic-api-key` — also exists (used by `POST /plans/extract` and `/api/chat`).
      In a fresh project, create it with:
@@ -69,29 +71,30 @@ Two separate things fail, with different fixes:
 
 Migrations 0041–0042 put the writing product's tables in schema `writing`, behind row-level
 security that checks the class as well as the district, reached by the API as `writing_app`.
-`sip_app` has no access to them; `writing_app` has none to SIP's tables. One-time, in this order:
+`sip_app` has no access to them; `writing_app` has none to SIP's tables.
+
+The one-time rollout is a script, run **in Cloud Shell** from a clean, current `main`, reading
+every credential from Secret Manager — nothing typed, nothing printed:
 
 ```bash
-# 1. The roles (Alembic cannot CREATE ROLE). Edit the password placeholder first.
-psql "host=127.0.0.1 user=postgres dbname=sip" -f sql/01_writing_roles.sql
-
-# 2. The same password, in Secret Manager, readable by the API's service account.
-printf %s "<that password>" | gcloud secrets create writing-app-password --data-file=-
-gcloud secrets add-iam-policy-binding writing-app-password   --member=serviceAccount:<the sip-api service account> --role=roles/secretmanager.secretAccessor
-
-# 3. Migrate (0042 refuses to run if step 1 has not).
-alembic upgrade head
-
-# 4. Prove it, on this database: every check, then ROLLBACK.
-psql "host=127.0.0.1 dbname=sip user=sip_migrator" -v ON_ERROR_STOP=1 -f sql/30_writing_rls_smoketest.sql
-
-# 5. Put yourself on the fixture class, or the console is a 403 for everyone — correctly.
-python -m writing.roster.grant_staff --email you@prevagroup.com --section section-11b-period4
+cd ~/school-improvement && git fetch origin && git checkout main && git pull
+bash backend/scripts/rollout_writing_access.sh you@prevagroup.com
 ```
 
-Then redeploy the API (routine redeploy below). Batch jobs are unaffected: they run as
-`sip_migrator`, the owner, which row-level security here does not bind, and the database's
-default `search_path` is now `public, writing`, so their unqualified table names still resolve.
+In order, and idempotent, so a re-run resumes: mint `writing-app-password` → create the roles
+from `sql/01_writing_roles.sql` as `postgres` → `alembic upgrade head` (0042 refuses to run
+without the roles) → `sql/30_writing_rls_smoketest.sql` (every check, then ROLLBACK) → put you
+on the fixture class with `writing.roster.grant_staff` (otherwise the console is a 403 for
+everyone — correctly) → routine redeploy, failing unless the new revision is the one serving →
+point `sip-score-corpus` at the new image and module path.
+
+It needs `postgres-password` in Secret Manager: creating roles is the one step the migrator
+cannot do. The API's service account reads all secrets project-wide, so the new
+`writing-app-password` needs no binding of its own.
+
+Batch jobs are unaffected: they run as `sip_migrator`, the owner, which row-level security here
+does not bind, and the database's default `search_path` is now `public, writing`, so their
+unqualified table names still resolve.
 
 ## Deploy
 
