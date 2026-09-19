@@ -21,7 +21,14 @@ joins on. Models: `app/models/{reference,tenant}.py`.
   (Names sip's three plan tables by string — the boundary is core's job; a string is not an import.)
 - `TenantMixin` (`app/models/tenant.py`) — `tenant_id` + `visibility`. Modules with private
   tables **apply** it; they must never invent their own tenancy columns.
-- `security.py` (identity → tenant), `db.py` (`SET LOCAL app.tenant`; `get_db` / `get_db_public`).
+- Student work (`artifact`, `score_event`, `roster_*`, `intake_*`, `measurement_fit_*` …) — RLS
+  ENABLE (not FORCE: batch jobs run as owner) with policies checking the district AND the class,
+  via `roster_visible_sections()`. Listed in migration `0041_writing_rls` (`POLICIES`,
+  `DENY_ALL`); `tests/test_student_work_access.py` fails on a tenanted writing table missing
+  from it. Proved against Postgres by `sql/30_writing_rls_smoketest.sql`.
+- `security.py` (identity → tenant; `principal_hash`), `db.py` (`SET LOCAL app.tenant`;
+  `get_db` / `get_db_public` / `get_db_classes` — the last is the only way a route reaches
+  student work, and re-binds on every transaction).
 
 ## The conformed vocabulary (`app/vocab.py`)
 

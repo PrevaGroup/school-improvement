@@ -41,7 +41,10 @@ more expensive than leaving it to policy.
 
 ## Tenancy
 
-All four tables carry `TenantMixin` and are **not yet in `PRIVATE_TABLES`**. Enabling RLS — here and
-on the `scoring` tables — is a deliberate `core` move for when the subsystem first holds real
-student writing, not a side effect of a module existing. This migration supplies the resolver those
-policies will call so that enabling them is a policy statement rather than a redesign.
+All four tables carry `TenantMixin` and have row-level security since migration `0041`: the API
+role reads a section, its enrollments and its students only through `roster_visible_sections()`,
+and reads only its OWN staff rows. It writes none of them. Batch jobs and the sync run as the owner
+and are not bound.
+
+Until there is a sync, `python -m roster.grant_staff` writes staff rows by hand — the only way a
+person reaches student work.

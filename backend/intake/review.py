@@ -37,7 +37,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.db import get_db_public
+from app.db import get_db_classes
 from app.security import get_current_principal
 
 from .gate import CONFIRM
@@ -141,12 +141,12 @@ def _who(principal: dict) -> str:
 
 
 @router.get("/manifests")
-def manifests(limit: int = 50, db: Session = Depends(get_db_public),
+def manifests(limit: int = 50, db: Session = Depends(get_db_classes),
               principal: dict = Depends(get_current_principal)) -> dict:
     """Every folder read, newest first, with what each read found."""
     try:
         rows = [dict(r) for r in db.execute(
-            _MANIFESTS, {"tenant": "public", "limit": limit}).mappings()]
+            _MANIFESTS, {"tenant": db.info["tenant"], "limit": limit}).mappings()]
     except Exception as exc:                       # before the migration has run
         db.rollback()
         log.info("intake tables not available yet: %s", exc)
@@ -160,10 +160,10 @@ def manifests(limit: int = 50, db: Session = Depends(get_db_public),
 
 
 @router.get("/manifest/{manifest_id}")
-def manifest(manifest_id: str, db: Session = Depends(get_db_public),
+def manifest(manifest_id: str, db: Session = Depends(get_db_classes),
              principal: dict = Depends(get_current_principal)) -> dict:
     """One read: the declaration, every file, and who on the roster handed in nothing."""
-    row = db.execute(_ONE, {"manifest_id": manifest_id, "tenant": "public"}).mappings().first()
+    row = db.execute(_ONE, {"manifest_id": manifest_id, "tenant": db.info["tenant"]}).mappings().first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such folder read")
 
@@ -173,10 +173,10 @@ def manifest(manifest_id: str, db: Session = Depends(get_db_public),
 
     section = row["declared_section_id"]
     missing = ([dict(m) for m in db.execute(
-        _MISSING, {"tenant": "public", "section_id": section,
+        _MISSING, {"tenant": db.info["tenant"], "section_id": section,
                    "manifest_id": manifest_id}).mappings()] if section else [])
     roster = ([dict(r) for r in db.execute(
-        _ROSTER, {"tenant": "public", "section_id": section}).mappings()] if section else [])
+        _ROSTER, {"tenant": db.info["tenant"], "section_id": section}).mappings()] if section else [])
 
     return {
         "available": True,
@@ -194,7 +194,7 @@ def manifest(manifest_id: str, db: Session = Depends(get_db_public),
 
 
 @router.post("/file/{file_id}/assign")
-def assign(file_id: str, payload: dict = Body(...), db: Session = Depends(get_db_public),
+def assign(file_id: str, payload: dict = Body(...), db: Session = Depends(get_db_classes),
            principal: dict = Depends(get_current_principal)) -> dict:
     """Correct one file's student before the set is confirmed.
 
@@ -219,9 +219,9 @@ def assign(file_id: str, payload: dict = Body(...), db: Session = Depends(get_db
     try:
         if student_id:
             n = db.execute(_ASSIGN, {"file_id": file_id, "student_id": student_id,
-                                     "tenant": "public"}).rowcount
+                                     "tenant": db.info["tenant"]}).rowcount
         else:
-            n = db.execute(_UNASSIGN, {"file_id": file_id, "tenant": "public",
+            n = db.execute(_UNASSIGN, {"file_id": file_id, "tenant": db.info["tenant"],
                                        "status": "unresolved",
                                        "reason": "detached_by_teacher"}).rowcount
         db.commit()
@@ -239,7 +239,7 @@ def assign(file_id: str, payload: dict = Body(...), db: Session = Depends(get_db
 
 
 @router.post("/manifest/{manifest_id}/confirm")
-def confirm(manifest_id: str, db: Session = Depends(get_db_public),
+def confirm(manifest_id: str, db: Session = Depends(get_db_classes),
             principal: dict = Depends(get_current_principal)) -> dict:
     """Agree with the set. This is the gate `scoring.bind` reads.
 
@@ -248,7 +248,7 @@ def confirm(manifest_id: str, db: Session = Depends(get_db_public),
     and this comes once.
     """
     who = _who(principal)
-    row = db.execute(_ONE, {"manifest_id": manifest_id, "tenant": "public"}).mappings().first()
+    row = db.execute(_ONE, {"manifest_id": manifest_id, "tenant": db.info["tenant"]}).mappings().first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such folder read")
     if row["confirmed_at"] is not None:
@@ -257,7 +257,7 @@ def confirm(manifest_id: str, db: Session = Depends(get_db_public),
             f"this folder was already confirmed by {row['confirmed_by']}. Read it again to pick "
             f"up anything that has changed since.")
 
-    n = db.execute(_CONFIRM, {"manifest_id": manifest_id, "tenant": "public", "who": who}).rowcount
+    n = db.execute(_CONFIRM, {"manifest_id": manifest_id, "tenant": db.info["tenant"], "who": who}).rowcount
     db.commit()
     if n != 1:
         raise HTTPException(status.HTTP_409_CONFLICT,

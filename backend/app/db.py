@@ -13,12 +13,12 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from fastapi import Depends
-from sqlalchemy import create_engine, text
+from fastapi import Depends, HTTPException, status
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import settings
-from .security import get_current_tenant
+from .security import get_current_principal, get_current_tenant, principal_hash
 
 
 def _build_engine():
@@ -82,5 +82,81 @@ def get_db_public() -> Iterator[Session]:
     session = SessionLocal()
     try:
         yield session
+    finally:
+        session.close()
+
+
+# --------------------------------------------------------------------------- #
+# Student work: scoped to the caller's CLASSES, not just their district.
+#
+# SIP's private data is tenant-scoped: `app.tenant` is enough. Student work needs a second key,
+# because a leak between two teachers in one district deserves the same defence as a leak between
+# districts — so the policies on the writing tables (migration 0041) also read
+# `app.principal_hash`, and resolve it to sections through `roster_visible_sections()`.
+#
+# The tenant is not taken from the identity-to-district mapping SIP uses. It is read from the
+# caller's own active staff rows, so the classes a person teaches are the only route to a
+# district's student work: a district administrator with a SIP mapping and no class sees none.
+# --------------------------------------------------------------------------- #
+
+# `roster_section_staff`'s policy admits only the caller's own rows, so this reads nothing else.
+_STAFF_TENANTS = text("""
+    SELECT DISTINCT tenant_id
+      FROM roster_section_staff
+     WHERE (active_from IS NULL OR active_from <= current_date)
+       AND (active_to   IS NULL OR active_to   >= current_date)
+""")
+
+
+def _bind(connection, principal_hash_value: str, tenant_id: str | None) -> None:
+    connection.execute(text("SELECT set_config('app.principal_hash', :h, true)"),
+                       {"h": principal_hash_value})
+    connection.execute(text("SELECT set_config('app.tenant', :t, true)"),
+                       {"t": tenant_id or ""})
+
+
+def get_db_classes(principal: dict = Depends(get_current_principal)) -> Iterator[Session]:
+    """FastAPI dependency for student work: a session that sees only the caller's classes.
+
+    403 when the caller teaches no class — "you have no classes" and "your class is empty" are
+    different answers, and a console that rendered the first as the second would be the defect
+    this codebase keeps finding: a thing reporting success while not doing the job. 409 when the
+    caller's classes span two districts, which nothing here can yet display honestly.
+
+    The binding is re-applied at the start of EVERY transaction, not once. `SET LOCAL` ends with
+    the transaction, and the review handlers commit partway through a request; a binding made
+    once would silently fall away after the first commit and every later read would see nothing.
+    Fail-closed, but wrong, and exactly the kind of wrong nobody notices.
+
+    The session's district is in `session.info["tenant"]` for queries that name it.
+    """
+    hashed = principal_hash(principal)
+    session = SessionLocal()
+    state: dict[str, str | None] = {"tenant": None}
+
+    @event.listens_for(session, "after_begin")
+    def _rebind(_session, _transaction, connection):  # noqa: ANN001 — SQLAlchemy's signature
+        _bind(connection, hashed, state["tenant"])
+
+    try:
+        tenants = [r[0] for r in session.execute(_STAFF_TENANTS)]
+        if not tenants:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "You are not on the staff of any class, so there is no student work to show. "
+                "Ask an administrator to add you to your class.")
+        if len(tenants) > 1:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Your classes are in more than one district, which this version cannot show "
+                "together yet.")
+        state["tenant"] = tenants[0]
+        session.info["tenant"] = tenants[0]
+        _bind(session.connection(), hashed, tenants[0])
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()

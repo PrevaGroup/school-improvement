@@ -42,14 +42,12 @@ words, they are the authority and holding their sentence back would be the tool 
 The findings are recorded on the new row so a reviewer can see what was flagged and that a person
 went ahead anyway, which is a different fact from nothing having been flagged.
 
-## What is NOT here yet
+## Whose papers
 
-Section scoping. `roster_visible_sections()` exists, is tested, and fails closed, and nothing calls
-it: the demo roster has no staff rows, so wiring it now would return an empty queue to everyone.
-Until it is wired, any signed-in user can see any artifact in the tenant. That is acceptable only
-because this subsystem holds synthetic papers and will hold no real student writing before a
-hardening phase — the same posture that leaves RLS off these tables. It is written down here
-because a gap nobody wrote down is a gap somebody will assume was closed.
+Every route here opens its session through `get_db_classes`, and the tables carry row-level
+security (migration 0041): a teacher reads and writes only papers in the sections their active
+staff rows name, in that district. A paper in someone else's class is a 404 here, not a 403 —
+from inside this session it does not exist, and saying otherwise would confirm that it does.
 """
 from __future__ import annotations
 
@@ -61,7 +59,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.db import get_db_public
+from app.db import get_db_classes
 from app.security import get_current_principal
 
 from . import feedback
@@ -171,7 +169,7 @@ def _artifact_or_404(db: Session, artifact_id: str) -> dict:
 
 
 @router.post("/{artifact_id}/state")
-def move(artifact_id: str, payload: dict = Body(...), db: Session = Depends(get_db_public),
+def move(artifact_id: str, payload: dict = Body(...), db: Session = Depends(get_db_classes),
          principal: dict = Depends(get_current_principal)) -> dict:
     """Make one of the teacher's moves. The database decides whether it is legal."""
     to_state = str(payload.get("state") or "")
@@ -203,7 +201,7 @@ def move(artifact_id: str, payload: dict = Body(...), db: Session = Depends(get_
 
 
 @router.post("/{artifact_id}/override")
-def override(artifact_id: str, payload: dict = Body(...), db: Session = Depends(get_db_public),
+def override(artifact_id: str, payload: dict = Body(...), db: Session = Depends(get_db_classes),
              principal: dict = Depends(get_current_principal)) -> dict:
     """Disagree with one criterion. Appends; never edits.
 
@@ -265,7 +263,7 @@ def override(artifact_id: str, payload: dict = Body(...), db: Session = Depends(
 
 
 @router.post("/set-override")
-def set_override(payload: dict = Body(...), db: Session = Depends(get_db_public),
+def set_override(payload: dict = Body(...), db: Session = Depends(get_db_classes),
                  principal: dict = Depends(get_current_principal)) -> dict:
     """One judgment about one criterion, across several papers, recorded once.
 
@@ -376,7 +374,7 @@ def set_override(payload: dict = Body(...), db: Session = Depends(get_db_public)
 
 
 @router.post("/{artifact_id}/resolve")
-def resolve(artifact_id: str, payload: dict = Body(...), db: Session = Depends(get_db_public),
+def resolve(artifact_id: str, payload: dict = Body(...), db: Session = Depends(get_db_classes),
             principal: dict = Depends(get_current_principal)) -> dict:
     """Say whose an unbound paper is.
 
@@ -421,7 +419,7 @@ def resolve(artifact_id: str, payload: dict = Body(...), db: Session = Depends(g
 
 @router.post("/{artifact_id}/feedback")
 def edit_feedback(artifact_id: str, payload: dict = Body(...),
-                  db: Session = Depends(get_db_public),
+                  db: Session = Depends(get_db_classes),
                   principal: dict = Depends(get_current_principal)) -> dict:
     """Replace the drafted message with the teacher's own, as a new composition."""
     message = (payload.get("message") or "").strip()
