@@ -3,6 +3,9 @@ import { api, ApiError } from "../api";
 import { routeForEmail } from "../auth-routing";
 import {
   completeEmailLinkSignIn,
+  forgetSignIn,
+  lastSignIn,
+  rememberSignIn,
   sendEmailSignInLink,
   signInWithProvider,
   signOut,
@@ -34,7 +37,8 @@ type Phase =
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>({ s: "checking" });
-  const [email, setEmail] = useState("");
+  // Seeded from the last sign-in so a reload while signed out keeps the pre-filled address.
+  const [email, setEmail] = useState(lastSignIn());
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -49,7 +53,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
       unsub = watchUser(async (user: User | null) => {
         if (!user) {
-          setPhase((p) => (p.s === "link-sent" ? p : { s: "signed-out" })); // keep the "check email" screen
+          // Keep the "check email" screen, and keep any reason already on screen: the 401
+          // branch below signs out on purpose, and this callback fires as a result. Without
+          // the second guard that sign-out would race the explanation off the screen and
+          // leave a bare sign-in form, which is the confusion this whole path exists to end.
+          setPhase((p) =>
+            p.s === "link-sent" || (p.s === "signed-out" && p.error) ? p : { s: "signed-out" },
+          );
           return;
         }
         setPhase({ s: "checking" });
@@ -64,8 +74,26 @@ export function AuthGate({ children }: { children: ReactNode }) {
               detail: "This account isn't on the invite list for this application.",
             });
           } else {
-            // 401 (token not accepted) or network: fall back to sign-in with the reason shown.
-            setPhase({ s: "signed-out", error: e instanceof Error ? e.message : String(e) });
+            // 401 (token not accepted) or network. The server is the authority on whether a
+            // session is still good, so make the client AGREE with it rather than keeping a
+            // Firebase session the backend rejects on every reload — that disagreement is
+            // what made this state sticky: the app showed a sign-in screen while silently
+            // still signed in, and reloading reproduced the failure exactly.
+            //
+            // Remember the address first. The commonest cause by far is `auth_time` ageing
+            // past session_max_age_days, where the person is who they say they are and has
+            // simply been away a week; asking them to retype an address they already proved
+            // they own is friction with nothing on the other side of it.
+            rememberSignIn(user.email);
+            if (user.email) setEmail(user.email);
+            setPhase({
+              s: "signed-out",
+              error:
+                e instanceof ApiError
+                  ? e.detail ?? e.message // the server's sentence when it sent one
+                  : "Couldn't reach the server — check your connection and try again.",
+            });
+            void signOut(); // the guard above protects the message from the resulting callback
           }
         }
       });
@@ -205,7 +233,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
           in the group that may use this application. If you should have access, ask whoever sent
           you here to add you to that group — it takes effect within a few minutes.
         </p>
-        <button className="auth-btn" onClick={() => void signOut()}>
+        <button
+          className="auth-btn"
+          onClick={() => {
+            // "A different account" is the one request pre-filling the old one would defeat.
+            forgetSignIn();
+            setEmail("");
+            void signOut();
+          }}
+        >
           Sign in with a different account
         </button>
       </div>
@@ -217,7 +253,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <div className="auth-strip">
         <AdminBadge />
         <span className="muted">Signed in</span>
-        <button onClick={() => void signOut()}>Sign out</button>
+        <button
+          onClick={() => {
+            // Deliberate: unlike an aged-out session, this may be someone handing the
+            // machine over. Don't leave their address in the next person's sign-in box.
+            forgetSignIn();
+            setEmail("");
+            void signOut();
+          }}
+        >
+          Sign out
+        </button>
       </div>
       {children}
     </>

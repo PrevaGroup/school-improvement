@@ -60,6 +60,46 @@ export function signOut(): Promise<void> {
   return fbSignOut(auth);
 }
 
+// --- Who signed in last, on this device only ------------------------------------------- //
+// Sessions age out after `session_max_age_days` (7, backend/app/config.py), so a returning
+// user is asked to sign in again on a schedule. Pre-filling the address they last used makes
+// that a click instead of a retype — the sign-in they are being asked to repeat is one they
+// already completed, and the backend re-derives everything from the token regardless.
+//
+// This never leaves the browser: not sent to the API, not attached to any activity, not shown
+// anywhere in the app — which is exactly what the sign-in screen's privacy note promises, and
+// the same footing as EMAIL_KEY below. Cleared on a DELIBERATE sign-out, because that is the
+// one case where the next person at this machine may not be the same person.
+const LAST_SIGNIN_KEY = "sip.lastSignIn";
+
+/** Remember an address for the next forced sign-in. No-ops on a falsy email. */
+export function rememberSignIn(email: string | null | undefined): void {
+  try {
+    if (email) window.localStorage.setItem(LAST_SIGNIN_KEY, email);
+  } catch {
+    // Storage disabled or full. Pre-filling is a convenience and never a requirement —
+    // failing here must not cost anyone the ability to sign in.
+  }
+}
+
+/** The address to pre-fill, or "" when there isn't one. */
+export function lastSignIn(): string {
+  try {
+    return window.localStorage.getItem(LAST_SIGNIN_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Forget it — a deliberate sign-out, or an explicit "different account". */
+export function forgetSignIn(): void {
+  try {
+    window.localStorage.removeItem(LAST_SIGNIN_KEY);
+  } catch {
+    // Nothing to clear if storage is unavailable.
+  }
+}
+
 // --- Passwordless email magic-link (any email; the click proves ownership) ------------- //
 // The confirmation step for "any email can be added": Identity Platform emails a one-time
 // link to the EXACT address; clicking it verifies the mailbox (`email_verified: true`) and

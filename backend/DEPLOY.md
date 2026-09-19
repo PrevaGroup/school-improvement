@@ -81,6 +81,11 @@ changing config or just code.
 Ships new code and re-stamps `GIT_SHA` (so a trace attributes the delta to the new revision);
 leaves every env var, the Cloud SQL wiring, scaling, and the IAM binding exactly as they are.
 
+This is the only deploy path. CI (`.github/workflows/ci.yml`) tests and builds but never
+deploys, and the project has no Cloud Build triggers — Cloud Run builds come from the
+`run-sources-*` bucket that `--source .` uploads to. Prod is whatever tree last ran this
+command, not whatever is on GitHub `main`.
+
 ```bash
 # Run from the REPO ROOT (school-improvement/, where .git is). `--source .` uploads THIS
 # local tree, not GitHub — a stale checkout rebuilds the OLD bundle and "nothing changed".
