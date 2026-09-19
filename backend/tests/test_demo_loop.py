@@ -18,7 +18,7 @@ def test_the_loop_confirms_through_the_gate_rather_than_around_it():
     wrote its own UPDATE would be a second implementation of the gate, and a gate implemented
     twice can be opened two ways and closed one."""
     src = inspect.getsource(demo_loop.run)
-    assert "from intake.gate import confirm" in src
+    assert "from writing.intake.gate import confirm" in src
     assert "UPDATE intake_manifest" not in src, "the loop is writing its own confirmation"
     assert "confirmed_at" not in src, "the loop is touching the gate column directly"
 
@@ -134,7 +134,7 @@ def test_the_teardown_verifies_every_table_it_deletes():
     nothing, followed by a print saying it had worked. The assertion is the fix for that, and this
     test is the fix for it happening again.
     """
-    from scoring.seed_demo import _PURGE_ORDER, verify
+    from writing.scoring.seed_demo import _PURGE_ORDER, verify
 
     counted = inspect.getsource(verify)
     missing = [t for t, _ in _PURGE_ORDER

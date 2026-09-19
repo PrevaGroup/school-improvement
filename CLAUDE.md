@@ -91,6 +91,10 @@ collected and those tests silently never ran. Any module carve-out that adds
   SPA, the domain). **Read its §2.5 before touching `serving/` or `app/main.py`.**
 - `ARCHITECTURE.md` — the logical model (5 data layers, trust boundary, pipelines).
 - `backend/core/` — the shared contract (see above).
+- `backend/writing/<X>/` — the **writing product** (student work), a second product that shares
+  `core` with SIP and nothing else. Its modules follow the same one rule, and additionally may
+  never import a SIP module (nor SIP a writing one) — enforced by `test_module_boundaries.py`,
+  with no exemption list. Its tables are in Postgres schema `writing`. See docs/MODULES.md.
 - `backend/<X>/` — modules, one folder each: the producers `likeschools`, `sip`,
   `public_metrics` (each owns tables) and `serving` (owns none; reads them). They sit
   alongside `app/` and `etl/` until the code they map is relocated.

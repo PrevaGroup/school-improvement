@@ -40,7 +40,7 @@ jobs onto a role of their own is the schema split that follows this, not a reaso
 
 The fixture papers stay in tenant `public`. Moving them is blocked by the append-only triggers,
 which are right to block it, and nothing reads them now without a staff row naming that section.
-`python -m roster.grant_staff` is how a person gets one.
+`python -m writing.roster.grant_staff` is how a person gets one.
 
 Revision ID: 0041
 Revises: 0040

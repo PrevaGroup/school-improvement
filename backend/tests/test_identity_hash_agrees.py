@@ -14,9 +14,9 @@ from __future__ import annotations
 import hashlib
 import json
 
-from registry import seed_demo
-from scoring.escalate import Policy
-from scoring.rater import STAGES, RaterIdentity
+from writing.registry import seed_demo
+from writing.scoring.escalate import Policy
+from writing.scoring.rater import STAGES, RaterIdentity
 
 
 def test_the_seed_and_the_rater_hash_the_same_parts():

@@ -38,7 +38,7 @@ def _migration(name: str):
 def _writing_model_tables():
     tables = []
     for module in WRITING_MODULES:
-        models = importlib.import_module(f"{module}.models")
+        models = importlib.import_module(f"writing.{module}.models")
         for obj in vars(models).values():
             table = getattr(obj, "__table__", None)
             if table is not None and obj.__module__ == models.__name__:
@@ -79,7 +79,7 @@ def test_writing_migrations_after_the_move_say_which_schema():
     `public` — beside SIP, readable by SIP's default grants."""
     offenders = []
     for module in WRITING_MODULES:
-        for path in (_BACKEND / module / "migrations").glob("*.py"):
+        for path in (_BACKEND / "writing" / module / "migrations").glob("*.py"):
             m = re.match(r"(\d{4})_", path.name)
             if not m or int(m.group(1)) <= 42:
                 continue

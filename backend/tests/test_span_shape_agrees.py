@@ -12,8 +12,8 @@ is the worst kind, and it cost a run to notice.
 """
 from __future__ import annotations
 
-from measurement.span_diagnostic import span_text, volume
-from scoring.verify import verify_all
+from writing.measurement.span_diagnostic import span_text, volume
+from writing.scoring.verify import verify_all
 
 PAPER = ("The Court held that student speech may be limited when it disrupts school. "
          "Tinker set the standard that schools must show substantial disruption.")

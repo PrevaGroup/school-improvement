@@ -11,8 +11,8 @@ symptom of a broken mapping is indistinguishable from the symptom of missing dat
 """
 from __future__ import annotations
 
-from corpus.models import DISCOURSE_TYPES
-from measurement.corpus_agreement import _EFFECTIVENESS, _SPAN_TYPE
+from writing.corpus.models import DISCOURSE_TYPES
+from writing.measurement.corpus_agreement import _EFFECTIVENESS, _SPAN_TYPE
 
 PERSUADE_WORDS = ("Ineffective", "Adequate", "Effective")
 

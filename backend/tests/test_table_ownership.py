@@ -5,7 +5,7 @@ It cannot see the half that actually matters, because modules integrate through 
 module can obey the import rule perfectly while writing straight into another module's tables with
 raw SQL, and nothing anywhere notices.
 
-That is not hypothetical. `scoring/seed_demo.py` was written on 2026-09-05, one commit after the
+That is not hypothetical. `writing/scoring/seed_demo.py` was written on 2026-09-05, one commit after the
 import scan was fixed, and it INSERTed six `registry_node_version` rows — publishing rubric
 versions from the scoring module, bypassing the registry linter that is supposed to gate exactly
 that. Every test passed. The import scan was clean, because there was no import.
@@ -37,7 +37,8 @@ import pytest
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
 
 # The modules whose table ownership is enforced. Adding a module here is how it opts in.
-SCANNED = ("scoring", "roster", "measurement", "pooling", "registry", "corpus", "intake", "delivery", "evals")
+SCANNED = ("writing/scoring", "writing/roster", "writing/measurement", "writing/pooling",
+           "writing/registry", "writing/corpus", "writing/intake", "writing/delivery", "evals")
 
 TABLENAME_RE = re.compile(r'__tablename__\s*=\s*["\']([a-z_0-9]+)["\']')
 # INSERT INTO x / UPDATE x SET / DELETE FROM x, in a SQL string anywhere in the file.

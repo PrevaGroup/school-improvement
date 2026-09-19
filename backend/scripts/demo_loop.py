@@ -55,10 +55,10 @@ def reset() -> dict:
     other way round would trip a foreign key halfway and leave the database in a state neither
     empty nor seeded, which is the worst of both for somebody trying to iterate.
     """
-    from intake import gate  # noqa: F401  — import here so --help works without a database
-    from registry import seed_demo as registry_seed
-    from roster import seed_demo as roster_seed
-    from scoring import seed_demo as scoring_seed
+    from writing.intake import gate  # noqa: F401  — import here so --help works without a database
+    from writing.registry import seed_demo as registry_seed
+    from writing.roster import seed_demo as roster_seed
+    from writing.scoring import seed_demo as scoring_seed
 
     # `include_intake_derived` because `bind` stamps the MANIFEST id as an artifact's run, not
     # the fixture's RUN_ID — so run-scoping alone left every bind-created artifact behind while
@@ -70,7 +70,7 @@ def reset() -> dict:
     # read left behind would sit in the Folders list forever looking like work to do.
     from sqlalchemy import text
 
-    from intake._db import engine
+    from writing.intake._db import engine
     with engine().begin() as conn:
         conn.execute(text("SELECT set_config('app.tenant', 'public', true)"))
         files = conn.execute(text("DELETE FROM intake_file")).rowcount
@@ -91,13 +91,13 @@ def reset() -> dict:
 
 
 def run(*, who: str, folder: pathlib.Path, stop_at: str, tenant: str) -> list[dict]:
-    from intake import read_folder
-    from intake._db import engine as intake_engine
-    from intake.gate import confirm
-    from registry import seed_demo as registry_seed
-    from roster import seed_demo as roster_seed
-    from scoring import bind, compose, run_scoring, seed_demo as scoring_seed
-    from scoring.prompts import fingerprint
+    from writing.intake import read_folder
+    from writing.intake._db import engine as intake_engine
+    from writing.intake.gate import confirm
+    from writing.registry import seed_demo as registry_seed
+    from writing.roster import seed_demo as roster_seed
+    from writing.scoring import bind, compose, run_scoring, seed_demo as scoring_seed
+    from writing.scoring.prompts import fingerprint
 
     steps, state = [], {}
     wanted = STAGES[: STAGES.index(stop_at) + 1]

@@ -40,12 +40,12 @@ def _load_migration():
 # ------------------------------------------------------------------ every route is bound
 
 def _student_work_routers():
-    from app.review_view import router as review_view
-    from delivery.view import router as delivery_view
-    from intake.review import router as intake_review
-    from scoring.review import router as scoring_review
-    return {"review_view": review_view, "scoring.review": scoring_review,
-            "intake.review": intake_review, "delivery.view": delivery_view}
+    from writing.serving.review_view import router as review_view
+    from writing.delivery.view import router as delivery_view
+    from writing.intake.review import router as intake_review
+    from writing.scoring.review import router as scoring_review
+    return {"review_view": review_view, "writing.scoring.review": scoring_review,
+            "writing.intake.review": intake_review, "writing.delivery.view": delivery_view}
 
 
 def _calls(dependant) -> set:
@@ -189,7 +189,7 @@ _WRITING_MODULES = ("scoring", "intake", "delivery", "measurement", "roster")
 def _writing_tables_with_a_tenant() -> set[str]:
     from app.models import Base
     for module in _WRITING_MODULES:
-        importlib.import_module(f"{module}.models")
+        importlib.import_module(f"writing.{module}.models")
     return {t.name for t in Base.metadata.tables.values()
             if "tenant_id" in t.columns
             and any(t.name.startswith(p) for p in (

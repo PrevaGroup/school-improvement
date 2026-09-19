@@ -126,8 +126,8 @@ def test_no_constraint_name_is_doubled():
     so an explicit name passes through.
     """
     from app.models import Base
-    import corpus.models, measurement.models, pooling.models  # noqa: F401
-    import registry.models, roster.models, scoring.models     # noqa: F401
+    import writing.corpus.models, writing.measurement.models, writing.pooling.models  # noqa: F401
+    import writing.registry.models, writing.roster.models, writing.scoring.models     # noqa: F401
 
     doubled = sorted(
         c.name for table in Base.metadata.tables.values() for c in table.constraints
@@ -172,8 +172,8 @@ def _module_migration_text() -> tuple[str, set[str]]:
 
 def _declared_tables():
     from app.models import Base
-    import corpus.models, measurement.models, pooling.models  # noqa: F401
-    import registry.models, roster.models, scoring.models     # noqa: F401
+    import writing.corpus.models, writing.measurement.models, writing.pooling.models  # noqa: F401
+    import writing.registry.models, writing.roster.models, writing.scoring.models     # noqa: F401
     return Base.metadata.tables
 
 
