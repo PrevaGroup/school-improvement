@@ -39,6 +39,36 @@ import registry.models  # noqa: E402,F401  — registry_node, registry_task, reg
 import corpus.models  # noqa: E402,F401  — corpus_source, corpus_paper, corpus_score, corpus_discourse_span
 
 target_metadata = Base.metadata
+
+# Two schemas since 0042: SIP's tables in `public`, the writing product's in `writing`. Autogenerate
+# inspects only the default schema unless told otherwise, and would then read every writing table
+# as missing from the database and propose creating it — the mirror of the DROP TABLE hazard
+# tests/test_schema_inventory.py guards. Compare both, and nothing else.
+_SCHEMAS = {None, "public", "writing"}
+
+
+def _include_name(name, type_, _parent_names):
+    return name in _SCHEMAS if type_ == "schema" else True
+
+
+def _comparing() -> bool:
+    """True for `alembic check` and `alembic revision --autogenerate` — the runs that REFLECT.
+
+    Reflection reports a table in a schema on the search_path as unqualified, so with the
+    database default of `public, writing` every writing index compares as dropped and re-added.
+    Those runs pin the path to `public`; a run that MIGRATES keeps the default, so a migration's
+    bare table names resolve the way every other connection's do.
+    """
+    opts = getattr(context.config, "cmd_opts", None)
+    if opts is None:
+        return False
+    if getattr(opts, "autogenerate", False):
+        return True
+    cmd = getattr(opts, "cmd", None)
+    fn = cmd[0] if isinstance(cmd, tuple) else cmd
+    return getattr(fn, "__name__", "") == "check"
+
+
 config = context.config
 
 if config.config_file_name is not None:
@@ -49,6 +79,8 @@ def run_migrations_offline() -> None:
     context.configure(
         url=settings.migration_database_url.render_as_string(hide_password=False),
         target_metadata=target_metadata,
+        include_schemas=True,
+        include_name=_include_name,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -59,7 +91,10 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connectable = create_engine(settings.migration_database_url, poolclass=pool.NullPool)
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        if _comparing():
+            connection.exec_driver_sql("SET search_path = public")
+        context.configure(connection=connection, target_metadata=target_metadata,
+                          include_schemas=True, include_name=_include_name)
         with context.begin_transaction():
             context.run_migrations()
 
