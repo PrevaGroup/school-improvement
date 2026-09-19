@@ -26,7 +26,7 @@ from writing.intake.review import router as intake_router
 from writing.scoring.review import router as review_actions_router
 from writing.serving.review_view import router as review_view_router
 from .security import (assert_dev_mode_not_in_production, assert_no_retired_invite_list,
-                       get_current_principal, is_admin)
+                       get_current_principal, is_admin, products_for)
 
 # Fail the deploy, not the security model: DEV_MODE + a production environment means the
 # unverified X-Dev-Tenant header would let any caller impersonate any district. Crash loudly at
@@ -107,8 +107,11 @@ def me(principal: dict = Depends(get_current_principal)) -> dict:
     Returns NOTHING identifying — the 200 itself is the whole signal. The app does not display
     or store the caller's identity (privacy posture 2026-07-17: usage is metered anonymously
     against the opaque `sub`, traces are pseudonymous). `principal` is still verified here; we
-    just don't hand the email back to be shown."""
-    return {"ok": True}
+    just don't hand the email back to be shown.
+
+    Also says which products the UI offers this caller (`security.products_for`) — the one fact
+    the SPA needs before it can draw a switcher, and nothing that identifies anyone."""
+    return {"ok": True, "products": products_for(principal)}
 
 
 @app.get(f"{API}/admin/status")

@@ -3,10 +3,14 @@ import { api } from "./api";
 import { fmtNum, fmtPct } from "./format";
 import { Chat } from "./components/Chat";
 import { Diagnostic } from "./components/Diagnostic";
-import { EvalWorkbench, type EvalSection } from "./components/EvalDashboard";
+import { EvalWorkbench } from "./components/EvalDashboard";
 import { FolderConfirm } from "./components/FolderConfirm";
 import { ReviewConsole } from "./components/ReviewConsole";
 import { applyChatWorkspace, defaultSpecForLevel } from "./workspace";
+import {
+  offered, ORDER, pathFor, placeFromPath, PRODUCTS, SECTION_LABEL, sectionsFor,
+  type Place, type Product,
+} from "./products";
 import {
   byRecency, createSession, forkSession, loadStore, reconcileSchoolChange, relTime, saveStore,
   titleFor, upsert,
@@ -17,27 +21,22 @@ import type {
   WorkspaceData, WorkspaceSpec,
 } from "./types";
 
-// The screen has one section at a time: the workspace and the teacher's own screens (everyone),
-// or an eval section (admins).
-type Section = "workspace" | "folders" | "review" | EvalSection;
-// Folders sits BEFORE student work, because that is the order the work happens in:
-// a folder is read and confirmed, and only then is there anything to review.
+// The screen shows one product's one section at a time. Which products and tabs exist, and what
+// their URLs are, lives in ./products — this file only follows it.
 //
-// TEACHER SECTIONS ARE NOT ADMIN-GATED. They were, by accident: the nav exists for the eval
-// workbenches, which are admin-only, and the writing screens were added to the same list and
-// swept behind the same gate. The effect was that a signed-in teacher saw only the workspace and
-// no way to reach their own students' work — the product's whole point, invisible, with nothing
-// on screen suggesting anything was missing.
-const TEACHER_SECTIONS: Section[] = ["workspace", "folders", "review"];
-// Release sits FIRST among the admin sections: whether scores may go to students at all is
-// the question the others exist to answer, and it should not be reachable only by scrolling
-// past three debugging screens.
-const ADMIN_SECTIONS: Section[] = ["release", "traces", "evals", "results", "graders"];
-const SECTION_LABEL: Record<Section, string> = {
-  workspace: "Workspace", folders: "Folders", review: "Student work",
-  release: "Release", traces: "Traces", evals: "Evals", results: "Results",
-  graders: "Graders",
-};
+// The last product used is remembered on this device, so `/` reopens where you were. Device-local
+// convenience only: nothing here decides what anyone may see.
+const PRODUCT_KEY = "sip.product";
+
+function rememberedProduct(available: Product[]): Product {
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(PRODUCT_KEY); } catch { /* storage blocked: fall through */ }
+  return available.find((p) => p === saved) ?? available[0] ?? "sip";
+}
+
+function rememberProduct(p: Product) {
+  try { localStorage.setItem(PRODUCT_KEY, p); } catch { /* storage blocked: harmless */ }
+}
 
 const DEMO_DISTRICT = "0622500"; // Long Beach Unified (NCES LEAID) — the demo default
 const LEVELS: Level[] = ["High", "Middle", "Primary"];
@@ -81,10 +80,16 @@ export default function App() {
   // session is the source of truth the rest of this state is a view of (design § Sessions).
   const [sessions, setSessions] = useState<Session[]>(BOOT.sessions);
   const [activeId, setActiveId] = useState<string | null>(BOOT.active_id);
-  // A section nav (admins only) chooses what fills the screen: the workspace, or an eval section.
-  // Each eval section is its own master-detail workbench that self-fetches. `isAdmin` gates them.
+  // Where you are: a product and one of its tabs, mirrored in the URL (/writing/review).
+  // `wantedPath` is the URL you asked for. It is resolved again when the server says which
+  // products you have and whether you are an admin, so a deep link to an admin tab survives the
+  // moment before /admin/status answers instead of being downgraded and forgotten.
   const [isAdmin, setIsAdmin] = useState(false);
-  const [section, setSection] = useState<Section>("workspace");
+  const [products, setProducts] = useState<Product[]>(ORDER); // until /me answers
+  const wantedPath = useRef(window.location.pathname);
+  const [place, setPlace] = useState<Place>(
+    () => placeFromPath(wantedPath.current, ORDER, false, rememberedProduct(ORDER)));
+  const { product, section } = place;
 
   // The Claude-controlled workspace: `wspec` is what should be on screen (the active
   // session's spec), `ws` is the server-built data for it.
@@ -127,6 +132,10 @@ export default function App() {
 
   useEffect(() => {
     api
+      .get<{ products?: string[] }>("/me")
+      .then((d) => { const p = offered(d.products); if (p.length) setProducts(p); })
+      .catch(() => {});
+    api
       .get<{ is_admin: boolean }>("/admin/status")
       .then((d) => setIsAdmin(!!d.is_admin))
       .catch(() => {});
@@ -141,12 +150,28 @@ export default function App() {
       .catch(() => {}); // client fallback covers it
   }, []);
 
-  // If admin is lost (e.g. a session change), fall back to the workspace so no eval section lingers.
-  // Losing admin drops you out of an ADMIN section only. Bouncing a teacher out of their own
-  // review screen because they are not an administrator is the bug this pair of lines caused.
+  // Re-resolve the requested URL whenever what you may see changes, and on back/forward. Losing
+  // admin drops you out of an admin tab only, into the same product's first tab — never out of a
+  // teacher's own screen.
   useEffect(() => {
-    if (!isAdmin && ADMIN_SECTIONS.includes(section)) setSection("workspace");
-  }, [isAdmin, section]);
+    const resolve = () =>
+      setPlace(placeFromPath(wantedPath.current, products, isAdmin, rememberedProduct(products)));
+    resolve();
+    const onPop = () => { wantedPath.current = window.location.pathname; resolve(); };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [products, isAdmin]);
+
+  useEffect(() => { document.title = PRODUCTS[product].label; }, [product]);
+
+  function go(next: Place) {
+    wantedPath.current = pathFor(next);
+    if (window.location.pathname !== wantedPath.current) {
+      window.history.pushState(null, "", wantedPath.current);
+    }
+    rememberProduct(next.product);
+    setPlace(next);
+  }
 
   // Every selection resolves to a scoped backend query — no "fetch everything, filter
   // client-side". See ../CLAUDE.md: the browser never receives data outside the current scope.
@@ -393,16 +418,30 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      {/* The nav is always shown: everyone has somewhere to go. Admins get more entries. */}
-      {(
-        <nav className="appnav">
-          {[...TEACHER_SECTIONS, ...(isAdmin ? ADMIN_SECTIONS : [])].map((k) => (
-            <button key={k} className={"appnav-i" + (section === k ? " on" : "")}
-                    onClick={() => setSection(k)}>{SECTION_LABEL[k]}</button>
-          ))}
-        </nav>
-      )}
+    <div className="app" data-product={product}>
+      {/* Which product you are in is never a guess: its name heads the nav, in its own colour,
+          and with more than one on offer the name is the switcher. Tabs are that product's only. */}
+      <nav className="appnav" aria-label={PRODUCTS[product].label}>
+        {products.length > 1 ? (
+          <div className="switcher" role="tablist" aria-label="Product">
+            {products.map((p) => (
+              <button key={p} role="tab" aria-selected={p === product} data-product={p}
+                      className={"switch-i" + (p === product ? " on" : "")}
+                      onClick={() => p !== product
+                        && go({ product: p, section: sectionsFor(p, isAdmin)[0] })}>
+                {PRODUCTS[p].label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="product-name">{PRODUCTS[product].label}</div>
+        )}
+        {sectionsFor(product, isAdmin).map((k) => (
+          <button key={k} className={"appnav-i" + (section === k ? " on" : "")}
+                  aria-current={section === k ? "page" : undefined}
+                  onClick={() => go({ product, section: k })}>{SECTION_LABEL[k]}</button>
+        ))}
+      </nav>
 
       {section === "workspace" ? (
         <div className="cols">
