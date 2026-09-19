@@ -5,6 +5,7 @@
 :root {
     --bg:#f4f1ea; --panel:#fff; --ink:#211f1b; --muted:#6b675e; --line:#e2ddd2;
     --green:#2f6f4f; --amber:#c98a2b; --red:#b5423a; --accent:#b5533a;
+    --writing:#34608f;
   }
   * { box-sizing: border-box; }
   html, body, #root { height: 100%; }
@@ -29,7 +30,16 @@
   .appnav { flex: 0 0 148px; border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; padding: 10px 8px; gap: 2px; overflow-y: auto; }
   .appnav-i { font: inherit; font-size: 13px; font-weight: 600; text-align: left; padding: 8px 11px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
   .appnav-i:hover { color: var(--ink); background: var(--bg); }
-  .appnav-i.on { color: #fff; background: var(--green); border-color: var(--green); }
+  .appnav-i.on { color: #fff; background: var(--product); border-color: var(--product); }
+  /* Each product has one accent, and everything that says "you are here" uses it. */
+  .app { --product: var(--green); }
+  .app[data-product="writing"], .switch-i[data-product="writing"] { --product: var(--writing); }
+  .switch-i[data-product="sip"] { --product: var(--green); }
+  .switcher { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .switch-i { font: inherit; font-size: 12px; font-weight: 700; text-align: left; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+  .switch-i:hover { color: var(--ink); border-color: var(--muted); }
+  .switch-i.on { color: var(--product); border-color: var(--product); box-shadow: inset 3px 0 0 var(--product); cursor: default; }
+  .product-name { font-size: 12px; font-weight: 700; color: var(--product); padding: 6px 11px 10px; }
   .cols { display: grid; grid-template-columns: 200px 1fr 440px; grid-template-rows: minmax(0, 1fr); flex: 1; min-width: 0; min-height: 0; }
   /* A section workbench: its list of items | the selected item's detail, each scrolling on its own. */
   .wb { display: grid; grid-template-columns: 340px 1fr; flex: 1; min-width: 0; min-height: 0; }
@@ -99,6 +109,8 @@
     .app { flex-direction: column; }
     .appnav { flex: none; flex-direction: row; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
     .appnav-i { white-space: nowrap; }
+    .switcher { flex-direction: row; border-bottom: 0; border-right: 1px solid var(--line); padding: 0 8px 0 0; margin: 0 6px 0 0; }
+    .switch-i { white-space: nowrap; }
   }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
   .school-hd { margin-bottom: 14px; }
@@ -195,7 +207,7 @@
   .dots::after { content:"…"; animation: d 1.2s steps(4,end) infinite; }
   @keyframes d { 0%{content:""} 25%{content:"."} 50%{content:".."} 75%{content:"..."} }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#1a1917; --panel:#242320; --ink:#ecebe6; --muted:#a29d92; --line:#34322c; }
+    :root { --bg:#1a1917; --panel:#242320; --ink:#ecebe6; --muted:#a29d92; --line:#34322c; --writing:#4a7bb0; }
   }
 
 /* --- admin eval dashboard --- */

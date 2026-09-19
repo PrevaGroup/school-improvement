@@ -458,6 +458,26 @@ def is_admin(principal: dict) -> bool:
     return member
 
 
+# --------------------------------------------------------------------------- #
+# Products — which of the two this caller is offered.
+# --------------------------------------------------------------------------- #
+PRODUCTS: tuple[str, ...] = ("sip", "writing")
+
+
+def products_for(principal: dict) -> list[str]:
+    """The products this caller's UI offers, in the order the switcher shows them.
+
+    Both, for everyone, for now: there is no product-level access control yet, and in development
+    every signed-in person should be able to reach both. This is the ONE place that changes when
+    there is — a teacher offered only `writing` (an active staff row), a planner only `sip` — and
+    the SPA needs nothing new, because it already renders whatever this returns.
+
+    A UI hint, never enforcement. Student work is enforced by the database (migrations 0041-0042),
+    whatever this says; hiding a tab is not what stops anyone reading a paper.
+    """
+    return list(PRODUCTS)
+
+
 async def require_admin(principal: dict = Depends(get_current_principal)) -> dict:
     """Gate a route to administrators. 403 for a verified-but-non-admin caller."""
     if not is_admin(principal):

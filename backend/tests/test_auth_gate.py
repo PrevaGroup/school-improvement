@@ -64,7 +64,9 @@ def test_me_returns_no_identity_only_an_ok_signal():
         r = client.get("/api/me")
         assert r.status_code == 200
         body = r.json()
-        assert body == {"ok": True}
+        # The products the switcher offers are not identity: the same list for everyone today,
+        # and a list of product names whatever the access rule becomes.
+        assert body == {"ok": True, "products": ["sip", "writing"]}
         assert "tester@prevagroup.com" not in r.text and "uid-1" not in r.text
     finally:
         app.dependency_overrides.clear()
@@ -76,3 +78,11 @@ def test_health_and_shell_stay_open():
     login screen to sign in at all."""
     assert client.get("/health").status_code == 200
     assert client.get("/").status_code in (200, 501)  # shell, or explicit 'frontend not built'
+
+
+def test_products_are_known_names_in_switcher_order():
+    """The SPA draws exactly what this returns; an unknown name would be a tab to nowhere."""
+    from app.security import PRODUCTS, products_for
+    got = products_for({"sub": "uid-1", "email": "tester@prevagroup.com"})
+    assert got and set(got) <= set(PRODUCTS)
+    assert got == [p for p in PRODUCTS if p in got]
