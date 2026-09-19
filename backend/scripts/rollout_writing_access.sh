@@ -6,7 +6,7 @@
 #
 # Every credential comes from Secret Manager, the same way the migration runbook reads
 # `sip-migrator-password`; nothing is typed and nothing is printed. It needs one secret that
-# predates it, `postgres-password` (the Cloud SQL admin), because creating roles is the one step
+# predates it, `postgres-admin-password` (the Cloud SQL admin), because creating roles is the one step
 # the migrator cannot do.
 #
 # Idempotent: re-running after a failure picks up where it stopped. Order matters —
@@ -33,14 +33,14 @@ git fetch -q origin
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || { echo "git pull first"; exit 1; }
 say "code: $(git log --oneline -1)"
 
-has_secret postgres-password || { echo "postgres-password is not in Secret Manager yet"; exit 1; }
+has_secret postgres-admin-password || { echo "postgres-admin-password is not in Secret Manager yet"; exit 1; }
 
 if ! pgrep -f "cloud-sql-proxy.*$ICN" >/dev/null; then
   cloud-sql-proxy "$ICN" --port 5432 > /tmp/cloud-sql-proxy.log 2>&1 &
   for _ in $(seq 30); do grep -q "ready for new connections" /tmp/cloud-sql-proxy.log && break; sleep 1; done
 fi
 export GCP_PROJECT=$PROJECT DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=sip
-as_admin()    { PGPASSWORD=$(secret postgres-password)     psql "host=127.0.0.1 dbname=sip user=postgres"     -v ON_ERROR_STOP=1 -q "$@"; }
+as_admin()    { PGPASSWORD=$(secret postgres-admin-password)     psql "host=127.0.0.1 dbname=sip user=postgres"     -v ON_ERROR_STOP=1 -q "$@"; }
 as_migrator() { PGPASSWORD=$(secret sip-migrator-password) psql "host=127.0.0.1 dbname=sip user=sip_migrator" -v ON_ERROR_STOP=1 -q "$@"; }
 
 # ---- 1. writing_app's password: minted once, straight into Secret Manager, never shown.
