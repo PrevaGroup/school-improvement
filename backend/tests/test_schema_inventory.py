@@ -119,53 +119,53 @@ EXPECTED_TABLES: dict[str, str] = {
     #     writing and carry tenant_id, but are NOT in PRIVATE_TABLES: turning RLS on is a
     #     deliberate core move made when the subsystem first holds real student work, not
     #     a side effect of the module existing. Same posture as evals. ---
-    "artifact": "scoring",
-    "score_event": "scoring",
-    "artifact_state_transition": "scoring",
-    "artifact_composition": "scoring",
+    "writing.artifact": "scoring",
+    "writing.score_event": "scoring",
+    "writing.artifact_state_transition": "scoring",
+    "writing.artifact_composition": "scoring",
     # Created by raw SQL inside 0008's trigger block; declared in models.py anyway,
     # because a table absent from Base.metadata is one autogenerate away from a DROP.
-    "artifact_transition_rule": "scoring",
+    "writing.artifact_transition_rule": "scoring",
     # --- roster's tables — declared in roster/models.py. The section-scoped
     #     authorisation edge; same deferred-RLS posture as scoring. ---
-    "roster_student": "roster",
-    "roster_section": "roster",
-    "roster_enrollment": "roster",
-    "roster_section_staff": "roster",
+    "writing.roster_student": "roster",
+    "writing.roster_section": "roster",
+    "writing.roster_enrollment": "roster",
+    "writing.roster_section_staff": "roster",
     # --- measurement's tables — declared in measurement/models.py. The estimator
     #     itself is Phase 6; these record what any estimate was fitted over. ---
-    "estimation_frame": "measurement",
-    "estimation_frame_member": "measurement",
-    "measurement_deletion_tombstone": "measurement",
+    "writing.estimation_frame": "measurement",
+    "writing.estimation_frame_member": "measurement",
+    "writing.measurement_deletion_tombstone": "measurement",
     # --- pooling's tables — declared in pooling/models.py. Tenant-NEUTRAL by
     #     design: they belong to no district, which is what lets a principal with
     #     no tenant mapping read them. ---
-    "pooling_aggregation_consent": "pooling",
-    "pooling_aggregate_run": "pooling",
+    "writing.pooling_aggregation_consent": "pooling",
+    "writing.pooling_aggregate_run": "pooling",
     # --- registry's tables — declared in registry/models.py. Public reference
     #     content, no tenancy: a node means the same thing in every district. ---
-    "registry_node": "registry",
-    "registry_node_version": "registry",
-    "registry_task": "registry",
-    "registry_scoring_site": "registry",
-    "registry_scoring_site_node": "registry",
-    "registry_scoring_configuration": "registry",
-    "registry_lint_acknowledgment": "registry",
-    "intake_manifest": "intake",
-    "intake_file": "intake",
+    "writing.registry_node": "registry",
+    "writing.registry_node_version": "registry",
+    "writing.registry_task": "registry",
+    "writing.registry_scoring_site": "registry",
+    "writing.registry_scoring_site_node": "registry",
+    "writing.registry_scoring_configuration": "registry",
+    "writing.registry_lint_acknowledgment": "registry",
+    "writing.intake_manifest": "intake",
+    "writing.intake_file": "intake",
     # Per-teacher OAuth. A credential row: never selected by a serving query, never returned
     # by an endpoint. Migration 0029.
-    "intake_drive_connection": "intake",
-    "artifact_delivery": "delivery",
-    "registry_skill": "registry",
-    "registry_rubric": "registry",
-    "registry_rubric_trait": "registry",
+    "writing.intake_drive_connection": "intake",
+    "writing.artifact_delivery": "delivery",
+    "writing.registry_skill": "registry",
+    "writing.registry_rubric": "registry",
+    "writing.registry_rubric_trait": "registry",
     # --- corpus tables — declared in corpus/models.py. Public reference content:
     #     the anchor papers, identical for every district. ---
-    "corpus_source": "corpus",
-    "corpus_paper": "corpus",
-    "corpus_score": "corpus",
-    "corpus_discourse_span": "corpus",
+    "writing.corpus_source": "corpus",
+    "writing.corpus_paper": "corpus",
+    "writing.corpus_score": "corpus",
+    "writing.corpus_discourse_span": "corpus",
 }
 
 

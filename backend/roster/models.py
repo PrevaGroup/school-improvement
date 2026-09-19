@@ -32,7 +32,7 @@ from sqlalchemy import (CheckConstraint, Date, ForeignKey, Index, Text, TIMESTAM
                         UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import WRITING_SCHEMA, Base
 from app.models.tenant import TenantMixin
 
 # Who may act on a section, and what that lets them do. Deliberately small: the MVP has no
@@ -71,6 +71,7 @@ class Student(Base, TenantMixin):
 
     __table_args__ = (
         Index("ix_roster_student_external", "tenant_id", "external_key_hash"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -98,6 +99,7 @@ class Section(Base, TenantMixin):
     __table_args__ = (
         Index("ix_roster_section_school", "tenant_id", "school_id"),
         UniqueConstraint("tenant_id", "external_key", name="uq_roster_section_external_key"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -118,9 +120,9 @@ class Enrollment(Base, TenantMixin):
 
     enrollment_id: Mapped[str] = mapped_column(Text, primary_key=True)
     section_id: Mapped[str] = mapped_column(
-        ForeignKey("roster_section.section_id"), nullable=False)
+        ForeignKey("writing.roster_section.section_id"), nullable=False)
     student_id: Mapped[str] = mapped_column(
-        ForeignKey("roster_student.student_id"), nullable=False)
+        ForeignKey("writing.roster_student.student_id"), nullable=False)
     active_from: Mapped[date | None] = mapped_column(Date)
     active_to: Mapped[date | None] = mapped_column(Date)   # null = still enrolled
     created_at: Mapped[datetime] = mapped_column(
@@ -131,6 +133,7 @@ class Enrollment(Base, TenantMixin):
         Index("ix_roster_enrollment_student", "tenant_id", "student_id"),
         UniqueConstraint("section_id", "student_id", "active_from",
                          name="uq_roster_enrollment_span"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -149,7 +152,7 @@ class SectionStaff(Base, TenantMixin):
 
     section_staff_id: Mapped[str] = mapped_column(Text, primary_key=True)
     section_id: Mapped[str] = mapped_column(
-        ForeignKey("roster_section.section_id"), nullable=False)
+        ForeignKey("writing.roster_section.section_id"), nullable=False)
     principal_hash: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False)
     active_from: Mapped[date | None] = mapped_column(Date)
@@ -164,4 +167,5 @@ class SectionStaff(Base, TenantMixin):
                          name="uq_roster_section_staff_span"),
         CheckConstraint(
             "role IN (" + ",".join(f"'{r}'" for r in STAFF_ROLES) + ")", name="role"),
+        {"schema": WRITING_SCHEMA},
     )

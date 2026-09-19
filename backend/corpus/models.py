@@ -45,7 +45,7 @@ from sqlalchemy import (CheckConstraint, ForeignKey, Index, Integer, Numeric, Te
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import WRITING_SCHEMA, Base
 
 # Calibration anchors the parameters; validation is held out to check the model against human
 # judgment. `unassigned` exists so a paper can be loaded before the split policy is settled rather
@@ -79,6 +79,7 @@ class CorpusSource(Base):
     later reader does not repeat the mistake of treating them as independent.
     """
     __tablename__ = "corpus_source"
+    __table_args__ = {"schema": WRITING_SCHEMA}
 
     source_id: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -112,7 +113,7 @@ class CorpusPaper(Base):
 
     paper_id: Mapped[str] = mapped_column(Text, primary_key=True)
     source_id: Mapped[str] = mapped_column(
-        ForeignKey("corpus_source.source_id"), nullable=False)
+        ForeignKey("writing.corpus_source.source_id"), nullable=False)
     external_id: Mapped[str] = mapped_column(Text, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     text_hash: Mapped[str] = mapped_column(Text, nullable=False)   # cross-source overlap detection
@@ -149,6 +150,7 @@ class CorpusPaper(Base):
         # The fairness queries. Named so it is obvious why they exist.
         Index("ix_corpus_paper_ell", "source_id", "ell_status"),
         Index("ix_corpus_paper_race", "source_id", "race_ethnicity"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -163,7 +165,7 @@ class CorpusScore(Base):
 
     corpus_score_id: Mapped[str] = mapped_column(Text, primary_key=True)
     paper_id: Mapped[str] = mapped_column(
-        ForeignKey("corpus_paper.paper_id"), nullable=False)
+        ForeignKey("writing.corpus_paper.paper_id"), nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)     # holistic | element_effectiveness
     label: Mapped[str | None] = mapped_column(Text)             # which trait, where there is one
     value: Mapped[float] = mapped_column(Numeric, nullable=False)
@@ -176,6 +178,7 @@ class CorpusScore(Base):
 
     __table_args__ = (
         Index("ix_corpus_score_paper", "paper_id", "kind"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -191,7 +194,7 @@ class CorpusDiscourseSpan(Base):
 
     span_id: Mapped[str] = mapped_column(Text, primary_key=True)
     paper_id: Mapped[str] = mapped_column(
-        ForeignKey("corpus_paper.paper_id"), nullable=False)
+        ForeignKey("writing.corpus_paper.paper_id"), nullable=False)
     discourse_type: Mapped[str] = mapped_column(Text, nullable=False)
     start_char: Mapped[int | None] = mapped_column(Integer)
     end_char: Mapped[int | None] = mapped_column(Integer)
@@ -201,4 +204,5 @@ class CorpusDiscourseSpan(Base):
     __table_args__ = (
         Index("ix_corpus_span_paper", "paper_id"),
         Index("ix_corpus_span_type", "discourse_type"),
+        {"schema": WRITING_SCHEMA},
     )

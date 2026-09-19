@@ -18,6 +18,8 @@ sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
 
 1. **Secrets in Secret Manager** (project `school-improvement-501916`):
    - `sip-app-password`, `sip-migrator-password` — already exist (runbook Phase 3).
+   - `writing-app-password` — the student-work routes' own database user (migration 0042). See
+     [Student work: its own schema and user](#student-work-its-own-schema-and-user).
    - `anthropic-api-key` — also exists (used by `POST /plans/extract` and `/api/chat`).
      In a fresh project, create it with:
      ```bash
@@ -62,6 +64,34 @@ Two separate things fail, with different fixes:
   ```
   A dead key surfaces cleanly as `Anthropic API 401: … → check the anthropic-api-key secret`
   (extract_sip maps Anthropic HTTP errors to a one-line message; `/plans/extract` → 502).
+
+## Student work: its own schema and user
+
+Migrations 0041–0042 put the writing product's tables in schema `writing`, behind row-level
+security that checks the class as well as the district, reached by the API as `writing_app`.
+`sip_app` has no access to them; `writing_app` has none to SIP's tables. One-time, in this order:
+
+```bash
+# 1. The roles (Alembic cannot CREATE ROLE). Edit the password placeholder first.
+psql "host=127.0.0.1 user=postgres dbname=sip" -f sql/01_writing_roles.sql
+
+# 2. The same password, in Secret Manager, readable by the API's service account.
+printf %s "<that password>" | gcloud secrets create writing-app-password --data-file=-
+gcloud secrets add-iam-policy-binding writing-app-password   --member=serviceAccount:<the sip-api service account> --role=roles/secretmanager.secretAccessor
+
+# 3. Migrate (0042 refuses to run if step 1 has not).
+alembic upgrade head
+
+# 4. Prove it, on this database: every check, then ROLLBACK.
+psql "host=127.0.0.1 dbname=sip user=sip_migrator" -v ON_ERROR_STOP=1 -f sql/30_writing_rls_smoketest.sql
+
+# 5. Put yourself on the fixture class, or the console is a 403 for everyone — correctly.
+python -m roster.grant_staff --email you@prevagroup.com --section section-11b-period4
+```
+
+Then redeploy the API (routine redeploy below). Batch jobs are unaffected: they run as
+`sip_migrator`, the owner, which row-level security here does not bind, and the database's
+default `search_path` is now `public, writing`, so their unqualified table names still resolve.
 
 ## Deploy
 

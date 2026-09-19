@@ -35,7 +35,7 @@ from sqlalchemy import (CheckConstraint, ForeignKey, Index, Text, TIMESTAMP, Uni
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import WRITING_SCHEMA, Base
 from app.models.tenant import TenantMixin
 
 # A frame is drafted, then activated, then eventually superseded by a later version. `stale` is the
@@ -86,7 +86,7 @@ class EstimationFrame(Base, TenantMixin):
 
     # Which frame this one replaced. A chain, not an edit history.
     supersedes_frame_id: Mapped[str | None] = mapped_column(
-        ForeignKey("estimation_frame.frame_id"))
+        ForeignKey("writing.estimation_frame.frame_id"))
 
     resolved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     member_count: Mapped[int | None] = mapped_column()
@@ -100,6 +100,7 @@ class EstimationFrame(Base, TenantMixin):
         CheckConstraint(
             "status IN (" + ",".join(f"'{s}'" for s in FRAME_STATUSES) + ")", name="status"),
         Index("ix_estimation_frame_key", "tenant_id", "frame_key", "status"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -118,15 +119,16 @@ class EstimationFrameMember(Base, TenantMixin):
     __tablename__ = "estimation_frame_member"
 
     frame_id: Mapped[str] = mapped_column(
-        ForeignKey("estimation_frame.frame_id"), primary_key=True)
+        ForeignKey("writing.estimation_frame.frame_id"), primary_key=True)
     event_id: Mapped[str] = mapped_column(
-        ForeignKey("score_event.event_id"), primary_key=True)
+        ForeignKey("writing.score_event.event_id"), primary_key=True)
     enters_calibration: Mapped[bool] = mapped_column(nullable=False, server_default="false")
 
     __table_args__ = (
         Index("ix_estimation_frame_member_calibration",
               "frame_id", "enters_calibration"),
         Index("ix_estimation_frame_member_event", "event_id"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -156,4 +158,5 @@ class DeletionTombstone(Base, TenantMixin):
     __table_args__ = (
         Index("ix_measurement_tombstone_subject", "tenant_id", "subject_type", "subject_id"),
         CheckConstraint("subject_type IN ('student','section','artifact')", name="subject_type"),
+        {"schema": WRITING_SCHEMA},
     )

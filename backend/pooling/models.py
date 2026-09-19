@@ -42,7 +42,7 @@ from sqlalchemy import CheckConstraint, Date, Index, Text, TIMESTAMP, UniqueCons
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import WRITING_SCHEMA, Base
 
 # What a district may agree to, separately. A district agreeing that module evidence may reach the
 # publisher has not thereby agreed that its teachers' acceptance behaviour may — and conflating the
@@ -93,6 +93,7 @@ class AggregationConsent(Base):
         CheckConstraint(
             "scope IN (" + ",".join(f"'{s}'" for s in CONSENT_SCOPES) + ")", name="scope"),
         Index("ix_pooling_consent_district", "district_tenant_id", "scope"),
+        {"schema": WRITING_SCHEMA},
     )
 
 
@@ -132,4 +133,5 @@ class AggregateRun(Base):
         Index("ix_pooling_run_definition", "definition_key", "window_label"),
         CheckConstraint("status IN ('running','succeeded','failed','superseded')",
                         name="status"),
+        {"schema": WRITING_SCHEMA},
     )

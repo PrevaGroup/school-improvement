@@ -115,7 +115,9 @@ def bound_engine(monkeypatch):
         conn.execute(text("""CREATE TABLE roster_section_staff (
             tenant_id TEXT, principal_hash TEXT, active_from DATE, active_to DATE)"""))
 
-    monkeypatch.setattr(app_db, "SessionLocal", sessionmaker(bind=engine, future=True))
+    monkeypatch.setattr(app_db, "_writing_sessions", sessionmaker(bind=engine, future=True))
+    # SIP's factory must never be the one student work opens; make it fail loudly if it is.
+    monkeypatch.setattr(app_db, "SessionLocal", lambda: pytest.fail("opened a SIP session"))
     return engine, calls
 
 

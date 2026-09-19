@@ -198,7 +198,7 @@ def test_the_purge_only_asks_a_table_for_columns_it_has():
         return {c for c in re.findall(r"([a-z_]+_id|run_id)", outer)}
 
     for table, scope in _PURGE_ORDER:
-        have = set(Base.metadata.tables[table].c.keys())
+        have = set({t.name: t for t in Base.metadata.tables.values()}[table].c.keys())
         for widened in (False, True):
             if not widened:
                 predicate = _BY_RUN if scope == "run" else _BY_ARTIFACT

@@ -26,6 +26,11 @@ Postgres roles *bypass* RLS: **superusers** and **table owners**. So the runtime
 every private table is set to **`FORCE ROW LEVEL SECURITY`** so even the owner is subject to
 policy. That combination is what makes "RLS is on" actually mean "RLS is enforced."
 
+Student work is held apart from that, not beside it: its tables are in schema `writing`, the
+routes that serve it connect as `writing_app` (same posture: non-owner, `NOBYPASSRLS`), and the
+two runtime roles have no grants on each other's tables (migration 0042). Its policies check the
+teacher's class as well as the district (0041).
+
 ## Setup
 
 ```bash

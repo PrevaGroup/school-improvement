@@ -1,8 +1,10 @@
 -- ============================================================================
--- 30_writing_rls_smoketest.sql — prove that student work is scoped to classes.
+-- 30_writing_rls_smoketest.sql — prove that student work is scoped to classes, and that the
+-- two products cannot read each other's tables.
 -- Run AFTER `alembic upgrade head`, as sip_migrator (owner), on a NON-production database:
 --   psql ... -v ON_ERROR_STOP=1 -f sql/30_writing_rls_smoketest.sql
--- (sip_migrator must be able to SET ROLE sip_app: GRANT sip_app TO sip_migrator;)
+-- (sip_migrator must be able to SET ROLE to sip_app, writing_app and writing_bridge — the
+--  bootstrap and 01_writing_roles.sql grant that.)
 --
 -- Everything runs in one transaction and ends in ROLLBACK, so it leaves nothing behind. Any
 -- failed expectation raises and stops the script; reaching the final NOTICE means every check
@@ -77,7 +79,30 @@ CREATE FUNCTION pg_temp.as_caller(principal text, tenant text) RETURNS void AS $
            set_config('app.tenant', coalesce(tenant, ''), true);
 $$ LANGUAGE sql;
 
+CREATE FUNCTION pg_temp.expect_refused(label text, probe text) RETURNS void AS $$
+BEGIN
+    BEGIN
+        EXECUTE probe;
+    EXCEPTION WHEN insufficient_privilege OR undefined_table THEN
+        RETURN;  -- refused, or not even nameable: both correct
+    END;
+    RAISE EXCEPTION 'FAILED: % — the query ran', label;
+END $$ LANGUAGE plpgsql;
+
+INSERT INTO pooling_aggregation_consent (consent_id, district_tenant_id, scope, effective_from)
+VALUES ('consent-a', 'smoke_a', 'module_evidence', current_date - 1),
+       ('consent-b-other-scope', 'smoke_b', 'teacher_instrumentation', current_date - 1);
+
+-- 0. The products cannot reach each other's tables at all, whatever the settings say.
 SET LOCAL ROLE sip_app;
+SELECT pg_temp.as_caller('hash-A1', 'smoke_a');
+SELECT pg_temp.expect_refused('sip_app reads student work',  'SELECT 1 FROM writing.artifact');
+SELECT pg_temp.expect_refused('sip_app reads the roster',    'SELECT 1 FROM writing.roster_student');
+RESET ROLE;
+SET LOCAL ROLE writing_app;
+SELECT pg_temp.expect_refused('writing_app reads SIP metrics', 'SELECT 1 FROM public.fact_metric');
+SELECT pg_temp.expect_refused('writing_app reads SIP plans',   'SELECT 1 FROM public.plan');
+SELECT pg_temp.expect_refused('writing_app reads tenants',     'SELECT 1 FROM public.dim_tenant');
 
 -- 1. Nobody bound: nothing at all, including the staff table that authorises everything else.
 SELECT pg_temp.as_caller(NULL, NULL);
@@ -132,15 +157,18 @@ VALUES ('ev-own', 'art-a1', 'run-smoke', 'n1', 'teacher', 'abstained', 'k-own', 
 SELECT pg_temp.expect('A1: score on own paper',
        (SELECT count(*) FROM score_event WHERE event_id = 'ev-own'), 1);
 
--- 5. No DELETE policy anywhere: even their own rows cannot be deleted by the API.
-WITH d AS (DELETE FROM artifact_state_transition RETURNING 1)
-SELECT pg_temp.expect('A1: delete transitions',      (SELECT count(*) FROM d), 0);
-WITH d AS (DELETE FROM roster_enrollment RETURNING 1)
-SELECT pg_temp.expect('A1: delete enrollments',      (SELECT count(*) FROM d), 0);
+-- 5. No DELETE policy and no DELETE grant: even their own rows cannot be deleted by the API.
+SELECT pg_temp.expect_refused('A1: delete transitions', 'DELETE FROM artifact_state_transition');
+SELECT pg_temp.expect_refused('A1: delete enrollments', 'DELETE FROM roster_enrollment');
+SELECT pg_temp.expect_refused('A1: write the roster',
+       $q$INSERT INTO roster_section_staff (section_staff_id, section_id, principal_hash, role,
+          tenant_id, visibility) VALUES ('forged', 'smoke-a2', 'hash-A1', 'teacher', 'smoke_a',
+          'private')$q$);
 
 -- 6. The tables the API never touches are closed to it outright.
-SELECT pg_temp.expect('A1: drive connections',       (SELECT count(*) FROM intake_drive_connection), 0);
-SELECT pg_temp.expect('A1: estimation frames',       (SELECT count(*) FROM estimation_frame), 0);
+SELECT pg_temp.expect_refused('A1: drive connections', 'SELECT 1 FROM intake_drive_connection');
+SELECT pg_temp.expect_refused('A1: estimation frames', 'SELECT 1 FROM estimation_frame');
+SELECT pg_temp.expect_refused('A1: the corpus',        'SELECT 1 FROM corpus_paper');
 
 -- 7. An assignment that has ended grants nothing, though the row is still there.
 SELECT pg_temp.as_caller('hash-OLD', 'smoke_a');
@@ -152,7 +180,23 @@ SELECT pg_temp.expect('B1: artifacts',               (SELECT count(*) FROM artif
 SELECT pg_temp.expect('B1: sees none of A',
        (SELECT count(*) FROM artifact WHERE tenant_id = 'smoke_a'), 0);
 
--- 9. The owner — what the batch jobs run as — is not bound by any of this.
+-- 9. The bridge: a district's scores only while its module-evidence consent stands, and
+--    nothing that names a student or a class.
+RESET ROLE;
+SET LOCAL ROLE writing_bridge;
+SELECT pg_temp.as_caller(NULL, 'smoke_a');
+SELECT pg_temp.expect('bridge, consented district: score events', (SELECT count(*) FROM score_event), 3);  -- both classes, incl. check 4's
+SELECT pg_temp.as_caller(NULL, 'smoke_b');
+SELECT pg_temp.expect('bridge, wrong-scope consent: score events', (SELECT count(*) FROM score_event), 0);
+SELECT pg_temp.expect_refused('bridge reads the roster', 'SELECT 1 FROM roster_student');
+SELECT pg_temp.expect_refused('bridge reads the papers', 'SELECT 1 FROM artifact_composition');
+RESET ROLE;
+UPDATE pooling_aggregation_consent SET revoked_at = now() WHERE consent_id = 'consent-a';
+SET LOCAL ROLE writing_bridge;
+SELECT pg_temp.as_caller(NULL, 'smoke_a');
+SELECT pg_temp.expect('bridge, revoked consent: score events', (SELECT count(*) FROM score_event), 0);
+
+-- 10. The owner — what the batch jobs run as — is not bound by any of this.
 RESET ROLE;
 SELECT pg_temp.expect('owner: artifacts', (SELECT count(*) FROM artifact
                                             WHERE run_id = 'run-smoke'), 3);
