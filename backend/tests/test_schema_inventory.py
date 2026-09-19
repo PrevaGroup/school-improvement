@@ -53,14 +53,14 @@ import etl.ca.sip.models  # noqa: E402,F401  — plan_extraction, plan, plan_goa
 import likeschools.models  # noqa: E402,F401  — feat_match_vector, mart_school_peer, model_partition_stats
 import evals.models  # noqa: E402,F401  — trace, eval_case, eval_run, eval_result, feedback,
 #                                          eval_stop_condition (6)
-import scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_state_transition
-import roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
-import measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
-import pooling.models  # noqa: E402,F401  — pooling_aggregation_consent, pooling_aggregate_run
-import intake.models  # noqa: E402,F401  — intake_manifest, intake_file, intake_drive_connection (3)
-import delivery.models  # noqa: E402,F401  — artifact_delivery (1)
-import registry.models  # noqa: E402,F401  — registry_node, registry_task, registry_scoring_*, lint ack (7)
-import corpus.models  # noqa: E402,F401  — corpus_source, corpus_paper, corpus_score, corpus_discourse_span
+import writing.scoring.models  # noqa: E402,F401  — artifact, score_event, artifact_state_transition
+import writing.roster.models  # noqa: E402,F401  — roster_student, roster_section, roster_enrollment, roster_section_staff
+import writing.measurement.models  # noqa: E402,F401  — estimation_frame, estimation_frame_member, measurement_deletion_tombstone
+import writing.pooling.models  # noqa: E402,F401  — pooling_aggregation_consent, pooling_aggregate_run
+import writing.intake.models  # noqa: E402,F401  — intake_manifest, intake_file, intake_drive_connection (3)
+import writing.delivery.models  # noqa: E402,F401  — artifact_delivery (1)
+import writing.registry.models  # noqa: E402,F401  — registry_node, registry_task, registry_scoring_*, lint ack (7)
+import writing.corpus.models  # noqa: E402,F401  — corpus_source, corpus_paper, corpus_score, corpus_discourse_span
 
 # table -> the module that DECLARES it (whose models.py the class lives in). That's what this
 # file can actually check: Base.metadata is built from declarations, not from who writes rows.
@@ -115,7 +115,7 @@ EXPECTED_TABLES: dict[str, str] = {
     # was allowed; the threshold is copied onto the row, not referenced. Migration 0030.
     "eval_stop_condition": "evals",
     "feedback": "evals",
-    # --- scoring's tables — declared in scoring/models.py. Hold identifiable student
+    # --- scoring's tables — declared in writing/scoring/models.py. Hold identifiable student
     #     writing and carry tenant_id, but are NOT in PRIVATE_TABLES: turning RLS on is a
     #     deliberate core move made when the subsystem first holds real student work, not
     #     a side effect of the module existing. Same posture as evals. ---
@@ -126,23 +126,23 @@ EXPECTED_TABLES: dict[str, str] = {
     # Created by raw SQL inside 0008's trigger block; declared in models.py anyway,
     # because a table absent from Base.metadata is one autogenerate away from a DROP.
     "writing.artifact_transition_rule": "scoring",
-    # --- roster's tables — declared in roster/models.py. The section-scoped
+    # --- roster's tables — declared in writing/roster/models.py. The section-scoped
     #     authorisation edge; same deferred-RLS posture as scoring. ---
     "writing.roster_student": "roster",
     "writing.roster_section": "roster",
     "writing.roster_enrollment": "roster",
     "writing.roster_section_staff": "roster",
-    # --- measurement's tables — declared in measurement/models.py. The estimator
+    # --- measurement's tables — declared in writing/measurement/models.py. The estimator
     #     itself is Phase 6; these record what any estimate was fitted over. ---
     "writing.estimation_frame": "measurement",
     "writing.estimation_frame_member": "measurement",
     "writing.measurement_deletion_tombstone": "measurement",
-    # --- pooling's tables — declared in pooling/models.py. Tenant-NEUTRAL by
+    # --- pooling's tables — declared in writing/pooling/models.py. Tenant-NEUTRAL by
     #     design: they belong to no district, which is what lets a principal with
     #     no tenant mapping read them. ---
     "writing.pooling_aggregation_consent": "pooling",
     "writing.pooling_aggregate_run": "pooling",
-    # --- registry's tables — declared in registry/models.py. Public reference
+    # --- registry's tables — declared in writing/registry/models.py. Public reference
     #     content, no tenancy: a node means the same thing in every district. ---
     "writing.registry_node": "registry",
     "writing.registry_node_version": "registry",
@@ -160,7 +160,7 @@ EXPECTED_TABLES: dict[str, str] = {
     "writing.registry_skill": "registry",
     "writing.registry_rubric": "registry",
     "writing.registry_rubric_trait": "registry",
-    # --- corpus tables — declared in corpus/models.py. Public reference content:
+    # --- corpus tables — declared in writing/corpus/models.py. Public reference content:
     #     the anchor papers, identical for every district. ---
     "writing.corpus_source": "corpus",
     "writing.corpus_paper": "corpus",

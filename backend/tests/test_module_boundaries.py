@@ -64,20 +64,37 @@ MODULE_OF_PREFIX: dict[str, str] = {
     "app.marts": "serving",
     "app.chat": "serving",
     "app.evals_view": "serving",  # read-only admin view over the evals `trace` table (SQL, no import)
-    "app.review_view": "serving",  # the teacher review queue — reads scoring's tables with SQL
     "app.traces": "serving",  # trace EMISSION (GCS, no tables) — eval-trace-system.md phase 1
     "likeschools": "likeschools",
     "public_metrics": "public_metrics",
     "evals": "evals",  # trace store + eval loop (owns 5 tables) — eval-trace-system.md phase 2
-    "scoring": "scoring",  # the writing subsystem's record (artifact, score_event) — expansion plan §6
-    "roster": "roster",  # sections, enrolments, the section-scoped access edge — expansion plan §7
-    "measurement": "measurement",  # estimation frames — engine, no serving surface (expansion plan §10)
-    "pooling": "pooling",  # the ONLY module that crosses the district threshold — expansion plan §7
-    "registry": "registry",  # nodes, tasks, scoring sites, scoring configuration + the linter
-    "corpus": "corpus",  # anchor papers — public reference content, bulk ETL like public_metrics
-    "delivery": "delivery",  # hand-back attempts, including the ones that fail
-    "intake": "intake",  # folder -> manifest; roster reconciliation; the manifest gate
+    # --- the writing product, under backend/writing/ ---
+    "writing.scoring": "writing.scoring",  # the record (artifact, score_event) — expansion plan §6
+    "writing.roster": "writing.roster",  # sections, enrolments, the section-scoped access edge — §7
+    "writing.measurement": "writing.measurement",  # estimation frames, fits — engine (§10)
+    "writing.pooling": "writing.pooling",  # the ONLY module that crosses the district threshold — §7
+    "writing.registry": "writing.registry",  # nodes, tasks, scoring sites, configuration + linter
+    "writing.corpus": "writing.corpus",  # anchor papers — public reference content, bulk ETL
+    "writing.delivery": "writing.delivery",  # hand-back attempts, including the ones that fail
+    "writing.intake": "writing.intake",  # folder -> manifest; roster reconciliation; the gate
+    "writing.serving": "writing.serving",  # the teacher console's read side — SQL, no imports
 }
+
+# Which product each module belongs to. The module rule already forbids any cross-module import;
+# this is the rule one level up, stated separately because it must hold even if the module rule
+# ever acquires an exception: SIP and the writing product share `core` and nothing else. A
+# KNOWN_VIOLATIONS entry could someday let one module reach another inside a product — nothing
+# lets a module reach across products.
+SIP_PRODUCT = frozenset({"sip", "serving", "likeschools", "public_metrics", "evals"})
+WRITING_PRODUCT = frozenset(m for m in MODULE_OF_PREFIX.values() if m.startswith("writing."))
+
+
+def _product_of(module: str | None) -> str | None:
+    if module in SIP_PRODUCT:
+        return "sip"
+    if module in WRITING_PRODUCT:
+        return "writing"
+    return None
 
 # Scanned trees. `tests/`, `scripts/`, and `migrations/` are tooling that legitimately
 # reaches across everything (a test imports what it tests), so they are not modules.
@@ -94,9 +111,7 @@ MODULE_OF_PREFIX: dict[str, str] = {
 # exactly what to do and it still did not happen — which is the argument for a test rather than
 # a comment. Third instance of this shape, after pytest.ini `testpaths` and alembic
 # `version_locations`: a path missing from a registry is an absence, and absences report green.
-SOURCE_TREES = ("app", "etl", "likeschools", "public_metrics", "evals",
-                "scoring", "roster", "measurement", "pooling", "registry", "corpus", "intake",
-                "delivery")
+SOURCE_TREES = ("app", "etl", "likeschools", "public_metrics", "evals", "writing")
 
 # Package directories that are tooling rather than modules. `tests` and `scripts` reach across
 # everything by design; `migrations` is the repo-level alembic tree.
@@ -254,3 +269,46 @@ def test_no_stale_entries_in_the_known_violations_list():
         "KNOWN_VIOLATIONS is out of date — these are fixed and must be removed from the "
         f"list: {stale}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# The product boundary.
+# --------------------------------------------------------------------------- #
+def test_every_module_belongs_to_exactly_one_product():
+    modules = set(MODULE_OF_PREFIX.values()) - {CORE, "_composition_root"}
+    unplaced = sorted(m for m in modules if _product_of(m) is None)
+    assert not unplaced, (f"{unplaced} belong to neither product. Add each to SIP_PRODUCT, or "
+                          "move it under backend/writing/ if it is the writing product's.")
+    assert not (SIP_PRODUCT & WRITING_PRODUCT)
+
+
+def test_the_writing_product_lives_under_writing():
+    """A writing module outside backend/writing/ would be scanned as SIP's neighbour, and the
+    folder would stop meaning what it says."""
+    outside = sorted(p for p, m in MODULE_OF_PREFIX.items()
+                     if m in WRITING_PRODUCT and not p.startswith("writing."))
+    inside = sorted(p for p, m in MODULE_OF_PREFIX.items()
+                    if p.startswith("writing.") and m not in WRITING_PRODUCT)
+    assert not outside and not inside, (outside, inside)
+
+
+@pytest.mark.parametrize("path", _source_files(), ids=lambda p: str(p.relative_to(BACKEND)))
+def test_no_import_crosses_products(path: pathlib.Path):
+    rel = path.relative_to(BACKEND).as_posix()
+    if rel == COMPOSITION_ROOT:
+        pytest.skip("composition root: mounts both products' routers, by design")
+    mine = _product_of(_module_of(_dotted_name_of(path)))
+    if mine is None:
+        return  # core: checked by the module rule, which allows it only core
+    crossing = [(target, line) for target, line in _imports_of(path)
+                if (theirs := _product_of(_module_of(target))) and theirs != mine]
+    assert not crossing, (f"{rel} ({mine}) imports the other product: {crossing}. The two share "
+                          "core and nothing else — this is not a KNOWN_VIOLATIONS decision.")
+
+
+def test_core_imports_neither_product():
+    core_files = [p for p in _source_files() if _module_of(_dotted_name_of(p)) == CORE]
+    assert core_files
+    for path in core_files:
+        reached = [(t, line) for t, line in _imports_of(path) if _product_of(_module_of(t))]
+        assert not reached, f"{path.relative_to(BACKEND)} (core) imports a product: {reached}"

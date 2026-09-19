@@ -25,6 +25,27 @@ module can be rewritten freely as long as it still produces its owned tables wit
 The star schema itself is the one thing that is *not* swappable (a schema change is a breaking
 migration) — which is why it lives in `core`, not in a module.
 
+## Two products, one server
+
+This repo holds two products that share `core` and nothing else:
+
+- **SIP** (school improvement plans) — the modules in the registry below, under `backend/`.
+- **The writing product** (student work scored against a rubric, reviewed by the teacher) — every
+  module under `backend/writing/`: `scoring`, `intake`, `delivery`, `measurement`, `roster`,
+  `registry`, `corpus`, `pooling`, and `serving` (the teacher console's read side). Each owns
+  tables in the Postgres schema `writing`.
+
+The boundary is enforced three ways. **Imports:** `tests/test_module_boundaries.py` fails on any
+import that crosses a module, and separately on any that crosses a product — the second rule has
+no exemption list. **Database grants:** SIP's API connects as `sip_app`, which has no access to
+schema `writing`; the writing routes connect as `writing_app`, which has none to `public`
+(migration 0042). **Row-level security:** student work is visible only to the teachers of that
+class, in that district (migration 0041).
+
+`app/main.py` mounts both products' routers; it is the one file that knows both exist. `evals` is
+still shared — it holds SIP's chat-trace loop and the writing product's five stop conditions — and
+is the next thing to split.
+
 ## Registry
 
 | Module | Owns (writes) | Reads (from core / public) | Serving surface | Status |

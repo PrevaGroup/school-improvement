@@ -3,7 +3,7 @@
 --   PGPASSWORD=$(gcloud secrets versions access latest --secret=sip-migrator-password) \
 --     psql "host=127.0.0.1 dbname=sip user=sip_migrator" -f sql/23_retire_prefixed_fixture_rows.sql 1>&2
 --
--- WHY A FILE RATHER THAN THE PURGE. `registry.seed_demo --purge` was rewritten to walk the rubric
+-- WHY A FILE RATHER THAN THE PURGE. `writing.registry.seed_demo --purge` was rewritten to walk the rubric
 -- graph — `WHERE rubric_id = ...` — because identifiers stopped carrying a lifecycle prefix. That
 -- column arrives in 0019. And 0019 also adds a CHECK requiring node_id to be a UUID, which the old
 -- `demo-ci` rows violate, so they have to go BEFORE the upgrade.
@@ -19,7 +19,7 @@
 \set ON_ERROR_STOP on
 BEGIN;
 
--- THE ARTIFACTS FIRST, and this half was missing on the first pass. `scoring.seed_demo --purge`
+-- THE ARTIFACTS FIRST, and this half was missing on the first pass. `writing.scoring.seed_demo --purge`
 -- reported `"artifact": 0` and that was read as "already gone" — it actually meant the rewritten
 -- purge was scoped to run `fixture-run-1`, which did not exist yet, while the old rows belonged to
 -- `demo-run-1`. A zero from a scoped delete means nothing matched the scope, not that nothing

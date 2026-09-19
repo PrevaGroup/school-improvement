@@ -103,7 +103,7 @@ APP_READS: tuple[str, ...] = ("registry_node", "registry_task", "artifact_transi
 BRIDGE_READS: tuple[str, ...] = ("pooling_aggregation_consent", "registry_node")
 BRIDGE_WRITES: tuple[str, ...] = ("pooling_aggregate_run",)
 
-# Consent gates ENTRY to the frame (pooling/CONTRACT.md, rule 2): a district's rows are invisible
+# Consent gates ENTRY to the frame (writing/pooling/CONTRACT.md, rule 2): a district's rows are invisible
 # to the bridge unless an unrevoked consent covers today. Enforced here so a job that forgets to
 # filter computes over nothing rather than over data nobody agreed to share. Score events are
 # module evidence; `teacher_instrumentation` consent does not admit them.

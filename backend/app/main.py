@@ -18,13 +18,13 @@ from .auth_proxy import router as auth_proxy_router
 from .chat import router as chat_router
 from .db import get_db
 from .evals_view import router as evals_view_router
-from .review_view import router as review_view_router
 from .marts import router as marts_router
 from .models import DimSchool, FactMetric
 from .plans import router as plans_router
-from delivery.view import router as delivery_router
-from intake.review import router as intake_router
-from scoring.review import router as review_actions_router
+from writing.delivery.view import router as delivery_router
+from writing.intake.review import router as intake_router
+from writing.scoring.review import router as review_actions_router
+from writing.serving.review_view import router as review_view_router
 from .security import (assert_dev_mode_not_in_production, assert_no_retired_invite_list,
                        get_current_principal, is_admin)
 

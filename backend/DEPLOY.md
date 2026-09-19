@@ -86,7 +86,7 @@ alembic upgrade head
 psql "host=127.0.0.1 dbname=sip user=sip_migrator" -v ON_ERROR_STOP=1 -f sql/30_writing_rls_smoketest.sql
 
 # 5. Put yourself on the fixture class, or the console is a 403 for everyone — correctly.
-python -m roster.grant_staff --email you@prevagroup.com --section section-11b-period4
+python -m writing.roster.grant_staff --email you@prevagroup.com --section section-11b-period4
 ```
 
 Then redeploy the API (routine redeploy below). Batch jobs are unaffected: they run as
@@ -462,7 +462,7 @@ identity Cloud Scheduler uses to **invoke** it (that's the `run.invoker` binding
 
 ## Scoring a corpus wave (Cloud Run job, on demand)
 
-`scoring.run_scoring` is hours of work that spends real money — roughly **$0.23 a paper** for the
+`writing.scoring.run_scoring` is hours of work that spends real money — roughly **$0.23 a paper** for the
 eight PERSUADE traits, measured, so an anchor wave of ~330 papers is about **$77 and two hours**.
 
 **It cannot live in Cloud Shell.** The first corpus wave was started there with `nohup` and died
@@ -477,12 +477,12 @@ $77 because a wave got re-bound is not a thing to leave running.
 
 The same two facts from the ingest section apply, and one more:
 
-1. **DB connection is the Cloud SQL socket, not the Connector.** `scoring/_db.py` builds its engine
+1. **DB connection is the Cloud SQL socket, not the Connector.** `writing/scoring/_db.py` builds its engine
    from `settings.migration_database_url` — plain host:port, none of `app/db.py`'s Connector logic.
    Set `DB_HOST=/cloudsql/<ICN>`; psycopg reads a `/`-prefixed host as a socket directory.
 2. **It connects as the migrator role**, so the SA needs `secretAccessor` on
    `sip-migrator-password`.
-3. **It needs the Anthropic key.** `scoring/rater.py` resolves it through `app.config`, which reads
+3. **It needs the Anthropic key.** `writing/scoring/rater.py` resolves it through `app.config`, which reads
    Secret Manager over ADC — so `secretAccessor` on `anthropic-api-key` and `GCP_PROJECT` set is
    all it takes. No `--set-secrets` mount, and no key in an env var.
 
@@ -527,12 +527,17 @@ gcloud run jobs create sip-score-corpus \
   --region us-central1 \
   --image "$IMAGE" \
   --command python \
-  --args=-m,scoring.run_scoring,--tenant,corpus,--config-key,writing-default,--limit,400 \
+  --args=-m,writing.scoring.run_scoring,--tenant,corpus,--config-key,writing-default,--limit,400 \
   --set-cloudsql-instances school-improvement-501916:us-central1:school-improvement-sql \
   --set-env-vars GCP_PROJECT=school-improvement-501916,DB_NAME=sip,DB_HOST=/cloudsql/school-improvement-501916:us-central1:school-improvement-sql \
   --service-account $SCORE_SA \
   --max-retries 1 --task-timeout 6h
 ```
+
+> **The module path moved** (`scoring.run_scoring` → `writing.scoring.run_scoring`) when the
+> writing product moved under `backend/writing/`. A job created before that keeps working on its
+> old image, and breaks the first time its image is updated unless its args move too:
+> `gcloud run jobs update sip-score-corpus --region us-central1 --image "$IMAGE" --args=-m,writing.scoring.run_scoring,...`
 
 `--max-retries 1` is safe here and would not be in a naive scorer: the resume check is **per
 trait**, so a retry skips every trait already written and pays only for what is genuinely missing.
@@ -541,7 +546,7 @@ trait**, so a retry skips every trait already written and pays only for what is 
 account, the Cloud SQL socket, both secrets and the tenant lock without making a single API call:
 
 ```bash
-gcloud run jobs execute sip-score-corpus --region us-central1 --wait --args=-m,scoring.run_scoring,--tenant,corpus,--config-key,writing-default,--limit,0
+gcloud run jobs execute sip-score-corpus --region us-central1 --wait --args=-m,writing.scoring.run_scoring,--tenant,corpus,--config-key,writing-default,--limit,0
 ```
 
 Expect exit 0 and `"pending": 0` in the summary. **Do this before the real run** — a
@@ -589,7 +594,7 @@ psql "host=127.0.0.1 dbname=sip user=sip_migrator" -c "SELECT * FROM pg_locks WH
 different configuration, a smaller limit:
 
 ```bash
-gcloud run jobs execute sip-score-corpus --region us-central1 --args=-m,scoring.run_scoring,--tenant,corpus,--config-key,writing-default,--limit,50
+gcloud run jobs execute sip-score-corpus --region us-central1 --args=-m,writing.scoring.run_scoring,--tenant,corpus,--config-key,writing-default,--limit,50
 ```
 
 > **The job pins the image at creation — it does NOT track new `sip-api` deploys.** Same caveat as
@@ -605,7 +610,7 @@ gcloud run jobs execute sip-score-corpus --region us-central1 --args=-m,scoring.
 ### Reading the result
 
 ```bash
-python -m measurement.corpus_agreement
+python -m writing.measurement.corpus_agreement
 ```
 
 Agreement, severity and ELL bias per trait against the PERSUADE human scores. If it says
