@@ -18,7 +18,8 @@ sidecar needed on Cloud Run); locally it falls back to the Auth-Proxy URL.
 
 1. **Secrets in Secret Manager** (project `school-improvement-501916`):
    - `sip-app-password`, `sip-migrator-password` — already exist (runbook Phase 3).
-   - `postgres-password` — the Cloud SQL admin. Only the role-creation step uses it.
+   - `postgres-admin-password` — the Cloud SQL admin, database user `postgres` (set when the
+     instance was created). Only the role-creation step uses it.
    - `writing-app-password` — the student-work routes' own database user (migration 0042),
      minted by the rollout script. See
      [Student work: its own schema and user](#student-work-its-own-schema-and-user).
@@ -88,7 +89,7 @@ on the fixture class with `writing.roster.grant_staff` (otherwise the console is
 everyone — correctly) → routine redeploy, failing unless the new revision is the one serving →
 point `sip-score-corpus` at the new image and module path.
 
-It needs `postgres-password` in Secret Manager: creating roles is the one step the migrator
+It needs `postgres-admin-password` in Secret Manager: creating roles is the one step the migrator
 cannot do. The API's service account reads all secrets project-wide, so the new
 `writing-app-password` needs no binding of its own.
 
